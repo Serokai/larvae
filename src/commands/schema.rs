@@ -18,13 +18,16 @@ pub fn directive() -> String {
 
 pub fn run(root: &Path) -> Result<ExitCode> {
     let path = root.join("coldluau.toml");
+    
     if !path.exists() {
         bail!("no coldluau.toml here - run `coldluau init` first");
     }
+
     let content = std::fs::read_to_string(&path)?;
     let directive = directive();
 
     let first = content.lines().next().unwrap_or("");
+    
     let new_content = if first == directive {
         ui::print_success("coldluau.toml already references the schema");
         return Ok(ExitCode::SUCCESS);
@@ -41,6 +44,7 @@ pub fn run(root: &Path) -> Result<ExitCode> {
         "Added schema reference to {}",
         crate::ui::rel(&path)
     ));
+
     eprintln!("Editors with Even Better TOML / Taplo now get completion and docs.");
     Ok(ExitCode::SUCCESS)
 }
@@ -53,15 +57,18 @@ mod tests {
     fn adds_and_is_idempotent() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
+        
         std::fs::write(root.join("coldluau.toml"), "[process]\ninput = \"src\"\n").unwrap();
 
         run(root).unwrap();
+        
         let content = std::fs::read_to_string(root.join("coldluau.toml")).unwrap();
         assert!(content.starts_with(&directive()));
         assert!(content.contains("[process]"));
 
         // Second run leaves the file unchanged
         run(root).unwrap();
+
         let again = std::fs::read_to_string(root.join("coldluau.toml")).unwrap();
         assert_eq!(content, again);
     }
@@ -70,13 +77,16 @@ mod tests {
     fn replaces_stale_directive() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
+        
         std::fs::write(
             root.join("coldluau.toml"),
             "#:schema https://old.example/x.json\n[process]\n",
         )
         .unwrap();
         run(root).unwrap();
+        
         let content = std::fs::read_to_string(root.join("coldluau.toml")).unwrap();
+        
         assert!(content.starts_with(&directive()));
         assert!(!content.contains("old.example"));
         assert!(content.contains("[process]"));

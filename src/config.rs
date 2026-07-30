@@ -171,7 +171,7 @@ fn default_location() -> String {
 pub enum RuleStatus {
     /// Works today
     Done,
-    
+
     /// Designed, lands in this milestone
     Planned(&'static str),
 
@@ -185,6 +185,7 @@ darklua config gets a useful message rather than "unknown key"
 */
 pub fn rule_status(name: &str) -> Option<RuleStatus> {
     use RuleStatus::*;
+
     Some(match name {
         // implemented
         "const_requires" | "remove_comments" | "append_text_comment" | "add_luau_directive" => Done,
@@ -229,14 +230,19 @@ pub fn rule_status(name: &str) -> Option<RuleStatus> {
 pub struct RequiresConfig {
     #[serde(default)]
     pub target: Target,
+
     #[serde(default)]
     pub sourcemap: Option<PathBuf>,
+
     #[serde(default)]
     pub mounts: HashMap<String, String>,
+
     #[serde(default)]
     pub strict: bool,
+
     #[serde(default)]
     pub overrides: Option<toml::Value>,
+
     #[serde(default)]
     pub indexing_style: Option<IndexingStyle>,
 }
@@ -258,9 +264,11 @@ pub enum IndexingStyle {
     #[default]
     #[serde(alias = "find-first-child")]
     FindFirstChild,
+
     /// `script.Parent:WaitForChild("x")`
     #[serde(alias = "wait-for-child")]
     WaitForChild,
+
     /// `script.Parent.x` (the dot format)
     #[serde(alias = "property-instance", alias = "property_instance")]
     Property,
@@ -313,8 +321,10 @@ impl Config {
     pub fn load(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", crate::ui::rel(path)))?;
+        
         let config: Config = toml::from_str(&text)
             .with_context(|| format!("invalid config in {}", crate::ui::rel(path)))?;
+        
         config.validate()?;
         Ok(config)
     }
@@ -322,6 +332,7 @@ impl Config {
     /// Load `coldluau.toml` from `dir` if present, zero config default otherwise
     pub fn load_or_default(dir: &Path) -> Result<Self> {
         let path = dir.join("coldluau.toml");
+
         if path.exists() {
             Self::load(&path)
         } else {
@@ -338,20 +349,25 @@ impl Config {
             ("[check]", &self.check, "M3"),
             ("[profile.*]", &self.profile, "M2"),
         ];
+
         for (name, value, milestone) in unimplemented {
             if value.is_some() {
                 bail!("{name} is not implemented yet (lands in {milestone}); remove it for now");
             }
         }
+
         for name in self.rules.rest.keys() {
             match rule_status(name) {
                 Some(RuleStatus::Planned(m)) => bail!(
                     "rule \"{name}\" is not implemented yet, it lands in {m}, remove it for now"
                 ),
+
                 Some(RuleStatus::Elsewhere(where_)) => {
                     bail!("\"{name}\" is not a coldluau rule, {where_}")
                 }
+
                 Some(RuleStatus::Done) => {}
+
                 None => bail!("unknown rule \"{name}\""),
             }
         }
@@ -359,6 +375,7 @@ impl Config {
             if a.text.is_some() == a.file.is_some() {
                 bail!("append_text_comment needs exactly one of `text` or `file`");
             }
+
             if a.location != "start" && a.location != "end" {
                 bail!(
                     "append_text_comment location must be \"start\" or \"end\", got \"{}\"",
@@ -366,32 +383,38 @@ impl Config {
                 );
             }
         }
+
         if self.process.generator != "retain-lines" {
             bail!(
                 "generator = \"{}\" is not implemented yet (lands in M2); only \"retain-lines\" works today",
                 self.process.generator
             );
         }
+
         if self.requires.indexing_style.is_some() && self.requires.target != Target::RobloxInstance
         {
             bail!(
                 "requires.indexing_style only applies when requires.target = \"roblox-instance\""
             );
         }
+
         if self.requires.sourcemap.is_some() {
             bail!(
                 "requires.sourcemap is not implemented yet (auto-mounts from the Rojo project file cover most cases; sourcemap support lands with M2)"
             );
         }
+
         if self.requires.overrides.is_some() {
             bail!("[requires.overrides] is not implemented yet (lands in M2)");
         }
+
         for (name, value) in &self.aliases {
             validate_alias_name(name)?;
             if value.is_empty() {
                 bail!("alias \"{name}\" has an empty value");
             }
         }
+
         Ok(())
     }
 
@@ -408,16 +431,19 @@ pub fn validate_alias_name(name: &str) -> Result<()> {
     if name.is_empty() {
         bail!("empty alias name");
     }
+
     let lower = name.to_lowercase();
     if lower == "self" || lower == "game" {
         bail!("alias \"@{name}\" is reserved by Roblox/Luau and cannot be redefined");
     }
+
     if let Some(bad) = name
         .chars()
         .find(|c| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')))
     {
         bail!("alias \"@{name}\" contains invalid character {bad:?} (allowed: A-Z a-z 0-9 . _ -)");
     }
+
     Ok(())
 }
 
@@ -429,6 +455,7 @@ mod tests {
     fn zero_config_defaults() {
         let c: Config = toml::from_str("").unwrap();
         c.validate().unwrap();
+
         assert_eq!(c.process.input, PathBuf::from("src"));
         assert_eq!(c.requires.target, Target::RobloxString);
     }
@@ -443,6 +470,7 @@ mod tests {
     fn unimplemented_sections_error_with_milestone() {
         let c: Config = toml::from_str("[bundle]\nentry = \"src/init.luau\"").unwrap();
         let err = c.validate().unwrap_err().to_string();
+
         assert!(err.contains("M3"), "{err}");
     }
 
@@ -450,6 +478,7 @@ mod tests {
     fn reserved_alias_rejected() {
         let c: Config = toml::from_str("[aliases]\nself = \"./x\"").unwrap();
         assert!(c.validate().is_err());
+        
         let c: Config = toml::from_str("[aliases]\nGame = \"./x\"").unwrap();
         assert!(c.validate().is_err());
     }

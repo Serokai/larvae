@@ -17,8 +17,10 @@ const REPO: &str = "coldluau/cli";
 pub enum SelfCommand {
     /// Install coldluau to ~/.coldluau/bin
     Install,
+
     /// Update coldluau to the latest release
     Update,
+    
     /// Remove coldluau from this machine
     Uninstall,
 }
@@ -48,6 +50,7 @@ fn install() -> Result<ExitCode> {
             .with_context(|| format!("failed to copy to {}", target.display()))?;
         ui::print_success(&format!("Installed coldluau to {}", target.display()));
     }
+
     print_path_instructions(&bin_dir);
     Ok(ExitCode::SUCCESS)
 }
@@ -58,8 +61,10 @@ fn update() -> Result<ExitCode> {
 
     let release = github::latest_release(REPO)
         .with_context(|| format!("failed to query releases for {REPO}"))?;
+    
     let latest = Version::parse(release.tag_name.trim_start_matches('v'))
         .with_context(|| format!("release tag {:?} is not a version", release.tag_name))?;
+    
     if latest <= current {
         ui::print_success("coldluau is already up to date");
         return Ok(ExitCode::SUCCESS);
@@ -72,21 +77,25 @@ fn update() -> Result<ExitCode> {
         std::env::consts::ARCH,
         std::env::consts::EXE_SUFFIX
     );
+
     let Some(asset) = release.assets.iter().find(|a| a.name == asset_name) else {
         bail!("release v{latest} has no asset named {asset_name}");
     };
 
     eprintln!("Downloading {} v{latest}", asset.name);
-    let bytes = http::get_bytes(&asset.browser_download_url)?;
 
+    let bytes = http::get_bytes(&asset.browser_download_url)?;
     let staged = std::env::temp_dir().join(&asset_name);
+    
     std::fs::write(&staged, &bytes)
         .with_context(|| format!("failed to stage {}", staged.display()))?;
+    
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755))?;
     }
+
     self_replace::self_replace(&staged).context("failed to replace the running executable")?;
     let _ = std::fs::remove_file(&staged);
 
@@ -96,9 +105,11 @@ fn update() -> Result<ExitCode> {
 
 fn uninstall() -> Result<ExitCode> {
     let dir = paths::coldluau_dir()?;
+    
     if !dir.exists() {
         bail!("coldluau is not installed at {}", dir.display());
     }
+
     if !ui::confirm(&format!("Remove {}?", dir.display()), false) {
         eprintln!("Aborted.");
         return Ok(ExitCode::SUCCESS);
@@ -106,6 +117,7 @@ fn uninstall() -> Result<ExitCode> {
 
     // a binary inside ~/.coldluau deletes itself first so the dir can go
     let me = std::env::current_exe()?;
+
     if me
         .canonicalize()
         .map(|p| p.starts_with(&dir))
@@ -114,10 +126,12 @@ fn uninstall() -> Result<ExitCode> {
         self_replace::self_delete_outside_path(&dir)
             .context("failed to remove the running executable")?;
     }
-    std::fs::remove_dir_all(&dir).with_context(|| format!("failed to remove {}", dir.display()))?;
 
+    std::fs::remove_dir_all(&dir).with_context(|| format!("failed to remove {}", dir.display()))?;
     ui::print_success(&format!("Removed {}", dir.display()));
+    
     let bin = paths::bin_dir()?;
+    
     eprintln!("You can now drop {} from your PATH.", bin.display());
     Ok(ExitCode::SUCCESS)
 }
@@ -126,9 +140,11 @@ fn print_path_instructions(bin_dir: &std::path::Path) {
     let on_path = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).any(|entry| entry == bin_dir))
         .unwrap_or(false);
+    
     if on_path {
         return;
     }
+
     if cfg!(windows) {
         eprintln!(
             "Add {} to your PATH (Settings > Environment Variables), then open a new terminal.",

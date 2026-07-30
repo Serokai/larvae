@@ -13,9 +13,11 @@ fn agent() -> ureq::Agent {
 /// GET a JSON document, with optional extra headers
 pub fn get_json<T: serde::de::DeserializeOwned>(url: &str, headers: &[(&str, &str)]) -> Result<T> {
     let mut req = agent().get(url).set("User-Agent", USER_AGENT);
+    
     for (k, v) in headers {
         req = req.set(k, v);
     }
+
     let resp = req.call().with_context(|| format!("GET {url} failed"))?;
     resp.into_json()
         .with_context(|| format!("invalid JSON from {url}"))
@@ -24,12 +26,14 @@ pub fn get_json<T: serde::de::DeserializeOwned>(url: &str, headers: &[(&str, &st
 /// GET raw bytes following redirects by hand, ureq 2 skips 307/308 and GitHub uses them
 pub fn get_bytes(url: &str) -> Result<Vec<u8>> {
     let mut url = url.to_string();
+
     for _ in 0..8 {
         let resp = agent()
             .get(&url)
             .set("User-Agent", USER_AGENT)
             .call()
             .with_context(|| format!("GET {url} failed"))?;
+
         if (300..400).contains(&resp.status()) {
             let Some(next) = resp.header("Location") else {
                 bail!("redirect from {url} without a Location header");
@@ -37,13 +41,16 @@ pub fn get_bytes(url: &str) -> Result<Vec<u8>> {
             url = next.to_string();
             continue;
         }
+
         let mut bytes = Vec::new();
         use std::io::Read;
+
         resp.into_reader()
             .take(512 * 1024 * 1024)
             .read_to_end(&mut bytes)
             .with_context(|| format!("download from {url} failed"))?;
         return Ok(bytes);
     }
+    
     bail!("too many redirects fetching {url}");
 }

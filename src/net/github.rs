@@ -19,10 +19,13 @@ pub struct Asset {
 pub fn latest_release(repo: &str) -> Result<Release> {
     let url = format!("https://api.github.com/repos/{repo}/releases/latest");
     let token = std::env::var("GITHUB_TOKEN").ok();
+    
     let auth = token.map(|t| format!("Bearer {t}"));
     let mut headers: Vec<(&str, &str)> = vec![("Accept", "application/vnd.github.v3+json")];
+    
     if let Some(auth) = &auth {
         headers.push(("Authorization", auth));
     }
+
     crate::net::http::get_json(&url, &headers)
 }
