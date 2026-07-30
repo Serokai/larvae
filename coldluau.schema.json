@@ -351,108 +351,193 @@
           "description": "coldluau only. Wrap a module's returned table in `table.freeze`, only when nothing can write to it, so field writes, rebinds and metatable patterns turn the rule off for that file. Implemented."
         },
         "compute_expression": {
-          "$ref": "#/$defs/rule",
-          "description": "Fold side effect free expressions to their result. Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Fold constant expressions to their value. Only folds when the result prints back exactly, so fractions, values past exact double range and strings holding escapes are left alone. Implemented."
         },
         "convert_function_to_assignment": {
-          "$ref": "#/$defs/rule",
-          "description": "function foo() end becomes foo = function() end. Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Rewrite `function foo()` into `foo = function()`, and `function o:m()` into `o.m = function(self)`. Attributed functions are left alone. Implemented."
         },
         "convert_index_to_field": {
-          "$ref": "#/$defs/rule",
-          "description": "t['field'] becomes t.field. Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Rewrite `t[\"field\"]` into `t.field`, and the same for table constructor keys, when the literal spells a valid name that is not a reserved word. Implemented."
         },
         "convert_local_function_to_assign": {
-          "$ref": "#/$defs/rule",
-          "description": "Non recursive local function f becomes local f = function(). Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Rewrite `local function f()` into `local f = function()`, only when the body never mentions f, since the local form is in scope inside itself. Implemented."
         },
         "convert_luau_number": {
-          "$ref": "#/$defs/rule",
-          "description": "Binary literals become hex, digit separators stripped. Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Rewrite binary literals like 0b1010 as hex and strip digit separators, both being Luau only syntax. Implemented."
         },
         "convert_square_root_call": {
-          "$ref": "#/$defs/rule",
-          "description": "math.sqrt(x) becomes x ^ 0.5. Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Rewrite `math.sqrt(x)` into `(x ^ 0.5)`. The result is always parenthesised so it survives being the base of another power. Implemented."
         },
         "filter_after_early_return": {
-          "$ref": "#/$defs/rule",
-          "description": "Drop statements after a do block that always returns. Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Delete the statements after a `do ... return ... end` block, which can never run. Stops if a type alias is among them, since an exported one is visible outside the block. Implemented."
         },
         "group_local_assignment": {
-          "$ref": "#/$defs/rule",
-          "description": "Merge consecutive local statements. Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Merge a run of adjacent local declarations into one. Conservative, it stops at a call, a dependency between them, an annotation, a comment or anything but whitespace in between. Implemented."
         },
         "make_assignment_local": {
-          "$ref": "#/$defs/rule",
-          "description": "Luau const declarations become local (the inverse of const_requires). Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Turn a `const` declaration back into a `local` one, the inverse of const_requires, for output that has to stay plain Lua. Implemented."
         },
         "remove_assertions": {
-          "$ref": "#/$defs/rule",
-          "description": "Remove assert() calls. Not implemented yet, lands in M2."
+          "description": "Remove `assert(...)` statements. Implemented.",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "preserve_arguments_side_effects": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Keep calls whose arguments call something, since that inner call may be the point of the line"
+                }
+              }
+            }
+          ]
         },
         "remove_attribute": {
-          "$ref": "#/$defs/rule",
-          "description": "Remove Luau function attributes like @native. Not implemented yet, lands in M2."
+          "description": "Strip function attributes, ex: @native. `true` removes every one, or a table with `match` regexes tested against the attribute name without its @. Implemented.",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "match": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "default": [],
+                  "description": "Regexes tested against the attribute name, empty means every attribute"
+                }
+              }
+            }
+          ]
         },
         "remove_compound_assignment": {
-          "$ref": "#/$defs/rule",
-          "description": "x += 1 becomes x = x + 1. Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Expand `x += 1` into `x = x + 1` for every compound operator. Targets that would have to run code twice, ex: a computed key holding a call, are left alone. Implemented."
         },
         "remove_continue": {
-          "$ref": "#/$defs/rule",
-          "description": "Rewrite continue into repeat until true with a flag. Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Rewrite a loop containing `continue` into the `repeat ... until true` form with `continue` spelled `break`. Loops that also break at the same level, and repeat loops whose condition can read body locals, are left alone. Implemented."
         },
         "remove_debug_profiling": {
-          "$ref": "#/$defs/rule",
-          "description": "Remove debug.profilebegin and debug.profileend calls. Not implemented yet, lands in M2."
+          "description": "Remove `debug.profilebegin` and `debug.profileend` statements. Implemented.",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "preserve_arguments_side_effects": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Keep calls whose arguments call something, since that inner call may be the point of the line"
+                }
+              }
+            }
+          ]
         },
         "remove_empty_do": {
           "$ref": "#/$defs/rule",
           "description": "Remove empty do end blocks. Not implemented yet, lands in M2."
         },
         "remove_floor_division": {
-          "$ref": "#/$defs/rule",
-          "description": "a // b becomes math.floor(a / b). Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Rewrite `a // b` into `math.floor(a / b)`, and `a //= b` into `a = math.floor(a / b)`. Implemented."
         },
         "remove_function_call_parens": {
-          "$ref": "#/$defs/rule",
-          "description": "print('x') becomes print'x'. Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Rewrite `f(\"x\")` into `f\"x\"` and `f({})` into `f{}` when a call takes exactly one string or table argument. Implemented."
         },
         "remove_if_expression": {
-          "$ref": "#/$defs/rule",
-          "description": "if c then a else b becomes c and a or b. Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Rewrite `if c then a else b` into `c and a or b`. Only applied when the then value can never be false or nil, otherwise the and/or form would not be equivalent and the expression is left alone. Implemented."
         },
         "remove_interpolated_string": {
-          "$ref": "#/$defs/rule",
-          "description": "Backtick strings become string.format calls. Not implemented yet, lands in M2."
+          "description": "Rewrite backtick strings into string.format calls. `true`, or a table with `strategy`, \"string\" wraps each value in tostring and formats with %s, \"tostring\" uses Luau's %*. Multi line and nested backtick strings are left alone. Implemented.",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "strategy": {
+                  "enum": [
+                    "string",
+                    "tostring"
+                  ],
+                  "default": "string"
+                }
+              }
+            }
+          ]
         },
         "remove_method_call": {
-          "$ref": "#/$defs/rule",
-          "description": "obj:m(x) becomes obj.m(obj, x). Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Rewrite `obj:m(x)` into `obj.m(obj, x)`. Only for a plain identifier receiver, anything else would be evaluated twice. Implemented."
         },
         "remove_method_definition": {
-          "$ref": "#/$defs/rule",
-          "description": "function C:m() becomes function C.m(self). Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Rewrite `function C:m()` into `function C.m(self)`, making the implicit self parameter explicit. Implemented."
         },
         "remove_nil_declaration": {
-          "$ref": "#/$defs/rule",
-          "description": "Drop trailing nil values from local declarations. Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Rewrite `local x = nil` into `local x` and drop trailing nil values from multi bindings. Skips const, which must keep a value. Implemented."
         },
         "remove_types": {
-          "$ref": "#/$defs/rule",
-          "description": "Remove all Luau type syntax. Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Strip every type annotation, bindings, parameters, return types, generic lists, type aliases and the tail of a `::` assertion. Implemented."
         },
         "remove_unused_if_branch": {
-          "$ref": "#/$defs/rule",
-          "description": "Remove statically decidable if branches. Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Prune if branches whose condition is a known constant. A branch that always runs is unwrapped, or becomes a `do` block when it declares locals so their scope is preserved. Implemented."
         },
         "remove_unused_variable": {
           "$ref": "#/$defs/rule",
           "description": "Remove unused locals and local functions. Not implemented yet, lands in M2."
         },
         "remove_unused_while": {
-          "$ref": "#/$defs/rule",
-          "description": "Remove while loops whose condition is statically false. Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Delete a while loop whose condition is a constant false. Implemented."
         },
         "rename_variables": {
           "$ref": "#/$defs/rule",
