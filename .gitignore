@@ -12,3 +12,10 @@ lpm.toml
 
 # local config used while testing on this repo
 coldluau.toml
+
+*.md
+!LICENSE.md
+!CONTRIBUTING.md
+!README.md
+# working notes, not for the repo
+DOCTODO.md
