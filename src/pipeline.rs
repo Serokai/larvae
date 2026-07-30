@@ -250,6 +250,7 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
             &output,
             &resolver,
             &opts,
+            &config.rules,
             write,
             &mut local_diags,
         );
@@ -354,12 +355,14 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
 }
 
 /// Returns (rewrites, dynamic_count) on success, None if the file was skipped
+#[allow(clippy::too_many_arguments)]
 fn process_file(
     path: &Path,
     input: &Path,
     output: &Path,
     resolver: &Resolver,
     opts: &FileOpts,
+    rules_cfg: &crate::config::RulesConfig,
     write: bool,
     diags: &mut Vec<Diag>,
 ) -> Option<(usize, usize)> {
@@ -391,10 +394,14 @@ fn process_file(
     let quote = opts.quotes.char();
     let requote = opts.quotes != QuoteStyle::Preserve;
     let mut replacements: Vec<(u32, u32, String)> = Vec::new();
+    // every site with its final emitted form, rules use this to spot
+    // requires that point at the same module
+    let mut site_forms: Vec<(scan::RequireSite, String)> = Vec::new();
     for site in &scanned.sites {
         let spec = &src[site.inner_start as usize..site.inner_end as usize];
         match resolver.resolve(&ctx, spec, &src, site.at as usize, diags) {
             Rewrite::Keep => {
+                site_forms.push((*site, spec.to_string()));
                 // untouched requires still get the configured quote style
                 if requote
                     && src.as_bytes()[site.tok_start as usize] != quote as u8
@@ -404,6 +411,7 @@ fn process_file(
                 }
             }
             Rewrite::Replace(new) => {
+                site_forms.push((*site, new.clone()));
                 if requote {
                     replacements.push((site.tok_start, site.tok_end, lua_quote(&new, quote)));
                 } else {
@@ -412,6 +420,7 @@ fn process_file(
             }
             // instance exprs replace the whole argument, parenless calls need wrapping parens
             Rewrite::Expr(expr) => {
+                site_forms.push((*site, expr.clone()));
                 let expr = if site.has_parens {
                     expr
                 } else {
@@ -437,6 +446,20 @@ fn process_file(
         && let Some(rep) = crate::rules::append_text_comment(&src, text, *at_start)
     {
         replacements.push(rep);
+    }
+    if crate::rules::wants_ast(rules_cfg) {
+        let dm = ctx.dm.as_ref().map(|d| d.game_path());
+        crate::rules::apply_ast_rules(
+            rules_cfg,
+            &src,
+            &lexed,
+            &site_forms,
+            dm.as_deref(),
+            quote,
+            &mut replacements,
+            diags,
+            path,
+        );
     }
     replacements.sort_by_key(|r| (r.0, r.1));
 

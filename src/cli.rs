@@ -8,7 +8,6 @@ use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
 use crate::commands::{self, self_cmd::SelfCommand};
 use crate::{art, ui};
-
 #[derive(Parser)]
 #[command(
     name = "coldluau",
@@ -39,16 +38,20 @@ enum Command {
         #[arg(long, short)]
         watch: bool,
     },
+
     /// Validate requires and syntax without writing any output
     Check {
         /// Path to coldluau.toml (defaults to ./coldluau.toml when present)
         #[arg(long)]
         config: Option<PathBuf>,
     },
+
     /// Create a starter coldluau.toml for this project
     Init,
+
     /// Add the schema reference to coldluau.toml for editor intellisense
     Schema,
+
     /// Manage the coldluau installation itself
     #[command(name = "self")]
     SelfManage {
@@ -60,6 +63,7 @@ enum Command {
 pub fn main() -> ExitCode {
     match run() {
         Ok(code) => code,
+
         Err(e) => {
             ui::print_error(&format!("{e:#}"));
             ExitCode::FAILURE
@@ -76,16 +80,20 @@ fn run() -> Result<ExitCode> {
         // sub -h prints that subcommand's help, bare -h gets the fancy layout
         if let Some(name) = matches.subcommand_name() {
             let mut cmd = Cli::command().styles(ui::help_styles());
+
             let sub = cmd
                 .find_subcommand_mut(name)
                 .expect("parsed subcommand exists");
+
             if let Err(e) = sub.print_help()
                 && e.kind() != std::io::ErrorKind::BrokenPipe
             {
                 return Err(e.into());
             }
+
             return Ok(ExitCode::SUCCESS);
         }
+
         print_fancy_help(ui::want_color())?;
         return Ok(ExitCode::SUCCESS);
     }
@@ -102,9 +110,13 @@ fn run() -> Result<ExitCode> {
             profile,
             watch,
         } => commands::process::run(&root, config, profile, watch),
+
         Command::Check { config } => commands::check::run(&root, config),
+
         Command::Init => commands::init::run(&root),
+
         Command::Schema => commands::schema::run(&root),
+
         Command::SelfManage { command } => match command {
             Some(cmd) => commands::self_cmd::run(cmd),
             None => {
@@ -127,8 +139,10 @@ fn print_fancy_help(color: bool) -> Result<()> {
     use std::io::Write;
 
     const GAP: usize = 3;
+
     let logo = art::logo_small(color);
     let logo_lines: Vec<&str> = logo.lines().collect();
+
     let logo_w = logo_lines
         .iter()
         .map(|l| ui::visible_width(l))
@@ -137,6 +151,7 @@ fn print_fancy_help(color: bool) -> Result<()> {
 
     let width = ui::term_width();
     let side_by_side = width >= logo_w + GAP + 50;
+
     let help_width = if side_by_side {
         (width - logo_w - GAP).min(80)
     } else {
@@ -148,57 +163,71 @@ fn print_fancy_help(color: bool) -> Result<()> {
         .styles(ui::bold_styles())
         .term_width(help_width);
     let rendered = cmd.render_help();
+
     let help = if color {
         rendered.ansi().to_string()
     } else {
         rendered.to_string()
     };
-    let help_lines: Vec<&str> = help.lines().collect();
 
+    let help_lines: Vec<&str> = help.lines().collect();
     let mut out = String::new();
+
     if side_by_side {
         let rows = logo_lines.len().max(help_lines.len());
+
         // Vertically center the shorter column against the taller one
         let logo_off = (rows - logo_lines.len()) / 2;
         let help_off = (rows - help_lines.len()) / 2;
+
         for row in 0..rows {
             let logo_line = row
                 .checked_sub(logo_off)
                 .and_then(|i| logo_lines.get(i).copied())
                 .unwrap_or("");
+
             let help_line = row
                 .checked_sub(help_off)
                 .and_then(|i| help_lines.get(i).copied())
                 .unwrap_or("");
+
             let pad = logo_w - ui::visible_width(logo_line);
             out.push_str(logo_line);
+
             for _ in 0..pad + GAP {
                 out.push(' ');
             }
+
             if color && !help_line.is_empty() {
                 // row gradient color, reapplied after each clap reset so the line stays painted
                 let c = ui::fg(art::row_color(row, rows));
                 let reapplied = help_line.replace(ui::RESET, &format!("{}{c}", ui::RESET));
+
                 out.push_str(&c);
                 out.push_str(&reapplied);
                 out.push_str(ui::RESET);
             } else {
                 out.push_str(help_line);
             }
+
             // Avoid trailing whitespace on logo only rows
             while out.ends_with(' ') {
                 out.pop();
             }
+
             out.push('\n');
         }
     } else {
         out.push_str(&logo);
         out.push_str("\n\n");
+
         if color {
             let rows = help_lines.len();
+
             for (row, line) in help_lines.iter().enumerate() {
                 let c = ui::fg(art::row_color(row, rows));
                 let reapplied = line.replace(ui::RESET, &format!("{}{c}", ui::RESET));
+
                 out.push_str(&c);
                 out.push_str(&reapplied);
                 out.push_str(ui::RESET);
@@ -206,6 +235,7 @@ fn print_fancy_help(color: bool) -> Result<()> {
             }
         } else {
             out.push_str(&help);
+
             if !out.ends_with('\n') {
                 out.push('\n');
             }
@@ -218,5 +248,6 @@ fn print_fancy_help(color: bool) -> Result<()> {
     {
         return Err(e.into());
     }
+
     Ok(())
 }

@@ -1,7 +1,72 @@
-//! Builtin token level rules, the AST rule engine arrives with the parser
+/*!
+Builtin rules
 
-use crate::syntax::lexer::{Tok, TokKind};
+Token level rules live in this file, everything that needs the tree goes
+through the engine, darklua parity rules in one submodule and coldluau's
+own in the other
+*/
+
+pub mod darklua;
+pub mod engine;
+pub mod native;
+
+use std::path::Path;
+
+use crate::config::RulesConfig;
+use crate::diag::Diag;
+use crate::syntax::lexer::{Lexed, Tok, TokKind};
 use crate::syntax::scan::RequireSite;
+
+/// True when any enabled rule needs a parse
+pub fn wants_ast(cfg: &RulesConfig) -> bool {
+    darklua::wants(cfg) || native::wants(cfg)
+}
+
+/*
+Parse once and hand the tree to both rule families, a file that will not
+parse cannot be transformed so that is an error rather than a silent skip,
+the user asked for rules we cannot run
+*/
+#[allow(clippy::too_many_arguments)]
+pub fn apply_ast_rules(
+    cfg: &RulesConfig,
+    src: &str,
+    lexed: &Lexed,
+    require_forms: &[(RequireSite, String)],
+    dm_path: Option<&str>,
+    quote: char,
+    edits: &mut Vec<(u32, u32, String)>,
+    diags: &mut Vec<Diag>,
+    path: &Path,
+) {
+    let chunk = match crate::syntax::parser::parse(src, &lexed.toks) {
+        Ok(c) => c,
+        Err(e) => {
+            diags.push(
+                Diag::error(
+                    path,
+                    format!(
+                        "rules need a parse and this file has a syntax error, {}",
+                        e.message
+                    ),
+                )
+                .at(src, e.offset),
+            );
+            return;
+        }
+    };
+    let ctx = engine::RuleCtx {
+        src,
+        toks: &lexed.toks,
+        chunk: &chunk,
+        comments: &lexed.comments,
+        require_forms,
+        dm_path,
+        quote,
+    };
+    darklua::apply(cfg, &ctx, edits, diags, path);
+    native::apply(cfg, &ctx, edits, diags, path);
+}
 
 /*
 const_requires, turn `local X = require(...)` into `const X = require(...)`

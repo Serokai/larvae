@@ -45,6 +45,7 @@ impl Cache {
     /// Load the cache, an epoch or format change starts from empty
     pub fn load(cache_dir: &Path, epoch: u64, enabled: bool) -> Self {
         let path = cache_dir.join("build-cache.json");
+
         let entries = if enabled {
             std::fs::read_to_string(&path)
                 .ok()
@@ -55,6 +56,7 @@ impl Cache {
         } else {
             HashMap::new()
         };
+
         Self {
             path,
             epoch,
@@ -84,16 +86,20 @@ impl Cache {
         if !self.enabled {
             return Ok(());
         }
+
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+
         let data = CacheFile {
             format: FORMAT,
             epoch: self.epoch,
             files: self.entries.clone(),
         };
+
         let text = serde_json::to_string(&data)?;
         let tmp = self.path.with_extension("json.tmp");
+
         std::fs::write(&tmp, text)?;
         std::fs::rename(&tmp, &self.path)
     }
@@ -127,6 +133,7 @@ impl EpochInputs {
     /// or resolve a module ambiguity for files that did not change
     pub fn add_paths(&mut self, paths: &mut [PathBuf]) {
         paths.sort();
+
         for p in paths.iter() {
             self.add(p.to_string_lossy().as_bytes());
         }
@@ -145,9 +152,11 @@ mod tests {
     fn epoch_changes_with_any_input() {
         let mut a = EpochInputs::new();
         a.add(b"one");
+
         let mut b = EpochInputs::new();
         b.add(b"one");
         b.add(b"two");
+
         assert_ne!(a.finish(), b.finish());
     }
 
@@ -155,6 +164,7 @@ mod tests {
     fn epoch_mismatch_drops_entries() {
         let tmp = tempfile::tempdir().unwrap();
         let mut c = Cache::load(tmp.path(), 1, true);
+
         c.record("a.luau".into(), 42);
         c.save().unwrap();
 
@@ -169,6 +179,7 @@ mod tests {
     fn disabled_cache_never_reports_fresh() {
         let tmp = tempfile::tempdir().unwrap();
         let mut c = Cache::load(tmp.path(), 1, false);
+
         c.record("a.luau".into(), 42);
         assert!(!c.is_fresh("a.luau", 42, tmp.path()));
     }

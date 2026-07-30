@@ -11,10 +11,13 @@ use serde::Deserialize;
 pub struct Config {
     #[serde(default)]
     pub aliases: HashMap<String, String>,
+
     #[serde(default)]
     pub process: ProcessConfig,
+
     #[serde(default)]
     pub requires: RequiresConfig,
+
     #[serde(default)]
     pub rojo: RojoConfig,
 
@@ -24,14 +27,19 @@ pub struct Config {
     // parsed but unimplemented, so the error can name the milestone
     #[serde(default)]
     defines: Option<toml::Value>,
+
     #[serde(default)]
     extensions: Option<toml::Value>,
+
     #[serde(default)]
     bundle: Option<toml::Value>,
+
     #[serde(default)]
     minify: Option<toml::Value>,
+
     #[serde(default)]
     check: Option<toml::Value>,
+
     #[serde(default)]
     profile: Option<toml::Value>,
 }
@@ -41,18 +49,25 @@ pub struct Config {
 pub struct ProcessConfig {
     #[serde(default = "default_input")]
     pub input: PathBuf,
+
     #[serde(default = "default_output")]
     pub output: PathBuf,
+
     #[serde(default = "default_include")]
     pub include: Vec<String>,
+
     #[serde(default)]
     pub exclude: Vec<String>,
+
     #[serde(default = "default_generator")]
     pub generator: String,
+
     #[serde(default)]
     pub quotes: QuoteStyle,
+
     #[serde(default = "default_true")]
     pub cache: bool,
+
     #[serde(default = "default_cache_dir")]
     pub cache_dir: PathBuf,
 }
@@ -87,13 +102,17 @@ milestone they land in instead of being silently ignored
 pub struct RulesConfig {
     #[serde(default)]
     pub const_requires: bool,
+
     #[serde(default)]
     pub remove_comments: Option<RemoveComments>,
+
     #[serde(default)]
     pub append_text_comment: Option<AppendTextComment>,
+
     /// coldluau only, ex: "strict" writes `--!strict` at the top
     #[serde(default)]
     pub add_luau_directive: Option<String>,
+
     #[serde(flatten)]
     rest: HashMap<String, toml::Value>,
 }
@@ -135,9 +154,11 @@ pub struct AppendTextComment {
     /// Literal comment text, mutually exclusive with `file`
     #[serde(default)]
     pub text: Option<String>,
+
     /// Read the text from this file instead
     #[serde(default)]
     pub file: Option<PathBuf>,
+
     #[serde(default = "default_location")]
     pub location: String,
 }
@@ -150,8 +171,10 @@ fn default_location() -> String {
 pub enum RuleStatus {
     /// Works today
     Done,
+    
     /// Designed, lands in this milestone
     Planned(&'static str),
+
     /// Not a rule here, this is where it lives instead
     Elsewhere(&'static str),
 }
