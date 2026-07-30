@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  lint:
+    name: Format & Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+  test:
+    name: Test (${{ matrix.os }})
+    # Windows is in the matrix on purpose: path handling (emitted requires,
+    # mount mapping, re-relativized $paths) is a known cross-platform bug
+    # class for this tool category - plan.md §4.7.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --all-targets
+      - name: Unit & integration tests
+        run: cargo test
+      - name: Parser conformance
+        # corpus round trip, coverage, mutation and truncation sweeps
+        run: cargo test --test parser
+
+  smoke:
+    name: CLI smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binary
+        run: cargo build --release
+      - name: End-to-end CLI run on a fixture project
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="$PWD/target/release/coldluau"
+          FIXTURE="$(mktemp -d)"
+          cd "$FIXTURE"
+          mkdir -p src/shared src/server Packages
+          cat > default.project.json <<'EOF'
+          {
+            "name": "smoke",
+            "tree": {
+              "$className": "DataModel",
+              "ReplicatedStorage": {
+                "shared": { "$path": "src/shared" },
+                "Packages": { "$path": "Packages" }
+              },
+              "ServerScriptService": { "$path": "src/server" }
+            }
+          }
+          EOF
+          cat > coldluau.toml <<'EOF'
+          [aliases]
+          pkg = "@game/ReplicatedStorage/Packages"
+          EOF
+          echo 'return {}' > Packages/signal.luau
+          echo 'return {}' > src/shared/util.luau
+          printf 'local S = require("@pkg/signal")\nlocal u = require("../shared/util")\nreturn { S, u }\n' > src/server/boot.luau
+
+          "$BIN" process
+          "$BIN" check
+
+          grep -F 'require("@game/ReplicatedStorage/Packages/signal")' dist/server/boot.luau
+          grep -F 'require("@game/ReplicatedStorage/shared/util")' dist/server/boot.luau
+          grep -F '"../dist/shared"' .coldluau/build.project.json
+          grep -F '"../Packages"' .coldluau/build.project.json
+
+          # Idempotence: processing our own output must be a no-op.
+          cp dist/server/boot.luau src/server/boot.luau
+          "$BIN" process
+          grep -F 'require("@game/ReplicatedStorage/Packages/signal")' dist/server/boot.luau
+
+          # Failure paths must fail: unknown alias exits non-zero.
+          echo 'return require("@nope/x")' > src/shared/bad.luau
+          if "$BIN" check; then
+            echo "expected check to fail on unknown alias" >&2
+            exit 1
+          fi
