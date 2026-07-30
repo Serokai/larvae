@@ -1,0 +1,14 @@
+/target
+
+# build output and cache
+dist/
+.coldluau/
+
+# lpm scaffolding, not used by the rust crate
+packages/
+.lpm-patch/
+lpm.lock
+lpm.toml
+
+# local config used while testing on this repo
+coldluau.toml

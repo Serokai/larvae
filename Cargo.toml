@@ -1,0 +1,49 @@
+[package]
+name = "coldluau"
+version = "0.1.0"
+edition = "2024"
+description = "A fast Luau preprocessor: aliases to Roblox-native string requires, and more"
+license = "MIT"
+repository = "https://github.com/coldluau/cli"
+homepage = "https://github.com/coldluau/cli"
+keywords = ["luau", "roblox", "preprocessor", "rojo", "require"]
+categories = ["development-tools::build-utils", "command-line-utilities"]
+include = [
+    "src/**/*",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE.md",
+    "CHANGELOG.md",
+    "coldluau.example.toml",
+    "coldluau.schema.json",
+]
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+dirs = "6"
+globset = "0.4"
+json5 = "0.4"
+notify-debouncer-full = "0.7.0"
+rayon = "1"
+regex = "1"
+self-replace = "1"
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+terminal_size = "0.4"
+toml = "0.8"
+ureq = { version = "2", features = ["json"] }
+walkdir = "2"
+xxhash-rust = { version = "0.8.18", features = ["xxh3"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[workspace]
+members = ["."]
+exclude = ["fuzz"]
