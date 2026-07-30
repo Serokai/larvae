@@ -113,6 +113,27 @@ pub struct RulesConfig {
     #[serde(default)]
     pub add_luau_directive: Option<String>,
 
+    // --- coldluau only, no darklua rule does any of these ---
+    /// Statement position calls to drop, ex: ["print", "debug.profilebegin"]
+    #[serde(default)]
+    pub remove_calls: Option<RemoveCalls>,
+
+    /// `game.Players` becomes `game:GetService("Players")`
+    #[serde(default)]
+    pub use_get_service: bool,
+
+    /// Top level requires of the same module collapse onto the first one
+    #[serde(default)]
+    pub dedupe_requires: bool,
+
+    /// Name of a constant holding this file's datamodel path
+    #[serde(default)]
+    pub inject_module_path: Option<String>,
+
+    /// Wrap a provably safe module return in `table.freeze`
+    #[serde(default)]
+    pub freeze_module: bool,
+
     #[serde(flatten)]
     rest: HashMap<String, toml::Value>,
 }
@@ -143,6 +164,39 @@ impl RemoveComments {
         match self {
             RemoveComments::Enabled(_) => default_comment_except(),
             RemoveComments::Options { except } => except.clone(),
+        }
+    }
+}
+
+/// `remove_calls = ["print"]` or a table that also sets the side effect switch
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum RemoveCalls {
+    Functions(Vec<String>),
+
+    Options {
+        functions: Vec<String>,
+
+        /// Keep calls whose arguments call something, that call may matter
+        #[serde(default = "default_true")]
+        preserve_arguments_side_effects: bool,
+    },
+}
+
+impl RemoveCalls {
+    pub fn functions(&self) -> &[String] {
+        match self {
+            RemoveCalls::Functions(f) | RemoveCalls::Options { functions: f, .. } => f,
+        }
+    }
+
+    pub fn preserve_arguments_side_effects(&self) -> bool {
+        match self {
+            RemoveCalls::Functions(_) => true,
+            RemoveCalls::Options {
+                preserve_arguments_side_effects,
+                ..
+            } => *preserve_arguments_side_effects,
         }
     }
 }
@@ -188,7 +242,15 @@ pub fn rule_status(name: &str) -> Option<RuleStatus> {
 
     Some(match name {
         // implemented
-        "const_requires" | "remove_comments" | "append_text_comment" | "add_luau_directive" => Done,
+        "const_requires"
+        | "remove_comments"
+        | "append_text_comment"
+        | "add_luau_directive"
+        | "remove_calls"
+        | "use_get_service"
+        | "dedupe_requires"
+        | "inject_module_path"
+        | "freeze_module" => Done,
         // these are not rules in coldluau
         "convert_require" => Elsewhere("the [requires] section handles requires"),
         "inject_global_value" => Elsewhere("use [defines] instead (lands in M2)"),
@@ -384,6 +446,21 @@ impl Config {
             }
         }
 
+        if let Some(name) = &self.rules.inject_module_path
+            && !crate::rules::native::is_ident(name)
+        {
+            bail!("inject_module_path must be a Luau identifier, got \"{name}\"");
+        }
+
+        if let Some(calls) = &self.rules.remove_calls {
+            for name in calls.functions() {
+                if !name.split('.').all(crate::rules::native::is_ident) {
+                    bail!(
+                        "remove_calls entry \"{name}\" must be a name or a dotted path of names, ex: \"debug.profilebegin\""
+                    );
+                }
+            }
+        }
         if self.process.generator != "retain-lines" {
             bail!(
                 "generator = \"{}\" is not implemented yet (lands in M2); only \"retain-lines\" works today",
@@ -458,6 +535,41 @@ mod tests {
 
         assert_eq!(c.process.input, PathBuf::from("src"));
         assert_eq!(c.requires.target, Target::RobloxString);
+    }
+
+    #[test]
+    fn coldluau_rules_load_in_both_forms() {
+        let c: Config = toml::from_str(concat!(
+            "[rules]\n",
+            "remove_calls = { functions = [\"print\", \"debug.profilebegin\"], preserve_arguments_side_effects = false }\n",
+            "use_get_service = true\n",
+            "dedupe_requires = true\n",
+            "inject_module_path = \"MODULE_PATH\"\n",
+            "freeze_module = true\n",
+        ))
+        .unwrap();
+        c.validate().unwrap();
+        let calls = c.rules.remove_calls.as_ref().unwrap();
+        assert_eq!(calls.functions().len(), 2);
+        assert!(!calls.preserve_arguments_side_effects());
+        // the list form keeps the safe default
+        let c: Config = toml::from_str("[rules]\nremove_calls = [\"print\"]").unwrap();
+        c.validate().unwrap();
+        assert!(
+            c.rules
+                .remove_calls
+                .as_ref()
+                .unwrap()
+                .preserve_arguments_side_effects()
+        );
+    }
+
+    #[test]
+    fn generated_names_must_be_identifiers() {
+        let c: Config = toml::from_str("[rules]\ninject_module_path = \"not a name\"").unwrap();
+        assert!(c.validate().is_err());
+        let c: Config = toml::from_str("[rules]\nremove_calls = [\"obj:method\"]").unwrap();
+        assert!(c.validate().is_err());
     }
 
     #[test]
