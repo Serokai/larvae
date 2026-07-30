@@ -1,0 +1,140 @@
+/*!
+compute_expression
+
+Fold constant expressions to their value. The evaluator refuses anything it
+cannot print exactly, so the rule's own job is small, find the outermost
+node that folds, write the value in its place, and never look inside a node
+that already folded
+*/
+
+use super::eval;
+use super::support;
+use crate::rules::engine::{Edit, RuleCtx, Visit, walk_chunk};
+use crate::syntax::ast::*;
+
+pub fn compute_expression(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
+    struct V<'a, 'b> {
+        ctx: &'a RuleCtx<'b>,
+        edits: &'a mut Vec<Edit>,
+        /// Ranges already folded, the walk hits parents first so anything
+        /// inside one of these is part of a value we have already written
+        done: Vec<(u32, u32)>,
+    }
+    impl Visit for V<'_, '_> {
+        fn expr(&mut self, e: &Expr) {
+            // only composites are worth folding, a literal is already itself
+            if !matches!(
+                e,
+                Expr::Binary { .. } | Expr::Unary { .. } | Expr::Paren { .. }
+            ) {
+                return;
+            }
+            let (a, b) = self.ctx.bytes(e.span());
+            if self.done.iter().any(|&(fa, fb)| a >= fa && b <= fb) {
+                return;
+            }
+            let Some(value) = eval::eval(self.ctx, e) else {
+                return;
+            };
+            let Some(mut text) = eval::print(&value, self.ctx.quote) else {
+                return;
+            };
+            if text == self.ctx.src[a as usize..b as usize] {
+                return;
+            }
+            /*
+            a negative result butting up against a minus would read as a
+            comment, `a-(1-3)` must not collapse to `a--2`
+            */
+            if text.starts_with('-') && a > 0 && self.ctx.src.as_bytes()[a as usize - 1] == b'-' {
+                text.insert(0, ' ');
+            }
+            if support::replace_keep_lines(self.ctx, a, b, &text, self.edits) {
+                self.done.push((a, b));
+            }
+        }
+    }
+    walk_chunk(
+        ctx.chunk,
+        &mut V {
+            ctx,
+            edits,
+            done: Vec::new(),
+        },
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::testing::{assert_lines_kept, run};
+    use super::*;
+
+    #[test]
+    fn constant_arithmetic_folds() {
+        assert_eq!(
+            run("local x = 1 + 2\n", compute_expression),
+            "local x = 3\n"
+        );
+        assert_eq!(
+            run("local x = 2 * 3 + 4\n", compute_expression),
+            "local x = 10\n"
+        );
+        assert_eq!(
+            run("local x = 60 * 60 * 24\n", compute_expression),
+            "local x = 86400\n"
+        );
+    }
+
+    #[test]
+    fn only_the_outermost_node_is_written() {
+        // the inner 1 + 2 must not also produce an edit
+        let out = run("local x = (1 + 2) * 4\n", compute_expression);
+        assert_eq!(out, "local x = 12\n");
+    }
+
+    #[test]
+    fn comparisons_and_logic_fold() {
+        assert_eq!(
+            run("local x = 1 < 2\n", compute_expression),
+            "local x = true\n"
+        );
+        assert_eq!(
+            run("local x = not nil\n", compute_expression),
+            "local x = true\n"
+        );
+        assert_eq!(
+            run("local x = \"a\" .. \"b\"\n", compute_expression),
+            "local x = \"ab\"\n"
+        );
+    }
+
+    #[test]
+    fn a_negative_result_never_becomes_a_comment() {
+        assert_eq!(
+            run("local x = a-(1-3)\n", compute_expression),
+            "local x = a- -2\n"
+        );
+    }
+
+    #[test]
+    fn anything_not_constant_is_left_alone() {
+        let src = "local x = a + 1\n";
+        assert_eq!(run(src, compute_expression), src);
+        let src = "local x = f() + 1\n";
+        assert_eq!(run(src, compute_expression), src);
+        // a fraction has no exact printed form we want to commit to
+        let src = "local x = 10 / 4\n";
+        assert_eq!(run(src, compute_expression), src);
+        // already folded, no edit
+        let src = "local x = 3\n";
+        assert_eq!(run(src, compute_expression), src);
+    }
+
+    #[test]
+    fn folding_across_lines_keeps_the_line_count() {
+        let src = "local x = 1 +\n    2\nreturn x\n";
+        let out = run(src, compute_expression);
+        assert!(out.starts_with("local x = 3\n"), "{out}");
+        assert_lines_kept(src, &out);
+    }
+}
