@@ -383,10 +383,10 @@ impl Config {
     pub fn load(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", crate::ui::rel(path)))?;
-        
+
         let config: Config = toml::from_str(&text)
             .with_context(|| format!("invalid config in {}", crate::ui::rel(path)))?;
-        
+
         config.validate()?;
         Ok(config)
     }
@@ -590,7 +590,7 @@ mod tests {
     fn reserved_alias_rejected() {
         let c: Config = toml::from_str("[aliases]\nself = \"./x\"").unwrap();
         assert!(c.validate().is_err());
-        
+
         let c: Config = toml::from_str("[aliases]\nGame = \"./x\"").unwrap();
         assert!(c.validate().is_err());
     }

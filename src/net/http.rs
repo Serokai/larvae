@@ -13,7 +13,7 @@ fn agent() -> ureq::Agent {
 /// GET a JSON document, with optional extra headers
 pub fn get_json<T: serde::de::DeserializeOwned>(url: &str, headers: &[(&str, &str)]) -> Result<T> {
     let mut req = agent().get(url).set("User-Agent", USER_AGENT);
-    
+
     for (k, v) in headers {
         req = req.set(k, v);
     }
@@ -51,6 +51,6 @@ pub fn get_bytes(url: &str) -> Result<Vec<u8>> {
             .with_context(|| format!("download from {url} failed"))?;
         return Ok(bytes);
     }
-    
+
     bail!("too many redirects fetching {url}");
 }

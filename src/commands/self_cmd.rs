@@ -20,7 +20,7 @@ pub enum SelfCommand {
 
     /// Update coldluau to the latest release
     Update,
-    
+
     /// Remove coldluau from this machine
     Uninstall,
 }
@@ -61,10 +61,10 @@ fn update() -> Result<ExitCode> {
 
     let release = github::latest_release(REPO)
         .with_context(|| format!("failed to query releases for {REPO}"))?;
-    
+
     let latest = Version::parse(release.tag_name.trim_start_matches('v'))
         .with_context(|| format!("release tag {:?} is not a version", release.tag_name))?;
-    
+
     if latest <= current {
         ui::print_success("coldluau is already up to date");
         return Ok(ExitCode::SUCCESS);
@@ -86,10 +86,10 @@ fn update() -> Result<ExitCode> {
 
     let bytes = http::get_bytes(&asset.browser_download_url)?;
     let staged = std::env::temp_dir().join(&asset_name);
-    
+
     std::fs::write(&staged, &bytes)
         .with_context(|| format!("failed to stage {}", staged.display()))?;
-    
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -105,7 +105,7 @@ fn update() -> Result<ExitCode> {
 
 fn uninstall() -> Result<ExitCode> {
     let dir = paths::coldluau_dir()?;
-    
+
     if !dir.exists() {
         bail!("coldluau is not installed at {}", dir.display());
     }
@@ -129,9 +129,9 @@ fn uninstall() -> Result<ExitCode> {
 
     std::fs::remove_dir_all(&dir).with_context(|| format!("failed to remove {}", dir.display()))?;
     ui::print_success(&format!("Removed {}", dir.display()));
-    
+
     let bin = paths::bin_dir()?;
-    
+
     eprintln!("You can now drop {} from your PATH.", bin.display());
     Ok(ExitCode::SUCCESS)
 }
@@ -140,7 +140,7 @@ fn print_path_instructions(bin_dir: &std::path::Path) {
     let on_path = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).any(|entry| entry == bin_dir))
         .unwrap_or(false);
-    
+
     if on_path {
         return;
     }
