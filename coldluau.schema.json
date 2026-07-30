@@ -1,0 +1,542 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/coldluau/cli/master/coldluau.schema.json",
+  "title": "coldluau.toml",
+  "description": "Configuration for coldluau, a fast Luau preprocessor: aliases to Roblox-native string requires, and more.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "aliases": {
+      "$ref": "#/$defs/aliases"
+    },
+    "process": {
+      "$ref": "#/$defs/process"
+    },
+    "requires": {
+      "$ref": "#/$defs/requires"
+    },
+    "rojo": {
+      "$ref": "#/$defs/rojo"
+    },
+    "defines": {
+      "$ref": "#/$defs/defines"
+    },
+    "rules": {
+      "$ref": "#/$defs/rules"
+    },
+    "extensions": {
+      "$ref": "#/$defs/extensions"
+    },
+    "bundle": {
+      "$ref": "#/$defs/bundle"
+    },
+    "minify": {
+      "$ref": "#/$defs/minify"
+    },
+    "check": {
+      "$ref": "#/$defs/check"
+    },
+    "profile": {
+      "description": "Per-environment overlays selected with --profile <name>. Tables deep-merge per key; arrays and scalars are replaced whole. (M2)",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "aliases": {
+            "$ref": "#/$defs/aliases"
+          },
+          "process": {
+            "$ref": "#/$defs/process"
+          },
+          "requires": {
+            "$ref": "#/$defs/requires"
+          },
+          "defines": {
+            "$ref": "#/$defs/defines"
+          },
+          "rules": {
+            "$ref": "#/$defs/rules"
+          },
+          "minify": {
+            "$ref": "#/$defs/minify"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "aliases": {
+      "description": "Require aliases. Optional: .luaurc aliases work with zero config; entries here merge over them per key. Values are @game/... DataModel paths or filesystem paths. \"@self\" and \"@game\" are reserved.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9._-]+$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "description": "A DataModel path (\"@game/ReplicatedStorage/packages\") or a filesystem path (\"./Packages/signal\")."
+      }
+    },
+    "process": {
+      "description": "What to read, where to write, how to print.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "type": "string",
+          "default": "src",
+          "description": "Root scanned for source files."
+        },
+        "output": {
+          "type": "string",
+          "default": "dist",
+          "description": "Mirror of `input` with transforms applied."
+        },
+        "include": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/*.luau",
+            "**/*.lua"
+          ],
+          "description": "Globs relative to `input`."
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Globs to skip entirely."
+        },
+        "generator": {
+          "enum": [
+            "retain-lines",
+            "dense",
+            "readable"
+          ],
+          "default": "retain-lines",
+          "description": "Output printer. retain-lines preserves formatting, comments, and line numbers. dense/readable land in M2."
+        },
+        "quotes": {
+          "enum": [
+            "preserve",
+            "double",
+            "single"
+          ],
+          "default": "preserve",
+          "description": "Quote style for require strings in the output. preserve keeps whatever the source used, double/single requote every require string and generated instance expression."
+        },
+        "cache": {
+          "type": "boolean",
+          "default": true,
+          "description": "Incremental builds via content hashing. (M1c)"
+        },
+        "cache_dir": {
+          "type": "string",
+          "default": ".coldluau",
+          "description": "Cache directory; add to .gitignore."
+        }
+      }
+    },
+    "requires": {
+      "description": "The require-rewriting transform. Input semantics are always Luau-RFC \"luau\" mode.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "enum": [
+            "roblox-string",
+            "path",
+            "roblox-instance"
+          ],
+          "default": "roblox-string",
+          "description": "roblox-string: native @game/./@self string requires. path: relative filesystem paths (Lune). roblox-instance: Instance expressions like script.Parent:FindFirstChild(\"x\") (see indexing_style)."
+        },
+        "sourcemap": {
+          "type": "string",
+          "description": "Optional Rojo sourcemap.json to sharpen the DataModel mapping. (M2)"
+        },
+        "mounts": {
+          "type": "object",
+          "description": "Fallback filesystem->DataModel mapping; rarely needed with a Rojo project file. Keys are directories relative to the project root.",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^@game(/.*)?$"
+          }
+        },
+        "strict": {
+          "type": "boolean",
+          "default": false,
+          "description": "Upgrade warn-level classes (missing target file, case mismatch) to errors. Unknown aliases and inexpressible/realm-violating requires are ALWAYS errors."
+        },
+        "overrides": {
+          "type": "object",
+          "description": "Per-path target overrides (glob -> target), e.g. instance requires for early-replication client code. (M2)",
+          "additionalProperties": {
+            "enum": [
+              "roblox-string",
+              "path",
+              "roblox-instance"
+            ]
+          }
+        },
+        "indexing_style": {
+          "enum": [
+            "find_first_child",
+            "wait_for_child",
+            "property",
+            "find-first-child",
+            "wait-for-child",
+            "property-instance"
+          ],
+          "default": "find_first_child",
+          "description": "roblox-instance target only: how emitted Instance chains index children. find_first_child -> :FindFirstChild(\"x\"), wait_for_child -> :WaitForChild(\"x\"), property -> .x (the dot format). Kebab-case spellings are accepted too."
+        }
+      }
+    },
+    "rojo": {
+      "description": "Rojo project integration: auto-derived mounts and the derived build project in .coldluau/.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string",
+          "default": "default.project.json",
+          "description": "Source-of-truth Rojo project file."
+        },
+        "build_project": {
+          "type": "string",
+          "description": "Override the derived build project location (default: <cache_dir>/build.project.json)."
+        }
+      }
+    },
+    "defines": {
+      "description": "Compile-time constants, injected as globals and constant-folded. Override per profile for dev/release builds. (M2)",
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "boolean",
+          "string",
+          "number"
+        ]
+      }
+    },
+    "rule": {
+      "description": "false = off (default), true = on, or a table with rule options and per-rule file filters (apply_to/skip globs).",
+      "type": [
+        "boolean",
+        "object"
+      ]
+    },
+    "rules": {
+      "description": "Builtin transforms, all off by default. Every darklua rule name is accepted so configs port over 1:1. Rules that are not implemented yet error at load time naming their milestone. darklua's convert_require lives in [requires], inject_global_value in [defines], remove_spaces in the dense generator.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "const_requires": {
+          "type": "boolean",
+          "default": false,
+          "description": "coldluau only. Turn `local X = require(...)` into `const X = require(...)`. Skips multi bindings and annotated locals. Implemented."
+        },
+        "remove_comments": {
+          "description": "Remove comments. `true`, or a table with `except` regexes for comments to keep (defaults to [\"^--!\"] so Luau directives survive; set [] to match darklua). Implemented.",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "except": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "default": [
+                    "^--!"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "append_text_comment": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Insert a comment at the start or end of every file. Implemented.",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "Literal comment text, mutually exclusive with file"
+            },
+            "file": {
+              "type": "string",
+              "description": "Read the comment text from this file"
+            },
+            "location": {
+              "enum": [
+                "start",
+                "end"
+              ],
+              "default": "start"
+            }
+          }
+        },
+        "add_luau_directive": {
+          "type": "string",
+          "description": "coldluau only. Write a Luau directive at the top of every file, ex: \"strict\" emits --!strict. An existing directive of the same family is left alone. Implemented.",
+          "examples": [
+            "strict",
+            "nonstrict",
+            "native",
+            "optimize 2"
+          ]
+        },
+        "compute_expression": {
+          "$ref": "#/$defs/rule",
+          "description": "Fold side effect free expressions to their result. Not implemented yet, lands in M2."
+        },
+        "convert_function_to_assignment": {
+          "$ref": "#/$defs/rule",
+          "description": "function foo() end becomes foo = function() end. Not implemented yet, lands in M2."
+        },
+        "convert_index_to_field": {
+          "$ref": "#/$defs/rule",
+          "description": "t['field'] becomes t.field. Not implemented yet, lands in M2."
+        },
+        "convert_local_function_to_assign": {
+          "$ref": "#/$defs/rule",
+          "description": "Non recursive local function f becomes local f = function(). Not implemented yet, lands in M2."
+        },
+        "convert_luau_number": {
+          "$ref": "#/$defs/rule",
+          "description": "Binary literals become hex, digit separators stripped. Not implemented yet, lands in M2."
+        },
+        "convert_square_root_call": {
+          "$ref": "#/$defs/rule",
+          "description": "math.sqrt(x) becomes x ^ 0.5. Not implemented yet, lands in M2."
+        },
+        "filter_after_early_return": {
+          "$ref": "#/$defs/rule",
+          "description": "Drop statements after a do block that always returns. Not implemented yet, lands in M2."
+        },
+        "group_local_assignment": {
+          "$ref": "#/$defs/rule",
+          "description": "Merge consecutive local statements. Not implemented yet, lands in M2."
+        },
+        "make_assignment_local": {
+          "$ref": "#/$defs/rule",
+          "description": "Luau const declarations become local (the inverse of const_requires). Not implemented yet, lands in M2."
+        },
+        "remove_assertions": {
+          "$ref": "#/$defs/rule",
+          "description": "Remove assert() calls. Not implemented yet, lands in M2."
+        },
+        "remove_attribute": {
+          "$ref": "#/$defs/rule",
+          "description": "Remove Luau function attributes like @native. Not implemented yet, lands in M2."
+        },
+        "remove_compound_assignment": {
+          "$ref": "#/$defs/rule",
+          "description": "x += 1 becomes x = x + 1. Not implemented yet, lands in M2."
+        },
+        "remove_continue": {
+          "$ref": "#/$defs/rule",
+          "description": "Rewrite continue into repeat until true with a flag. Not implemented yet, lands in M2."
+        },
+        "remove_debug_profiling": {
+          "$ref": "#/$defs/rule",
+          "description": "Remove debug.profilebegin and debug.profileend calls. Not implemented yet, lands in M2."
+        },
+        "remove_empty_do": {
+          "$ref": "#/$defs/rule",
+          "description": "Remove empty do end blocks. Not implemented yet, lands in M2."
+        },
+        "remove_floor_division": {
+          "$ref": "#/$defs/rule",
+          "description": "a // b becomes math.floor(a / b). Not implemented yet, lands in M2."
+        },
+        "remove_function_call_parens": {
+          "$ref": "#/$defs/rule",
+          "description": "print('x') becomes print'x'. Not implemented yet, lands in M2."
+        },
+        "remove_if_expression": {
+          "$ref": "#/$defs/rule",
+          "description": "if c then a else b becomes c and a or b. Not implemented yet, lands in M2."
+        },
+        "remove_interpolated_string": {
+          "$ref": "#/$defs/rule",
+          "description": "Backtick strings become string.format calls. Not implemented yet, lands in M2."
+        },
+        "remove_method_call": {
+          "$ref": "#/$defs/rule",
+          "description": "obj:m(x) becomes obj.m(obj, x). Not implemented yet, lands in M2."
+        },
+        "remove_method_definition": {
+          "$ref": "#/$defs/rule",
+          "description": "function C:m() becomes function C.m(self). Not implemented yet, lands in M2."
+        },
+        "remove_nil_declaration": {
+          "$ref": "#/$defs/rule",
+          "description": "Drop trailing nil values from local declarations. Not implemented yet, lands in M2."
+        },
+        "remove_types": {
+          "$ref": "#/$defs/rule",
+          "description": "Remove all Luau type syntax. Not implemented yet, lands in M2."
+        },
+        "remove_unused_if_branch": {
+          "$ref": "#/$defs/rule",
+          "description": "Remove statically decidable if branches. Not implemented yet, lands in M2."
+        },
+        "remove_unused_variable": {
+          "$ref": "#/$defs/rule",
+          "description": "Remove unused locals and local functions. Not implemented yet, lands in M2."
+        },
+        "remove_unused_while": {
+          "$ref": "#/$defs/rule",
+          "description": "Remove while loops whose condition is statically false. Not implemented yet, lands in M2."
+        },
+        "rename_variables": {
+          "$ref": "#/$defs/rule",
+          "description": "Rename locals and params to short names. Not implemented yet, lands in M2."
+        }
+      }
+    },
+    "extensions": {
+      "description": "User-defined transformers written in Luau, sharing the fused traversal with builtin rules. (M3)",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Luau module returning { name, filter, visit }."
+          },
+          "options": {
+            "type": "object",
+            "description": "Passed to the transformer verbatim."
+          },
+          "before": {
+            "type": "string",
+            "description": "Run before this builtin rule instead of after all rules."
+          }
+        }
+      }
+    },
+    "bundle": {
+      "description": "Single-file bundling with deterministic module-init ordering. Present = enabled. (M3)",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry"
+      ],
+      "properties": {
+        "entry": {
+          "type": "string",
+          "description": "Entry-point module."
+        },
+        "output": {
+          "type": "string"
+        },
+        "excludes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Requires left as-is (runtime-provided), e.g. \"@lune/**\"."
+        },
+        "modules_identifier": {
+          "type": "string",
+          "default": "__COLDLUAU_MODULES"
+        },
+        "tree_shake": {
+          "type": "boolean",
+          "default": true,
+          "description": "Drop modules unreachable from the entry point."
+        },
+        "loaders": {
+          "type": "object",
+          "description": "Data files required as modules are converted to Lua tables (glob -> loader).",
+          "additionalProperties": {
+            "enum": [
+              "json",
+              "toml",
+              "yaml",
+              "text",
+              "skip"
+            ]
+          }
+        }
+      }
+    },
+    "minify": {
+      "description": "Options for generator = \"dense\". (M4)",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "column_span": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 120,
+          "description": "Max line width; 0 = unlimited."
+        },
+        "rename_variables": {
+          "type": "boolean",
+          "default": true,
+          "description": "Frequency-based short identifiers."
+        },
+        "trace_map": {
+          "type": "string",
+          "description": "Emit a mapping file for stack-trace deobfuscation."
+        }
+      }
+    },
+    "check": {
+      "description": "CI-gate diagnostics for `coldluau check`. (M3)",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "disallow_cycles": {
+          "type": "boolean",
+          "default": true,
+          "description": "Require cycles fail the check."
+        },
+        "disallow_unused_modules": {
+          "type": "boolean",
+          "default": false,
+          "description": "Files unreachable from any entry point."
+        },
+        "entry_points": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "realm_analysis": {
+          "type": "boolean",
+          "default": true,
+          "description": "Error when client-reachable code requires server-only containers."
+        },
+        "early_require_diagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Flag string requires reachable from early client entry points (no wait semantics)."
+        },
+        "native_expressible": {
+          "type": "boolean",
+          "default": true,
+          "description": "Flag emitted requires that can't be native string form."
+        }
+      }
+    }
+  }
+}
