@@ -297,6 +297,59 @@
             "optimize 2"
           ]
         },
+        "remove_calls": {
+          "description": "coldluau only. Remove statement position calls to the named functions, ex: print or debug.profilebegin. Names may be dotted paths; method calls and computed callees are never matched, and a call whose value is used is left alone. Implemented.",
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "functions"
+              ],
+              "properties": {
+                "functions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "preserve_arguments_side_effects": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Keep calls whose arguments call something, since that inner call may be the point of the line"
+                }
+              }
+            }
+          ]
+        },
+        "use_get_service": {
+          "type": "boolean",
+          "default": false,
+          "description": "coldluau only. Rewrite `game.Players` into `game:GetService(\"Players\")` for the known services, which keeps working when a service is renamed or not created yet. A local named game defeats it. Implemented."
+        },
+        "dedupe_requires": {
+          "type": "boolean",
+          "default": false,
+          "description": "coldluau only. Top level `local X = require(...)` statements that resolve to the same module collapse, the later ones become aliases of the first. Skips const, annotated and multi binding locals. Implemented."
+        },
+        "inject_module_path": {
+          "type": "string",
+          "description": "coldluau only. Name of a constant defined at the top of every file that references it, holding that file's DataModel path, ex: \"@game/ReplicatedStorage/shared/util\". Warns when no mount covers the file. Implemented.",
+          "examples": [
+            "MODULE_PATH"
+          ]
+        },
+        "freeze_module": {
+          "type": "boolean",
+          "default": false,
+          "description": "coldluau only. Wrap a module's returned table in `table.freeze`, only when nothing can write to it, so field writes, rebinds and metatable patterns turn the rule off for that file. Implemented."
+        },
         "compute_expression": {
           "$ref": "#/$defs/rule",
           "description": "Fold side effect free expressions to their result. Not implemented yet, lands in M2."
