@@ -538,9 +538,13 @@ fn const_requires_rule() {
 fn unknown_rule_errors_with_milestone() {
     let tmp = fixture();
     let root = tmp.path();
-    write(root, "coldluau.toml", "[rules]\nremove_types = true\n");
+    // still planned, it needs the scope tracking that lands with M2
+    write(root, "coldluau.toml", "[rules]\nrename_variables = true\n");
     let err = Config::load_or_default(root).unwrap_err().to_string();
-    assert!(err.contains("remove_types") && err.contains("M2"), "{err}");
+    assert!(
+        err.contains("rename_variables") && err.contains("M2"),
+        "{err}"
+    );
 }
 
 #[test]
