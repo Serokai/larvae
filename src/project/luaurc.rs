@@ -85,7 +85,7 @@ mod tests {
     fn parses_jsonc_and_inherits_upward() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
-        
+
         std::fs::create_dir_all(root.join("src/deep")).unwrap();
         std::fs::write(
             root.join(".luaurc"),
