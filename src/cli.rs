@@ -31,7 +31,7 @@ enum Command {
         /// Path to coldluau.toml (defaults to ./coldluau.toml when present)
         #[arg(long)]
         config: Option<PathBuf>,
-        /// Build profile (not implemented yet, lands in M2)
+        /// Merge [profile.<name>] over the config before building
         #[arg(long)]
         profile: Option<String>,
         /// Rebuild whenever a source file changes, Ctrl-C to stop
@@ -44,6 +44,9 @@ enum Command {
         /// Path to coldluau.toml (defaults to ./coldluau.toml when present)
         #[arg(long)]
         config: Option<PathBuf>,
+        /// Merge [profile.<name>] over the config before checking
+        #[arg(long)]
+        profile: Option<String>,
     },
 
     /// Create a starter coldluau.toml for this project
@@ -126,7 +129,7 @@ fn run() -> Result<ExitCode> {
             watch,
         } => commands::process::run(&root, config, profile, watch),
 
-        Command::Check { config } => commands::check::run(&root, config),
+        Command::Check { config, profile } => commands::check::run(&root, config, profile),
 
         Command::Init => commands::init::run(&root),
 

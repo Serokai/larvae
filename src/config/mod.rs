@@ -7,6 +7,7 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 mod process;
+mod profile;
 mod requires;
 mod rules;
 
@@ -51,17 +52,31 @@ pub struct Config {
 
     #[serde(default)]
     check: Option<toml::Value>,
-
-    #[serde(default)]
-    profile: Option<toml::Value>,
 }
 
 impl Config {
     pub fn load(path: &Path) -> Result<Self> {
+        Self::load_profile(path, None)
+    }
+
+    /// Load a config, merging `[profile.<name>]` over it when one is asked for
+    pub fn load_profile(path: &Path, profile: Option<&str>) -> Result<Self> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", crate::ui::rel(path)))?;
 
-        let config: Config = toml::from_str(&text)
+        let mut raw: toml::Value = toml::from_str(&text)
+            .with_context(|| format!("invalid config in {}", crate::ui::rel(path)))?;
+
+        if let Some(name) = profile {
+            profile::apply(&mut raw, name)
+                .with_context(|| format!("--profile {name} in {}", crate::ui::rel(path)))?;
+        } else if let Some(table) = raw.as_table_mut() {
+            // no profile asked for, so the block is just inert config
+            table.remove("profile");
+        }
+
+        let config: Config = raw
+            .try_into()
             .with_context(|| format!("invalid config in {}", crate::ui::rel(path)))?;
 
         config.validate()?;
@@ -71,10 +86,16 @@ impl Config {
 
     /// Load `coldluau.toml` from `dir` if present, zero config default otherwise
     pub fn load_or_default(dir: &Path) -> Result<Self> {
+        Self::load_or_default_profile(dir, None)
+    }
+
+    pub fn load_or_default_profile(dir: &Path, profile: Option<&str>) -> Result<Self> {
         let path = dir.join("coldluau.toml");
 
         if path.exists() {
-            Self::load(&path)
+            Self::load_profile(&path, profile)
+        } else if let Some(name) = profile {
+            bail!("--profile {name} needs a coldluau.toml, there is none here")
         } else {
             Ok(Self::default())
         }
@@ -86,7 +107,6 @@ impl Config {
             ("[bundle]", &self.bundle, "M3"),
             ("[minify]", &self.minify, "M4"),
             ("[check]", &self.check, "M3"),
-            ("[profile.*]", &self.profile, "M2"),
         ];
 
         for (name, value, milestone) in unimplemented {

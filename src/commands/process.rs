@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 
 use crate::config::Config;
 use crate::pipeline::{self, Outcome};
@@ -16,12 +16,8 @@ pub fn run(
     profile: Option<String>,
     watch: bool,
 ) -> Result<ExitCode> {
-    if profile.is_some() {
-        bail!("--profile is not implemented yet (lands in M2)");
-    }
-
     let config_path = config.clone();
-    let config = load_config(root, config)?;
+    let config = load_config(root, config, profile.as_deref())?;
 
     if watch {
         return crate::commands::watch::run(root, &config, config_path);
@@ -32,11 +28,15 @@ pub fn run(
     report(&outcome, true)
 }
 
-pub(crate) fn load_config(root: &Path, explicit: Option<PathBuf>) -> Result<Config> {
+pub(crate) fn load_config(
+    root: &Path,
+    explicit: Option<PathBuf>,
+    profile: Option<&str>,
+) -> Result<Config> {
     match explicit {
-        Some(path) => Config::load(&root.join(path)),
+        Some(path) => Config::load_profile(&root.join(path), profile),
 
-        None => Config::load_or_default(root),
+        None => Config::load_or_default_profile(root, profile),
     }
 }
 
