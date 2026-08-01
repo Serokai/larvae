@@ -47,3 +47,7 @@ codegen-units = 1
 [workspace]
 members = ["."]
 exclude = ["fuzz"]
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+winreg = "0.55"

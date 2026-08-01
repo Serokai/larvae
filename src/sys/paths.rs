@@ -29,3 +29,33 @@ pub fn same_file(a: &Path, b: &Path) -> bool {
         _ => false,
     }
 }
+
+/*
+Who owns the binary we are running from, we only ever replace our own copy,
+anything a version manager pins belongs to that manager
+*/
+pub fn managing_tool(exe: &Path) -> Option<&'static str> {
+    let path = exe.to_string_lossy().to_lowercase();
+
+    for (marker, name) in [
+        (".rokit", "rokit"),
+        (".aftman", "aftman"),
+        (".foreman", "foreman"),
+        (".lpm", "lpm"),
+        (".cargo", "cargo"),
+    ] {
+        if path.contains(marker) {
+            return Some(name);
+        }
+    }
+
+    None
+}
+
+/// True when this binary is the one `self install` put in place
+pub fn is_self_installed(exe: &Path) -> bool {
+    match installed_exe() {
+        Ok(target) => same_file(exe, &target),
+        Err(_) => false,
+    }
+}
