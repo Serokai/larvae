@@ -15,6 +15,12 @@ pub struct Mount {
 pub struct MountTable {
     /// Sorted deepest-first so lookup finds the most specific mount
     mounts: Vec<Mount>,
+    /*
+    Rojo's own answer, when the project supplied one. It wins over the
+    mounts because it is what rojo actually built rather than what we
+    inferred from the project file
+    */
+    map: crate::project::sourcemap::SourceMap,
 }
 
 /// Replication/runtime classification of a DataModel location
@@ -65,11 +71,22 @@ impl MountTable {
     pub fn new(mut mounts: Vec<Mount>) -> Self {
         mounts.sort_by_key(|m| std::cmp::Reverse(m.fs.components().count()));
 
-        Self { mounts }
+        Self {
+            mounts,
+            map: Default::default(),
+        }
     }
 
+    /// Take rojo's sourcemap as the authority, mounts still cover what it misses
+    pub fn with_sourcemap(mut self, map: crate::project::sourcemap::SourceMap) -> Self {
+        self.map = map;
+
+        self
+    }
+
+    /// True when nothing at all describes the tree, mounts or sourcemap
     pub fn is_empty(&self) -> bool {
-        self.mounts.is_empty()
+        self.mounts.is_empty() && self.map.is_empty()
     }
 
     pub fn mounts(&self) -> &[Mount] {
@@ -83,6 +100,10 @@ impl MountTable {
     a deeper one is the more precise answer
     */
     pub fn fs_of(&self, segments: &[String]) -> Option<PathBuf> {
+        if let Some(base) = self.map.fs_of(segments) {
+            return Some(base.to_path_buf());
+        }
+
         let mount = self
             .mounts
             .iter()
@@ -103,6 +124,19 @@ impl MountTable {
     .server/.client markers stripped, init files collapse into their dir
     */
     pub fn dm_of(&self, fs_path: &Path) -> Option<DmPath> {
+        if let Some(segments) = self.map.dm_of(fs_path) {
+            return Some(DmPath {
+                segments: segments.to_vec(),
+                /*
+                Every node in a sourcemap has a file behind it, so the only
+                floor on a relative require is the service itself. One map
+                covers the whole tree, so everything shares a mount
+                */
+                mount_depth: 1,
+                mount: usize::MAX,
+            });
+        }
+
         let (idx, mount) = self
             .mounts
             .iter()

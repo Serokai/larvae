@@ -168,7 +168,7 @@
         },
         "sourcemap": {
           "type": "string",
-          "description": "Optional Rojo sourcemap.json to sharpen the DataModel mapping. (M2)"
+          "description": "Path to a rojo sourcemap.json. Rojo's own file to instance map, which settles the cases a project file cannot describe on its own. It wins over auto mounts and is part of the cache key, so a stale one cannot produce stale requires."
         },
         "mounts": {
           "type": "object",

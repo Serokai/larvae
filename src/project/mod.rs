@@ -2,3 +2,4 @@
 
 pub mod luaurc;
 pub mod rojo;
+pub mod sourcemap;

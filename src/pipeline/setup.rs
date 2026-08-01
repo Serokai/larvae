@@ -51,7 +51,22 @@ pub fn mount_table(
         }
     }
 
-    MountTable::new(mounts)
+    let table = MountTable::new(mounts);
+
+    // rojo's own map, when the project keeps one, wins over what we inferred
+    let Some(rel) = &config.requires.sourcemap else {
+        return table;
+    };
+
+    match crate::project::sourcemap::load(&root.join(rel), root) {
+        Ok(map) => table.with_sourcemap(map),
+
+        Err(e) => {
+            diags.push(Diag::error(&root.join(rel), format!("{e:#}")));
+
+            table
+        }
+    }
 }
 
 /// Every .luaurc in the project, aliases resolve by walking up through these
@@ -115,6 +130,7 @@ invalidates the whole cache, coarse but never stale
 */
 pub fn epoch(
     root: &Path,
+    config: &Config,
     project: Option<&Project>,
     skip: &[PathBuf],
     files: &[&[PathBuf]],
@@ -123,6 +139,10 @@ pub fn epoch(
 
     if let Some(p) = project {
         epoch.add_file(&p.path);
+    }
+
+    if let Some(rel) = &config.requires.sourcemap {
+        epoch.add_file(&root.join(rel));
     }
 
     let cfg_path = root.join("coldluau.toml");

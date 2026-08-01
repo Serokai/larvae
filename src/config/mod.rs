@@ -204,12 +204,6 @@ impl Config {
             bail!("{msg}");
         }
 
-        if self.requires.sourcemap.is_some() {
-            bail!(
-                "requires.sourcemap is not implemented yet (auto-mounts from the Rojo project file cover most cases; sourcemap support lands with M2)"
-            );
-        }
-
         for (name, value) in &self.aliases {
             validate_alias_name(name)?;
 

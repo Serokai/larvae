@@ -89,7 +89,13 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
     let luaurc = setup::luaurc_index(&root, &skip, &mut diags);
     let (to_process, to_copy) = setup::discover(&roots, config)?;
 
-    let epoch = setup::epoch(&root, project.as_ref(), &skip, &[&to_process, &to_copy]);
+    let epoch = setup::epoch(
+        &root,
+        config,
+        project.as_ref(),
+        &skip,
+        &[&to_process, &to_copy],
+    );
 
     // caching only applies when writing, check must re-report every diagnostic
     let mut cache = Cache::load(
