@@ -1,4 +1,5 @@
 pub mod check;
+pub mod detect;
 pub mod init;
 pub mod process;
 pub mod schema;

@@ -14,29 +14,80 @@ pub fn run(root: &Path) -> Result<ExitCode> {
         bail!("coldluau.toml already exists");
     }
 
-    let has_project = root.join("default.project.json").exists();
-    let project_note = if has_project {
-        "# Mounts are auto-derived from default.project.json.\n"
+    let project = crate::project::rojo::find_project(root, None)
+        .and_then(|p| crate::project::rojo::load(&p).ok());
+    let found = crate::commands::detect::scan(root, project.as_ref());
+
+    let project_note = if project.is_some() {
+        "# Mounts come from default.project.json, nothing to repeat here.\n"
     } else {
-        "# No default.project.json found: for the roblox-string target you'll need\n# [requires.mounts] or a Rojo project file.\n"
+        "# No default.project.json found, the roblox-string target needs one\n# or a [requires.mounts] table.\n"
     };
 
-    let template = format!(
+    let mut template = format!(
         "{schema}\n\
          # coldluau configuration, run `coldluau schema` for editor completion.\n\
-         {project_note}\n\
-         [process]\n\
-         input = \"src\"\n\
-         output = \"dist\"\n\n\
-         [requires]\n\
-         target = \"roblox-string\"\n",
+         {project_note}",
         schema = crate::commands::schema::directive()
     );
+
+    if !found.aliases.is_empty() {
+        template.push_str("\n[aliases]\n");
+
+        for (name, value) in &found.aliases {
+            template.push_str(&format!("{name} = \"{value}\"\n"));
+        }
+    }
+
+    template.push_str("\n[process]\n");
+    template.push_str(&match found.inputs.as_slice() {
+        [] => "input = \"src\"\n".to_string(),
+
+        [one] => format!("input = \"{}\"\n", slashed(one)),
+
+        many => {
+            let list: Vec<String> = many.iter().map(|p| format!("\"{}\"", slashed(p))).collect();
+
+            format!("input = [{}]\n", list.join(", "))
+        }
+    });
+    template.push_str("output = \"dist\"\n\n[requires]\ntarget = \"roblox-string\"\n");
+
     std::fs::write(&path, template)?;
     ui::print_success(&format!("Wrote {}", crate::ui::rel(&path)));
+    report(&found);
     ensure_gitignore(root)?;
 
     Ok(ExitCode::SUCCESS)
+}
+
+/// Say what was picked up, so nobody has to diff the file to find out
+fn report(found: &crate::commands::detect::Detected) {
+    for (name, value) in &found.aliases {
+        eprintln!("  found a package directory, added @{name} = {value}");
+    }
+
+    if !found.luaurc_aliases.is_empty() {
+        eprintln!(
+            "  .luaurc already defines @{}, coldluau uses those as they are",
+            found.luaurc_aliases.join(", @")
+        );
+    }
+
+    if found.inputs.len() > 1 {
+        eprintln!(
+            "  {} source directories, each keeps its own folder under dist",
+            found.inputs.len()
+        );
+    }
+}
+
+/// Config paths are written with forward slashes on every platform
+fn slashed(path: &Path) -> String {
+    path.components()
+        .filter_map(|c| c.as_os_str().to_str())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// Entries coldluau's outputs need ignored
