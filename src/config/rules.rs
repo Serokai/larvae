@@ -104,6 +104,12 @@ pub struct RulesConfig {
     #[serde(default)]
     pub convert_square_root_call: bool,
 
+    #[serde(default)]
+    pub remove_unused_variable: bool,
+
+    #[serde(default)]
+    pub rename_variables: bool,
+
     // --- coldluau only, no darklua rule does any of these ---
     /// Statement position calls to drop, ex: ["print", "debug.profilebegin"]
     #[serde(default)]
@@ -355,16 +361,15 @@ pub fn rule_status(name: &str) -> Option<RuleStatus> {
         | "remove_types"
         | "remove_unused_if_branch"
         | "remove_empty_do"
+        | "remove_unused_variable"
+        | "rename_variables"
         | "remove_unused_while" => Done,
         // not rules in coldluau
         "convert_require" => Elsewhere("the [requires] section handles requires"),
 
         "inject_global_value" => Elsewhere("use [defines] instead"),
 
-        "remove_spaces" => Elsewhere("use process.generator = \"dense\" (lands in M2)"),
-        // still planned, these two need real scope tracking first
-        "remove_unused_variable" | "rename_variables" => Planned("M2"),
-
+        "remove_spaces" => Elsewhere("use process.generator = \"dense\" (lands in M4)"),
         _ => return None,
     })
 }

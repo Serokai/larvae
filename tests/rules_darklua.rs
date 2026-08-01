@@ -483,9 +483,23 @@ fn method_definitions_never_gain_two_self_parameters() {
 }
 
 #[test]
-fn planned_rules_still_name_their_milestone() {
-    let tmp = project("remove_unused_variable = true");
-    let err = Config::load_or_default(tmp.path()).unwrap_err().to_string();
+fn remove_unused_variable() {
+    let after = transform(
+        "remove_unused_variable = true",
+        "local unused = 1\nlocal kept = 2\nreturn kept\n",
+    );
 
-    assert!(err.contains("M2"), "{err}");
+    assert!(!after.contains("unused"), "{after}");
+    assert!(after.contains("local kept = 2"), "{after}");
+}
+
+#[test]
+fn rename_variables() {
+    let after = transform(
+        "rename_variables = true",
+        "local counter = 1\nreturn counter\n",
+    );
+
+    assert!(!after.contains("counter"), "{after}");
+    assert!(after.contains("local a = 1"), "{after}");
 }

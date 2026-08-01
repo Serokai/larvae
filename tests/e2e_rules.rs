@@ -103,15 +103,15 @@ fn const_requires_rule() {
 }
 
 #[test]
-fn unknown_rule_errors_with_milestone() {
+fn a_name_darklua_has_but_we_do_not_says_where_it_went() {
     let tmp = fixture();
     let root = tmp.path();
 
-    // still planned, it needs the scope tracking that lands with M2
-    write(root, "coldluau.toml", "[rules]\nrename_variables = true\n");
+    // it is a real darklua name, it just is not a rule here
+    write(root, "coldluau.toml", "[rules]\nremove_spaces = true\n");
     let err = Config::load_or_default(root).unwrap_err().to_string();
     assert!(
-        err.contains("rename_variables") && err.contains("M2"),
+        err.contains("remove_spaces") && err.contains("dense"),
         "{err}"
     );
 }
@@ -178,7 +178,6 @@ fn darklua_rule_names_get_useful_errors() {
     let root = tmp.path();
 
     let cases = [
-        ("rename_variables = true", "M2"),
         ("convert_require = true", "[requires]"),
         ("inject_global_value = true", "[defines]"),
         ("remove_spaces = true", "dense"),

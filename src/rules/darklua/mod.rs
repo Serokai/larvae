@@ -19,6 +19,7 @@ mod exprs;
 mod flow;
 mod fold;
 mod interp;
+mod locals;
 mod methods;
 mod support;
 mod types;
@@ -52,6 +53,8 @@ pub fn wants(cfg: &RulesConfig) -> bool {
         || cfg.group_local_assignment
         || cfg.convert_local_function_to_assign
         || cfg.convert_square_root_call
+        || cfg.remove_unused_variable
+        || cfg.rename_variables
         || cfg.remove_attribute.as_ref().is_some_and(|r| r.enabled())
         || cfg
             .remove_interpolated_string
@@ -219,6 +222,16 @@ pub fn apply(
         edits.run("remove_debug_profiling", |e| {
             calls::remove_debug_profiling(ctx, e, r.preserve())
         });
+    }
+
+    if cfg.remove_unused_variable {
+        edits.run("remove_unused_variable", |e| {
+            locals::remove_unused_variable(ctx, e)
+        });
+    }
+
+    if cfg.rename_variables {
+        edits.run("rename_variables", |e| locals::rename_variables(ctx, e));
     }
 
     if cfg.compute_expression {

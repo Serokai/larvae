@@ -182,7 +182,7 @@ impl Config {
 
         if self.process.generator != "retain-lines" {
             bail!(
-                "generator = \"{}\" is not implemented yet (lands in M2); only \"retain-lines\" works today",
+                "generator = \"{}\" is not implemented yet (dense and readable land in M4); only \"retain-lines\" works today",
                 self.process.generator
             );
         }

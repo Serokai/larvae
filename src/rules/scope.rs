@@ -16,33 +16,102 @@ use std::collections::HashSet;
 use crate::rules::engine::RuleCtx;
 use crate::syntax::ast::*;
 
+/// One local, where it was declared and everywhere it is read
+#[derive(Debug)]
+pub struct Binding {
+    /// Token index of the name in its declaration
+    pub declared_at: u32,
+    /// Token indexes of every reference to it, a recursive call counts
+    pub uses: Vec<u32>,
+    /// The statement kind that introduced it, deletion depends on this
+    pub origin: Origin,
+}
+
+/// What introduced a local, which decides whether it is safe to remove
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    /// `local x = ...`
+    Local,
+    /// `local function f() end`
+    LocalFunction,
+    /// A function parameter, never removable on its own
+    Param,
+    /// A `for` variable, never removable on its own
+    Loop,
+}
+
+/// Everything the walk learned about names in one file
+#[derive(Debug, Default)]
+pub struct Names {
+    pub bindings: Vec<Binding>,
+    /// Token indexes of references nothing in the source bound
+    pub globals: HashSet<u32>,
+    /// Every name spelled anywhere, so a generated name can avoid all of them
+    pub taken: HashSet<String>,
+}
+
 /// Token indexes of every name reference that no enclosing scope bound
 pub fn globals(ctx: &RuleCtx) -> HashSet<u32> {
+    resolve(ctx).globals
+}
+
+/// Walk the file and work out what every name refers to
+pub fn resolve(ctx: &RuleCtx) -> Names {
     let mut b = Binder {
         ctx,
         scopes: vec![Vec::new()],
-        found: HashSet::new(),
+        out: Names::default(),
     };
 
     b.block(&ctx.chunk.block);
 
-    b.found
+    b.out
 }
 
 struct Binder<'a, 'src> {
     ctx: &'a RuleCtx<'src>,
-    scopes: Vec<Vec<&'src str>>,
-    found: HashSet<u32>,
+    /// Each scope holds the names it introduced and which binding they are
+    scopes: Vec<Vec<(&'src str, usize)>>,
+    out: Names,
 }
 
 impl<'src> Binder<'_, 'src> {
-    fn bound(&self, name: &str) -> bool {
-        self.scopes.iter().any(|s| s.contains(&name))
+    /// Innermost binding of a name, which is the one a reference means
+    fn lookup(&self, name: &str) -> Option<usize> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|s| s.iter().rev().find(|(n, _)| *n == name).map(|(_, i)| *i))
     }
 
-    fn bind(&mut self, span: TokSpan) {
+    fn bind(&mut self, span: TokSpan, origin: Origin) {
         let name = self.ctx.tok_text(span.start);
-        self.scopes.last_mut().expect("a scope is open").push(name);
+        let index = self.out.bindings.len();
+
+        self.out.bindings.push(Binding {
+            declared_at: span.start,
+            uses: Vec::new(),
+            origin,
+        });
+        self.out.taken.insert(name.to_string());
+        self.scopes
+            .last_mut()
+            .expect("a scope is open")
+            .push((name, index));
+    }
+
+    /// Charge a name reference to whatever bound it, or call it a global
+    fn reference(&mut self, span: TokSpan) {
+        let name = self.ctx.tok_text(span.start);
+        self.out.taken.insert(name.to_string());
+
+        match self.lookup(name) {
+            Some(index) => self.out.bindings[index].uses.push(span.start),
+
+            None => {
+                self.out.globals.insert(span.start);
+            }
+        }
     }
 
     fn open(&mut self) {
@@ -69,7 +138,7 @@ impl<'src> Binder<'_, 'src> {
 
         for p in &f.params {
             if !p.is_vararg {
-                self.bind(p.name);
+                self.bind(p.name, Origin::Param);
             }
         }
 
@@ -91,13 +160,13 @@ impl<'src> Binder<'_, 'src> {
                 }
 
                 for name in &n.names {
-                    self.bind(name.name);
+                    self.bind(name.name, Origin::Local);
                 }
             }
 
             // the name comes first so the function can recurse
             Stmt::LocalFunction(n) => {
-                self.bind(n.name);
+                self.bind(n.name, Origin::LocalFunction);
                 self.body(&n.body);
             }
 
@@ -154,7 +223,7 @@ impl<'src> Binder<'_, 'src> {
                 }
 
                 self.open();
-                self.bind(n.var.name);
+                self.bind(n.var.name, Origin::Loop);
 
                 for s in &n.block.stmts {
                     self.stmt(s);
@@ -171,7 +240,7 @@ impl<'src> Binder<'_, 'src> {
                 self.open();
 
                 for v in &n.vars {
-                    self.bind(v.name);
+                    self.bind(v.name, Origin::Loop);
                 }
 
                 for s in &n.block.stmts {
@@ -191,11 +260,7 @@ impl<'src> Binder<'_, 'src> {
 
     fn expr(&mut self, e: &Expr) {
         match e {
-            Expr::Name(span) => {
-                if !self.bound(self.ctx.tok_text(span.start)) {
-                    self.found.insert(span.start);
-                }
-            }
+            Expr::Name(span) => self.reference(*span),
 
             Expr::Nil(_)
             | Expr::True(_)
