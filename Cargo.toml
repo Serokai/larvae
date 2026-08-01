@@ -26,14 +26,14 @@ globset = "0.4"
 json5 = "0.4"
 notify-debouncer-full = "0.7.0"
 rayon = "1"
-regex = "1"
+regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-perl", "unicode-case"] }
 self-replace = "1"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 terminal_size = "0.4"
-toml = "0.8"
-ureq = { version = "2", features = ["json"] }
+toml = { version = "0.8", default-features = false, features = ["parse"] }
+ureq = { version = "2", default-features = false, features = ["tls", "json"] }
 walkdir = "2"
 xxhash-rust = { version = "0.8.18", features = ["xxh3"] }
 
@@ -41,8 +41,34 @@ xxhash-rust = { version = "0.8.18", features = ["xxh3"] }
 tempfile = "3"
 
 [profile.release]
-lto = "thin"
+lto = "fat"
 codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+# Cold path crates, none of these run per file so they trade speed for size
+[profile.release.package.ureq]
+opt-level = "z"
+[profile.release.package.rustls]
+opt-level = "z"
+[profile.release.package.ring]
+opt-level = "z"
+[profile.release.package.rustls-webpki]
+opt-level = "z"
+[profile.release.package.clap_builder]
+opt-level = "z"
+[profile.release.package.notify]
+opt-level = "z"
+[profile.release.package.notify-debouncer-full]
+opt-level = "z"
+[profile.release.package.json5]
+opt-level = "z"
+[profile.release.package.pest]
+opt-level = "z"
+[profile.release.package.self-replace]
+opt-level = "z"
+[profile.release.package.semver]
+opt-level = "z"
 
 [workspace]
 members = ["."]
