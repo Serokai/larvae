@@ -7,10 +7,13 @@ own in the other
 */
 
 pub mod darklua;
+pub mod defines;
 pub mod edits;
 pub mod engine;
 pub mod native;
+pub mod scope;
 
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::config::RulesConfig;
@@ -21,8 +24,8 @@ use crate::syntax::scan::RequireSite;
 pub use edits::{Conflict, Edits, Family, Rule, splice};
 
 /// True when any enabled rule needs a parse
-pub fn wants_ast(cfg: &RulesConfig) -> bool {
-    darklua::wants(cfg) || native::wants(cfg)
+pub fn wants_ast(cfg: &RulesConfig, defines: &HashMap<String, defines::Value>) -> bool {
+    !defines.is_empty() || darklua::wants(cfg) || native::wants(cfg)
 }
 
 /*
@@ -33,6 +36,7 @@ the user asked for rules we cannot run
 #[allow(clippy::too_many_arguments)]
 pub fn apply_ast_rules(
     cfg: &RulesConfig,
+    defines: &HashMap<String, defines::Value>,
     src: &str,
     lexed: &Lexed,
     require_forms: &[(RequireSite, String)],
@@ -61,6 +65,27 @@ pub fn apply_ast_rules(
         }
     };
 
+    /*
+    Resolving locals from globals costs a walk, so only pay it when there
+    are defines to look up. Without it a local named DEBUG would get
+    substituted like the global one
+    */
+    let globals = if defines.is_empty() {
+        HashSet::new()
+    } else {
+        scope::globals(&engine::RuleCtx {
+            src,
+            toks: &lexed.toks,
+            chunk: &chunk,
+            comments: &lexed.comments,
+            require_forms,
+            dm_path,
+            quote,
+            defines,
+            globals: &HashSet::new(),
+        })
+    };
+
     let ctx = engine::RuleCtx {
         src,
         toks: &lexed.toks,
@@ -69,8 +94,12 @@ pub fn apply_ast_rules(
         require_forms,
         dm_path,
         quote,
+        defines,
+        globals: &globals,
     };
 
+    // defines go first, the folding rules want the literals already in place
+    edits.run("defines", |e| defines::apply(&ctx, e));
     darklua::apply(cfg, &ctx, edits, diags, path);
     native::apply(cfg, &ctx, edits, diags, path);
 }

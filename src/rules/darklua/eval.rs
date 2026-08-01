@@ -45,6 +45,17 @@ pub fn eval(ctx: &RuleCtx, e: &Expr) -> Option<Value> {
             support::plain_string_value(ctx, *span).map(|s| Value::Str(s.to_string()))
         }
 
+        // a define is a constant, so folding and branch pruning see through it
+        Expr::Name(span) => match ctx.define_at(*span)? {
+            crate::rules::defines::Value::Bool(b) => Some(Value::Bool(*b)),
+
+            crate::rules::defines::Value::Number(n) => parse_number(n).map(Value::Num),
+
+            crate::rules::defines::Value::Str(s) => Some(Value::Str(s.clone())),
+
+            crate::rules::defines::Value::Nil => Some(Value::Nil),
+        },
+
         Expr::Paren { inner, .. } => eval(ctx, inner),
 
         Expr::Unary { op, operand, .. } => {
@@ -235,6 +246,8 @@ mod tests {
             require_forms: &[],
             dm_path: None,
             quote: '"',
+            defines: &Default::default(),
+            globals: &Default::default(),
         };
 
         let Stmt::Local(l) = &chunk.block.stmts[0] else {

@@ -359,7 +359,7 @@ pub fn rule_status(name: &str) -> Option<RuleStatus> {
         // not rules in coldluau
         "convert_require" => Elsewhere("the [requires] section handles requires"),
 
-        "inject_global_value" => Elsewhere("use [defines] instead (lands in M2)"),
+        "inject_global_value" => Elsewhere("use [defines] instead"),
 
         "remove_spaces" => Elsewhere("use process.generator = \"dense\" (lands in M2)"),
         // still planned, these two need real scope tracking first

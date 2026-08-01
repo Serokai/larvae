@@ -29,6 +29,8 @@ pub struct FileOpts {
     directive: Option<String>,
     /// Read require(script.Parent.Foo) chains as input
     instance_input: bool,
+    /// Compile time constants, empty when none are configured
+    defines: std::collections::HashMap<String, crate::rules::defines::Value>,
 }
 
 impl FileOpts {
@@ -81,6 +83,11 @@ impl FileOpts {
             append_comment,
             directive: config.rules.add_luau_directive.clone(),
             instance_input: config.requires.instance_input,
+            defines: match &config.defines {
+                Some(table) => crate::rules::defines::parse(table).map_err(anyhow::Error::msg)?,
+
+                None => Default::default(),
+            },
         })
     }
 }
@@ -231,10 +238,11 @@ pub(super) fn process_file(
             edits.push("append_text_comment", rep);
         }
 
-        if crate::rules::wants_ast(rules_cfg) {
+        if crate::rules::wants_ast(rules_cfg, &opts.defines) {
             let dm = ctx.dm.as_ref().map(|d| d.game_path());
             crate::rules::apply_ast_rules(
                 rules_cfg,
+                &opts.defines,
                 &src,
                 &lexed,
                 &site_forms,

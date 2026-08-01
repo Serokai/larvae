@@ -35,10 +35,11 @@ pub struct Config {
     #[serde(default)]
     pub rules: RulesConfig,
 
-    // parsed but unimplemented, so the error can name the milestone
+    /// Compile time constants, names replaced with literals
     #[serde(default)]
-    defines: Option<toml::Value>,
+    pub defines: Option<toml::Value>,
 
+    // parsed but unimplemented, so the error can name the milestone
     #[serde(default)]
     extensions: Option<toml::Value>,
 
@@ -81,7 +82,6 @@ impl Config {
 
     fn validate(&self) -> Result<()> {
         let unimplemented: &[(&str, &Option<toml::Value>, &str)] = &[
-            ("[defines]", &self.defines, "M2"),
             ("[[extensions]]", &self.extensions, "M3"),
             ("[bundle]", &self.bundle, "M3"),
             ("[minify]", &self.minify, "M4"),
@@ -170,6 +170,12 @@ impl Config {
             bail!(
                 "requires.indexing_style only applies when requires.target = \"roblox-instance\""
             );
+        }
+
+        if let Some(table) = &self.defines
+            && let Err(msg) = crate::rules::defines::parse(table)
+        {
+            bail!("{msg}");
         }
 
         if self.requires.sourcemap.is_some() {

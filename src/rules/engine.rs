@@ -8,6 +8,8 @@ rule never sees another rule's output. Two rules reaching for the same bytes
 is handled in `edits.rs`, the first one stands and the second is reported
 */
 
+use std::collections::{HashMap, HashSet};
+
 use crate::syntax::ast::*;
 use crate::syntax::lexer::Tok;
 use crate::syntax::scan::RequireSite;
@@ -29,6 +31,14 @@ pub struct RuleCtx<'a> {
     pub dm_path: Option<&'a str>,
     /// Quote char the config asked for, use it in generated strings
     pub quote: char,
+    /// Compile time constants from [defines], empty when none are configured
+    pub defines: &'a HashMap<String, crate::rules::defines::Value>,
+    /*
+    Token indexes of name references the source never bound. Only filled in
+    when there are defines to look up, a rule must not treat a local named
+    DEBUG as the global one
+    */
+    pub globals: &'a HashSet<u32>,
 }
 
 impl<'a> RuleCtx<'a> {
@@ -59,6 +69,15 @@ impl<'a> RuleCtx<'a> {
     /// Text of one token
     pub fn tok_text(&self, index: u32) -> &'a str {
         self.toks[index as usize].text(self.src)
+    }
+
+    /// The constant a name stands for, if it is a define and not a local
+    pub fn define_at(&self, span: TokSpan) -> Option<&crate::rules::defines::Value> {
+        if self.defines.is_empty() || !self.globals.contains(&span.start) {
+            return None;
+        }
+
+        self.defines.get(self.tok_text(span.start))
     }
 
     /*
@@ -371,6 +390,8 @@ return function(...) return ... end
             require_forms: &[],
             dm_path: None,
             quote: '"',
+            defines: &Default::default(),
+            globals: &Default::default(),
         };
 
         let Stmt::Local(local) = &chunk.block.stmts[0] else {

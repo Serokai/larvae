@@ -187,6 +187,8 @@ pub(crate) mod test_support {
             require_forms: &forms,
             dm_path: dm,
             quote: '"',
+            defines: &Default::default(),
+            globals: &Default::default(),
         };
 
         let mut edits = Edits::new();
