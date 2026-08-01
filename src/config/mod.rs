@@ -13,7 +13,7 @@ mod requires;
 mod rules;
 
 pub use overrides::{Override, lookup as override_for, parse as parse_overrides};
-pub use process::{ProcessConfig, QuoteStyle};
+pub use process::{Input, ProcessConfig, QuoteStyle};
 pub use requires::{IndexingStyle, RequiresConfig, RojoConfig, Target};
 pub use rules::{
     AppendTextComment, PreserveSideEffects, RemoveAttribute, RemoveCalls, RemoveComments,
@@ -261,7 +261,7 @@ mod tests {
         let c: Config = toml::from_str("").unwrap();
         c.validate().unwrap();
 
-        assert_eq!(c.process.input, PathBuf::from("src"));
+        assert_eq!(c.process.inputs(), vec![PathBuf::from("src")]);
         assert_eq!(c.requires.target, Target::RobloxString);
     }
 

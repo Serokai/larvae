@@ -31,19 +31,29 @@ pub fn run(root: &Path, config: &Config, config_path: Option<PathBuf>) -> Result
     let (tx, rx) = mpsc::channel();
     let mut debouncer = new_debouncer(DEBOUNCE, None, tx).context("could not start the watcher")?;
 
-    let input = root.join(&config.process.input);
-    debouncer
-        .watch(&input, RecursiveMode::Recursive)
-        .with_context(|| format!("cannot watch {}", ui::rel(&input)))?;
+    // every input root, a project can have more than one
+    for dir in config.process.inputs() {
+        let input = root.join(&dir);
+        debouncer
+            .watch(&input, RecursiveMode::Recursive)
+            .with_context(|| format!("cannot watch {}", ui::rel(&input)))?;
+    }
     // the project file and .luaurc files change resolution for every file
     for extra in watched_roots(root, config, config_path.as_deref()) {
         let _ = debouncer.watch(&extra, RecursiveMode::NonRecursive);
     }
 
+    let watching: Vec<String> = config
+        .process
+        .inputs()
+        .iter()
+        .map(|d| ui::rel(&root.join(d)))
+        .collect();
+
     eprintln!(
         "{} {} for changes, press Ctrl-C to stop",
         ui::accent("watching", color),
-        ui::rel(&input)
+        watching.join(", ")
     );
 
     let output = root.join(&config.process.output);

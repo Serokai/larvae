@@ -111,7 +111,8 @@ pub(super) struct FileOutcome {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn process_file(
     path: &Path,
-    input: &Path,
+    // where this file lands, relative to the output directory
+    dest_rel: &Path,
     output: &Path,
     resolver: &Resolver,
     opts: &FileOpts,
@@ -155,8 +156,7 @@ pub(super) fn process_file(
     client code that runs out of a Starter container cannot use absolute
     @game strings the way shared code can
     */
-    let rel = path.strip_prefix(input).unwrap_or(path);
-    let (target, style) = match crate::config::override_for(&opts.overrides, rel) {
+    let (target, style) = match crate::config::override_for(&opts.overrides, dest_rel) {
         Some(o) => (o.target, o.style.unwrap_or(resolver.style)),
 
         None => (resolver.target, resolver.style),
@@ -278,8 +278,7 @@ pub(super) fn process_file(
     let mut clashes = Vec::new();
 
     if write {
-        let rel = path.strip_prefix(input).unwrap();
-        let dest = output.join(rel);
+        let dest = output.join(dest_rel);
         let out_src = crate::rules::splice(&src, &edits, &mut clashes);
 
         if let Err(e) = write_atomic(&dest, out_src.as_bytes()) {

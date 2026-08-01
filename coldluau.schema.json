@@ -84,9 +84,19 @@
       "additionalProperties": false,
       "properties": {
         "input": {
-          "type": "string",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
           "default": "src",
-          "description": "Root scanned for source files."
+          "description": "Source directory, or a list of them. One root flattens into the output, several keep their own directory so two roots cannot collide."
         },
         "output": {
           "type": "string",

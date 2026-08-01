@@ -2,6 +2,7 @@
 
 mod file;
 mod output;
+pub mod roots;
 mod setup;
 
 use std::collections::{BTreeSet, HashSet};
@@ -61,15 +62,10 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
     let root = root
         .canonicalize()
         .with_context(|| format!("cannot resolve project root {}", root.display()))?;
-    let input = root.join(&config.process.input);
+    let roots = roots::resolve(&root, config)?;
     let output = root.join(&config.process.output);
-
-    if !input.is_dir() {
-        anyhow::bail!(
-            "input directory {} does not exist (set [process].input in coldluau.toml)",
-            crate::ui::rel(&input)
-        );
-    }
+    // the first root still stands in wherever one path is all that fits
+    let input = roots[0].dir.clone();
 
     let mut diags: Vec<Diag> = Vec::new();
 
@@ -91,7 +87,7 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
     let skip = setup::skip_dirs(&root, config);
     let mounts = setup::mount_table(&root, config, project.as_ref(), &mut diags);
     let luaurc = setup::luaurc_index(&root, &skip, &mut diags);
-    let (to_process, to_copy) = setup::discover(&input, config)?;
+    let (to_process, to_copy) = setup::discover(&roots, config)?;
 
     let epoch = setup::epoch(&root, project.as_ref(), &skip, &[&to_process, &to_copy]);
 
@@ -122,7 +118,9 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
     let fresh_hashes: Mutex<Vec<(String, u64)>> = Mutex::new(Vec::new());
 
     to_process.par_iter().for_each(|path| {
-        let rel = path.strip_prefix(&input).unwrap();
+        let Some(rel) = roots::dest_of(&roots, path) else {
+            return;
+        };
         let rel_key = rel.to_string_lossy().into_owned();
 
         let source = match std::fs::read(path) {
@@ -139,7 +137,7 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
 
         let source_hash = hash_bytes(&source);
 
-        if cache.is_fresh(&rel_key, source_hash, &output.join(rel)) {
+        if cache.is_fresh(&rel_key, source_hash, &output.join(&rel)) {
             let mut s = stats.lock().unwrap();
             s.files_processed += 1;
             s.files_cached += 1;
@@ -150,7 +148,7 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
         let mut local_diags = Vec::new();
         let rewritten = process_file(
             path,
-            &input,
+            &rel,
             &output,
             &resolver,
             &opts,
@@ -184,7 +182,9 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
 
     if write {
         to_copy.par_iter().for_each(|path| {
-            let rel = path.strip_prefix(&input).unwrap();
+            let Some(rel) = roots::dest_of(&roots, path) else {
+                return;
+            };
             let dest = output.join(rel);
 
             if let Err(e) = copy_atomic(path, &dest) {
@@ -211,7 +211,7 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
         }
 
         for path in &to_process {
-            if let Ok(rel) = path.strip_prefix(&input) {
+            if let Some(rel) = roots::dest_of(&roots, path) {
                 keep.insert(rel.to_string_lossy().into_owned());
             }
         }
@@ -229,7 +229,7 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
         let produced: HashSet<PathBuf> = to_process
             .iter()
             .chain(to_copy.iter())
-            .filter_map(|p| p.strip_prefix(&input).ok().map(|r| output.join(r)))
+            .filter_map(|p| roots::dest_of(&roots, p).map(|r| output.join(r)))
             .collect();
         stats.files_pruned = prune_output(&output, &input, &root, &produced, &mut diags);
     }

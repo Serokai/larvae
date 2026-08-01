@@ -70,27 +70,37 @@ pub fn luaurc_index(root: &Path, skip: &[PathBuf], diags: &mut Vec<Diag>) -> Lua
 }
 
 /// Split the input tree into files we transform and files we copy through
-pub fn discover(input: &Path, config: &Config) -> Result<(Vec<PathBuf>, Vec<PathBuf>)> {
+pub fn discover(
+    roots: &[super::roots::Root],
+    config: &Config,
+) -> Result<(Vec<PathBuf>, Vec<PathBuf>)> {
     let include = globset(&config.process.include)?;
     let exclude = globset(&config.process.exclude)?;
     let mut to_process: Vec<PathBuf> = Vec::new();
     let mut to_copy: Vec<PathBuf> = Vec::new();
 
-    for entry in WalkDir::new(input).into_iter().filter_map(|e| e.ok()) {
-        if !entry.file_type().is_file() {
-            continue;
-        }
+    for root in roots {
+        for entry in WalkDir::new(&root.dir).into_iter().filter_map(|e| e.ok()) {
+            if !entry.file_type().is_file() {
+                continue;
+            }
 
-        let rel = entry.path().strip_prefix(input).unwrap();
+            // a nested root owns its own files, the outer one skips them
+            if super::roots::owner(roots, entry.path()).map(|o| &o.dir) != Some(&root.dir) {
+                continue;
+            }
 
-        if exclude.is_match(rel) {
-            continue;
-        }
+            let rel = entry.path().strip_prefix(&root.dir).unwrap();
 
-        if include.is_match(rel) {
-            to_process.push(entry.path().to_owned());
-        } else if entry.file_name() != ".luaurc" {
-            to_copy.push(entry.path().to_owned());
+            if exclude.is_match(rel) {
+                continue;
+            }
+
+            if include.is_match(rel) {
+                to_process.push(entry.path().to_owned());
+            } else if entry.file_name() != ".luaurc" {
+                to_copy.push(entry.path().to_owned());
+            }
         }
     }
 

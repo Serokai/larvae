@@ -4,11 +4,36 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
+/*
+Where source comes from, one directory or several
+
+A single root flattens into the output the way it always has. Several keep
+their own directories so two roots cannot collide, which they would the
+moment both held an init.luau
+*/
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum Input {
+    One(PathBuf),
+    Many(Vec<PathBuf>),
+}
+
+impl ProcessConfig {
+    /// Configured roots, always as a list
+    pub fn inputs(&self) -> Vec<PathBuf> {
+        match &self.input {
+            Input::One(p) => vec![p.clone()],
+
+            Input::Many(list) => list.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProcessConfig {
     #[serde(default = "default_input")]
-    pub input: PathBuf,
+    pub input: Input,
 
     #[serde(default = "default_output")]
     pub output: PathBuf,
@@ -69,8 +94,8 @@ impl Default for ProcessConfig {
     }
 }
 
-fn default_input() -> PathBuf {
-    "src".into()
+fn default_input() -> Input {
+    Input::One("src".into())
 }
 fn default_output() -> PathBuf {
     "dist".into()
