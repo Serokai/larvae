@@ -6,11 +6,13 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+mod overrides;
 mod process;
 mod profile;
 mod requires;
 mod rules;
 
+pub use overrides::{Override, lookup as override_for, parse as parse_overrides};
 pub use process::{ProcessConfig, QuoteStyle};
 pub use requires::{IndexingStyle, RequiresConfig, RojoConfig, Target};
 pub use rules::{
@@ -192,6 +194,10 @@ impl Config {
             );
         }
 
+        if let Some(table) = &self.requires.overrides {
+            overrides::parse(table)?;
+        }
+
         if let Some(table) = &self.defines
             && let Err(msg) = crate::rules::defines::parse(table)
         {
@@ -202,10 +208,6 @@ impl Config {
             bail!(
                 "requires.sourcemap is not implemented yet (auto-mounts from the Rojo project file cover most cases; sourcemap support lands with M2)"
             );
-        }
-
-        if self.requires.overrides.is_some() {
-            bail!("[requires.overrides] is not implemented yet (lands in M2)");
         }
 
         for (name, value) in &self.aliases {

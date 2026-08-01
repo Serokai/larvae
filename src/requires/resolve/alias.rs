@@ -27,7 +27,7 @@ impl<'a> Resolver<'a> {
         }
 
         // instance target resolves @self on disk like any other require
-        if self.target == Target::RobloxInstance {
+        if ctx.target == Target::RobloxInstance {
             let Some(target_base) = normalize_join(&ctx.dir, rest) else {
                 diags.push(
                     Diag::error(
@@ -56,7 +56,7 @@ impl<'a> Resolver<'a> {
         offset: usize,
         diags: &mut Vec<Diag>,
     ) -> Rewrite {
-        if self.target == Target::Path {
+        if ctx.target == Target::Path {
             diags.push(
                 Diag::warning(ctx.path, format!("require(\"@game/{rest}\") cannot be converted for the path target; leaving it alone"))
                     .at(src, offset),
@@ -74,7 +74,7 @@ impl<'a> Resolver<'a> {
             self.check_container_rules(ctx, service, src, offset, diags);
         }
 
-        if self.target == Target::RobloxInstance {
+        if ctx.target == Target::RobloxInstance {
             if segments.is_empty() {
                 diags.push(
                     Diag::error(ctx.path, "require(\"@game\") has no path".to_string())
@@ -84,7 +84,7 @@ impl<'a> Resolver<'a> {
                 return Rewrite::Keep;
             }
 
-            return Rewrite::Expr(absolute_instance(self.style, self.quote, &segments));
+            return Rewrite::Expr(absolute_instance(ctx.style, self.quote, &segments));
         }
 
         Rewrite::Keep
@@ -137,7 +137,7 @@ impl<'a> Resolver<'a> {
 
             // DataModel-valued alias, textual expansion
             if let Some(dm_base) = parse_game_path(value) {
-                if self.target == Target::Path {
+                if ctx.target == Target::Path {
                     diags.push(
                         Diag::error(ctx.path, format!("require(\"{spec}\"): alias @{name} points at the DataModel ({value}), which the path target cannot express"))
                             .at(src, offset),
@@ -170,8 +170,8 @@ impl<'a> Resolver<'a> {
                 self.check_container_rules(ctx, &segments[0], src, offset, diags);
                 self.validate_dm_target_on_disk(ctx, spec, &segments, src, offset, diags);
 
-                if self.target == Target::RobloxInstance {
-                    return Rewrite::Expr(absolute_instance(self.style, self.quote, &segments));
+                if ctx.target == Target::RobloxInstance {
+                    return Rewrite::Expr(absolute_instance(ctx.style, self.quote, &segments));
                 }
 
                 return Rewrite::Replace(format!("@game/{}", segments.join("/")));

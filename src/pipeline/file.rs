@@ -31,6 +31,8 @@ pub struct FileOpts {
     instance_input: bool,
     /// Compile time constants, empty when none are configured
     defines: std::collections::HashMap<String, crate::rules::defines::Value>,
+    /// Per path target overrides, in the order the config wrote them
+    overrides: Vec<crate::config::Override>,
 }
 
 impl FileOpts {
@@ -88,6 +90,11 @@ impl FileOpts {
 
                 None => Default::default(),
             },
+            overrides: match &config.requires.overrides {
+                Some(table) => crate::config::parse_overrides(table)?,
+
+                None => Vec::new(),
+            },
         })
     }
 }
@@ -142,7 +149,20 @@ pub(super) fn process_file(
     }
 
     let scanned = scan::scan(&src, &lexed.toks);
-    let ctx = FileCtx::new(path, resolver.mounts);
+
+    /*
+    A mixed project can want a different output form per directory, ex:
+    client code that runs out of a Starter container cannot use absolute
+    @game strings the way shared code can
+    */
+    let rel = path.strip_prefix(input).unwrap_or(path);
+    let (target, style) = match crate::config::override_for(&opts.overrides, rel) {
+        Some(o) => (o.target, o.style.unwrap_or(resolver.style)),
+
+        None => (resolver.target, resolver.style),
+    };
+
+    let ctx = FileCtx::new(path, resolver.mounts, target, style);
 
     let quote = opts.quotes.char();
     let requote = opts.quotes != QuoteStyle::Preserve;

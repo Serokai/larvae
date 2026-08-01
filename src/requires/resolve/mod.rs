@@ -47,10 +47,13 @@ pub struct FileCtx<'a> {
     pub is_init: bool,
     pub kind: ScriptKind,
     pub dm: Option<DmPath>,
+    /// Output form for this file, an override can move it off the default
+    pub target: Target,
+    pub style: IndexingStyle,
 }
 
 impl<'a> FileCtx<'a> {
-    pub fn new(path: &'a Path, mounts: &MountTable) -> Self {
+    pub fn new(path: &'a Path, mounts: &MountTable, target: Target, style: IndexingStyle) -> Self {
         let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
         let is_init = script_instance_name(file_name).is_none();
         let dir = path.parent().unwrap_or(Path::new("")).to_owned();
@@ -61,6 +64,8 @@ impl<'a> FileCtx<'a> {
             is_init,
             kind: script_kind(file_name),
             dir,
+            target,
+            style,
         }
     }
 

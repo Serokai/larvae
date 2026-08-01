@@ -65,7 +65,7 @@ impl<'a> Resolver<'a> {
             }
         };
 
-        let out = match self.target {
+        let out = match ctx.target {
             Target::Path => self.emit_path_target(ctx, &node),
 
             Target::RobloxString => {
@@ -193,7 +193,7 @@ impl<'a> Resolver<'a> {
 
             push_downs(
                 &mut expr,
-                self.style,
+                ctx.style,
                 self.quote,
                 &target_dm.segments[common..],
             );
@@ -202,7 +202,7 @@ impl<'a> Resolver<'a> {
         }
 
         Some(absolute_instance(
-            self.style,
+            ctx.style,
             self.quote,
             &target_dm.segments,
         ))

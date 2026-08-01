@@ -180,12 +180,41 @@
         },
         "overrides": {
           "type": "object",
-          "description": "Per-path target overrides (glob -> target), e.g. instance requires for early-replication client code. (M2)",
+          "description": "A different require target for the paths a glob matches, relative to [process].input. First match wins. The value is a target name, or a table with target and indexing_style.",
           "additionalProperties": {
-            "enum": [
-              "roblox-string",
-              "path",
-              "roblox-instance"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "roblox-string",
+                  "roblox-instance",
+                  "path"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "target": {
+                    "type": "string",
+                    "enum": [
+                      "roblox-string",
+                      "roblox-instance",
+                      "path"
+                    ]
+                  },
+                  "indexing_style": {
+                    "type": "string",
+                    "enum": [
+                      "property",
+                      "find_first_child",
+                      "wait_for_child"
+                    ]
+                  }
+                },
+                "required": [
+                  "target"
+                ]
+              }
             ]
           }
         },
