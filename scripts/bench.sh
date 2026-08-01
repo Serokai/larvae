@@ -1,17 +1,27 @@
 #!/usr/bin/env bash
 # Benchmark coldluau against darklua on synthetic Rojo shaped projects
 #
-# coldluau does its full job (alias expansion + require rewriting to native
-# string requires), darklua gets the LIGHTEST config it supports (no rules,
-# retain_lines generator), so the comparison favors darklua, it only has to
-# parse and reprint what coldluau parses, resolves, and rewrites
+# Three workloads, because one number would be misleading
 #
-# Scenarios
+#   parse only   darklua runs no rules with the retain_lines generator, which
+#                is the least work it can be asked to do. coldluau still
+#                resolves and rewrites every require in this row, so it is
+#                doing strictly more, the row is here as darklua's floor
+#
+#   same rules   both tools run the same ten rules, retain_lines on both
+#                sides. This is the honest head to head
+#
+#   darklua      darklua's own default config, which is its default rule
+#   default      stack plus the dense generator. coldluau has no dense
+#                generator yet and no rename_variables, so there is no
+#                speedup printed for this row, it is here so nobody thinks
+#                the other rows are darklua at full stretch
+#
+# Scenarios per size
 #   cold      first build, nothing cached
 #   warm      nothing changed since the last build
 #   one edit  a single file touched, everything else cached
 #   check     validation only, this one parses every file
-#   1 big     one large module instead of many small ones
 #
 # Usage  scripts/bench.sh [file counts...]   defaults to 3000 5000
 # Env    COLDLUAU=path DARKLUA=path RUNS=n
@@ -19,13 +29,27 @@ set -euo pipefail
 
 SIZES=("${@:-3000 5000}")
 [ $# -eq 0 ] && SIZES=(3000 5000)
-RUNS="${RUNS:-5}"
+RUNS="${RUNS:-7}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 COLDLUAU="${COLDLUAU:-$ROOT/target/release/coldluau}"
 DARKLUA="${DARKLUA:-darklua}"
 
+# rules both tools implement under the same name, this is the matched workload
+MATCHED_RULES=(
+    compute_expression
+    convert_index_to_field
+    filter_after_early_return
+    remove_comments
+    remove_empty_do
+    remove_function_call_parens
+    remove_method_definition
+    remove_nil_declaration
+    remove_unused_if_branch
+    remove_unused_while
+)
+
 if [ ! -x "$COLDLUAU" ]; then
-    echo "building coldluau (release)..."
+    echo "building coldluau (release)..." >&2
     (cd "$ROOT" && cargo build --release)
 fi
 HAVE_DARKLUA=1
@@ -80,13 +104,24 @@ EOF
 [aliases]
 pkg = "@game/ReplicatedStorage/Packages"
 EOF
-    cat > darklua.json <<'EOF'
-{ "rules": [], "generator": "retain_lines" }
-EOF
+    {
+        cat coldluau.toml
+        echo
+        echo "[rules]"
+        for r in "${MATCHED_RULES[@]}"; do echo "$r = true"; done
+    } > cold-rules.toml
+
+    echo '{ "rules": [], "generator": "retain_lines" }' > dark-bare.json
+    python3 - "${MATCHED_RULES[@]}" <<'PY'
+import json, sys
+json.dump({"rules": sys.argv[1:], "generator": "retain_lines"}, open("dark-rules.json", "w"))
+PY
+    echo '{}' > dark-default.json
 }
 
-MEAN=0
-bench() { # bench <setup> <cmd...>, sets MEAN in ms
+MEDIAN=0
+FASTEST=0
+bench() { # bench <setup> <cmd...>, sets MEDIAN and FASTEST in ms
     local setup="$1"
     shift
     "$setup"
@@ -94,16 +129,17 @@ bench() { # bench <setup> <cmd...>, sets MEAN in ms
         echo "command failed:" "$@" >&2
         exit 1
     }
-    local total=0 start end ms
+    local times=() start end
     for _ in $(seq "$RUNS"); do
         "$setup"
         start=$(date +%s%N)
         "$@" >/dev/null 2>&1
         end=$(date +%s%N)
-        ms=$(((end - start) / 1000000))
-        total=$((total + ms))
+        times+=($(((end - start) / 1000000)))
     done
-    MEAN=$((total / RUNS))
+    mapfile -t times < <(printf '%s\n' "${times[@]}" | sort -n)
+    MEDIAN=${times[$((RUNS / 2))]}
+    FASTEST=${times[0]}
 }
 
 ratio() { # ratio <slow> <fast>
@@ -115,7 +151,7 @@ ratio() { # ratio <slow> <fast>
     echo "$((r / 10)).$((r % 10))x"
 }
 
-drop_cache() { rm -rf .coldluau dist; }
+drop_cache() { rm -rf .coldluau dist dist-darklua; }
 keep_cache() { :; }
 touch_one() {
     # no pipe to head here, it would SIGPIPE find and pipefail would abort
@@ -125,25 +161,39 @@ touch_one() {
     return 0
 }
 
-ROWS=()
+CACHE_ROWS=()
+HEAD_ROWS=()
+
 run_scenarios() { # run_scenarios <label>
     local label="$1"
-    bench drop_cache "$COLDLUAU" process
-    local cold=$MEAN
-    bench keep_cache "$COLDLUAU" process
-    local warm=$MEAN
-    bench touch_one "$COLDLUAU" process
-    local one=$MEAN
-    bench keep_cache "$COLDLUAU" check
-    local check=$MEAN
 
-    local dark="-" speed="-"
-    if [ "$HAVE_DARKLUA" = 1 ]; then
-        bench keep_cache "$DARKLUA" process --config darklua.json src dist-darklua
-        speed="$(ratio "$MEAN" "$cold")"
-        dark="$MEAN ms"
+    bench drop_cache "$COLDLUAU" process
+    local cold=$MEDIAN
+    bench keep_cache "$COLDLUAU" process
+    local warm=$MEDIAN
+    bench touch_one "$COLDLUAU" process
+    local one=$MEDIAN
+    bench keep_cache "$COLDLUAU" check
+    local check=$MEDIAN
+    CACHE_ROWS+=("$label|${cold} ms|${warm} ms|${one} ms|${check} ms")
+
+    if [ "$HAVE_DARKLUA" = 0 ]; then
+        return
     fi
-    ROWS+=("$label|${cold} ms|${warm} ms|${one} ms|${check} ms|${dark}|$speed")
+
+    # parse only, darklua's floor
+    bench drop_cache "$DARKLUA" process --config dark-bare.json src dist-darklua
+    HEAD_ROWS+=("$label|parse only|${cold} ms|${MEDIAN} ms|$(ratio "$MEDIAN" "$cold")")
+
+    # same ten rules on both sides
+    bench drop_cache "$COLDLUAU" process --config cold-rules.toml
+    local cold_rules=$MEDIAN
+    bench drop_cache "$DARKLUA" process --config dark-rules.json src dist-darklua
+    HEAD_ROWS+=("$label|same rules|${cold_rules} ms|${MEDIAN} ms|$(ratio "$MEDIAN" "$cold_rules")")
+
+    # darklua's own default, which coldluau cannot match yet
+    bench drop_cache "$DARKLUA" process --config dark-default.json src dist-darklua
+    HEAD_ROWS+=("$label|darklua default|n/a|${MEDIAN} ms|-")
 }
 
 for size in "${SIZES[@]}"; do
@@ -171,18 +221,57 @@ for i in range(20000):
 lines.append('return { M, pkg }')
 open("src/mod0/sub0.luau", "w").write("\n".join(lines) + "\n")
 PY
-echo "  big module is $(wc -c < src/mod0/sub0.luau) bytes" >&2
+BIG_BYTES=$(wc -c < src/mod0/sub0.luau)
+echo "  big module is $BIG_BYTES bytes" >&2
 run_scenarios "1 big"
 
+# --- report ------------------------------------------------------------------
+cd "$ROOT"
 echo
-echo "coldluau does full require rewriting, darklua runs no rules and only parses and prints"
-echo "check parses every file, darklua has no cache so warm and one edit are coldluau only"
+echo "machine: $(nproc) cores, $RUNS runs per cell, median reported"
+[ "$HAVE_DARKLUA" = 1 ] && echo "versions: $("$COLDLUAU" --version), $("$DARKLUA" --version)"
 echo
-printf "| %-6s | %-8s | %-8s | %-8s | %-8s | %-9s | %-7s |\n" \
-    "Files" "cold" "warm" "one edit" "check" "darklua" "speedup"
-printf "|%s|%s|%s|%s|%s|%s|%s|\n" \
-    "-------:" "---------:" "---------:" "---------:" "---------:" "----------:" "--------:"
-for row in "${ROWS[@]}"; do
-    IFS='|' read -r f c w o ch d s <<<"$row"
-    printf "| %6s | %8s | %8s | %8s | %8s | %9s | %7s |\n" "$f" "$c" "$w" "$o" "$ch" "$d" "$s"
+echo "coldluau incremental build, darklua has no cache so these are ours alone"
+echo
+printf "| %-6s | %-8s | %-8s | %-8s | %-8s |\n" "Files" "cold" "warm" "one edit" "check"
+printf "|%s|%s|%s|%s|%s|\n" "-------:" "---------:" "---------:" "---------:" "---------:"
+for row in "${CACHE_ROWS[@]}"; do
+    IFS='|' read -r f c w o ch <<<"$row"
+    printf "| %6s | %8s | %8s | %8s | %8s |\n" "$f" "$c" "$w" "$o" "$ch"
 done
+
+if [ "$HAVE_DARKLUA" = 1 ]; then
+    echo
+    echo "head to head, both cold, same input tree"
+    echo
+    printf "| %-6s | %-15s | %-9s | %-9s | %-7s |\n" \
+        "Files" "workload" "coldluau" "darklua" "speedup"
+    printf "|%s|%s|%s|%s|%s|\n" "-------:" ":----------------" "----------:" "----------:" "--------:"
+    for row in "${HEAD_ROWS[@]}"; do
+        IFS='|' read -r f w c d s <<<"$row"
+        printf "| %6s | %-15s | %9s | %9s | %7s |\n" "$f" "$w" "$c" "$d" "$s"
+    done
+    echo
+    echo "parse only    darklua runs no rules, coldluau still rewrites every require"
+    echo "same rules    both run ${#MATCHED_RULES[@]} matching rules with retain_lines"
+    echo "darklua default   darklua's default stack plus its dense generator, coldluau"
+    echo "                  has neither yet so no speedup is claimed on that row"
+    echo
+    echo "darklua can convert requires with a rojo sourcemap, that is not enabled here"
+    echo "because it needs a separate rojo run, so the require work is coldluau only"
+fi
+
+if [ -x "$COLDLUAU" ]; then
+    cl_size=$(stat -c%s "$COLDLUAU")
+    echo
+    if [ "$HAVE_DARKLUA" = 1 ]; then
+        dl_bin="$(command -v "$DARKLUA")"
+        tmp_dl="$WORK/darklua-stripped"
+        cp "$dl_bin" "$tmp_dl" && strip "$tmp_dl" 2>/dev/null || true
+        dl_size=$(stat -c%s "$tmp_dl")
+        printf "binary size, both stripped: coldluau %s KB, darklua %s KB\n" \
+            $((cl_size / 1024)) $((dl_size / 1024))
+    else
+        printf "binary size: coldluau %s KB\n" $((cl_size / 1024))
+    fi
+fi
