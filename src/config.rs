@@ -159,6 +159,9 @@ pub struct RulesConfig {
     #[serde(default)]
     pub remove_continue: bool,
 
+    #[serde(default)]
+    pub remove_empty_do: bool,
+
     // --- darklua parity, tier two, needs the evaluator --------------------
     #[serde(default)]
     pub remove_assertions: Option<PreserveSideEffects>,
@@ -400,7 +403,7 @@ pub fn rule_status(name: &str) -> Option<RuleStatus> {
     use RuleStatus::*;
 
     Some(match name {
-        // implemented, coldluau's own
+        // coldluau rules
         "const_requires"
         | "remove_comments"
         | "append_text_comment"
@@ -410,7 +413,7 @@ pub fn rule_status(name: &str) -> Option<RuleStatus> {
         | "dedupe_requires"
         | "inject_module_path"
         | "freeze_module" => Done,
-        // darklua parity, all running on the shared ast engine
+        // darklua parity lives in ast engine
         "compute_expression"
         | "convert_function_to_assignment"
         | "convert_index_to_field"
@@ -434,13 +437,14 @@ pub fn rule_status(name: &str) -> Option<RuleStatus> {
         | "remove_nil_declaration"
         | "remove_types"
         | "remove_unused_if_branch"
+        | "remove_empty_do"
         | "remove_unused_while" => Done,
-        // these are not rules in coldluau
+        // not rules in coldluau
         "convert_require" => Elsewhere("the [requires] section handles requires"),
         "inject_global_value" => Elsewhere("use [defines] instead (lands in M2)"),
         "remove_spaces" => Elsewhere("use process.generator = \"dense\" (lands in M2)"),
         // still planned, these two need real scope tracking first
-        "remove_empty_do" | "remove_unused_variable" | "rename_variables" => Planned("M2"),
+        "remove_unused_variable" | "rename_variables" => Planned("M2"),
         _ => return None,
     })
 }

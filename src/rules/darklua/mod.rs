@@ -46,6 +46,7 @@ pub fn wants(cfg: &RulesConfig) -> bool {
         || cfg.compute_expression
         || cfg.remove_unused_if_branch
         || cfg.remove_unused_while
+        || cfg.remove_empty_do
         || cfg.remove_nil_declaration
         || cfg.group_local_assignment
         || cfg.convert_local_function_to_assign
@@ -146,6 +147,10 @@ pub fn apply(
     }
     if cfg.remove_unused_if_branch {
         flow::remove_unused_if_branch(ctx, edits);
+    }
+
+    if cfg.remove_empty_do {
+        flow::remove_empty_do(ctx, edits);
     }
 
     if let Some(r) = &cfg.remove_assertions

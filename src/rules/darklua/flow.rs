@@ -51,15 +51,18 @@ pub fn remove_unused_while(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         ctx: &'a RuleCtx<'b>,
         edits: &'a mut Vec<Edit>,
     }
+
     impl Visit for V<'_, '_> {
         fn stmt(&mut self, s: &Stmt) {
             let Stmt::While(w) = s else { return };
             let Some(v) = eval::eval(self.ctx, &w.cond) else {
                 return;
             };
+
             if v.truthy() {
                 return;
             }
+
             self.ctx.delete_keep_lines(w.span, self.edits);
         }
     }
@@ -81,6 +84,7 @@ pub fn remove_continue(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         ctx: &'a RuleCtx<'b>,
         edits: &'a mut Vec<Edit>,
     }
+
     impl Visit for V<'_, '_> {
         fn stmt(&mut self, s: &Stmt) {
             let (block, span) = match s {
@@ -89,28 +93,36 @@ pub fn remove_continue(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
                 Stmt::GenericFor(n) => (&n.block, n.span),
                 _ => return,
             };
+
             rewrite(self.ctx, block, span, self.edits);
         }
     }
+
     walk_chunk(ctx.chunk, &mut V { ctx, edits });
 }
 
 fn rewrite(ctx: &RuleCtx, block: &Block, span: TokSpan, edits: &mut Vec<Edit>) {
     let mut continues = Vec::new();
     let mut has_break = false;
+
     scan_level(block, &mut continues, &mut has_break);
+
     if continues.is_empty() || has_break {
         return;
     }
+
     let Some(do_tok) = block.span.start.checked_sub(1) else {
         return;
     };
+
     let end_tok = span.end - 1;
     if ctx.tok_text(do_tok) != "do" || ctx.tok_text(end_tok) != "end" {
         return;
     }
+
     insert(tok_bytes(ctx, do_tok).1, " repeat", edits);
     insert(tok_bytes(ctx, end_tok).0, "until true ", edits);
+
     for c in continues {
         ctx.replace(c, "break".to_string(), edits);
     }
@@ -124,8 +136,11 @@ fn scan_level(b: &Block, continues: &mut Vec<TokSpan>, has_break: &mut bool) {
     for s in &b.stmts {
         match s {
             Stmt::Continue(span) => continues.push(*span),
+
             Stmt::Break(_) => *has_break = true,
+
             Stmt::Do(d) => scan_level(&d.block, continues, has_break),
+
             Stmt::If(n) => {
                 for (_, body) in &n.branches {
                     scan_level(body, continues, has_break);
@@ -151,6 +166,7 @@ pub fn remove_unused_if_branch(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         ctx: &'a RuleCtx<'b>,
         edits: &'a mut Vec<Edit>,
     }
+
     impl Visit for V<'_, '_> {
         fn stmt(&mut self, s: &Stmt) {
             if let Stmt::If(n) = s {
@@ -158,6 +174,7 @@ pub fn remove_unused_if_branch(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
             }
         }
     }
+
     walk_chunk(ctx.chunk, &mut V { ctx, edits });
 }
 
@@ -166,6 +183,7 @@ fn branch_keyword(ctx: &RuleCtx, n: &If, i: usize) -> Option<u32> {
     if i == 0 {
         return (ctx.tok_text(n.span.start) == "if").then_some(n.span.start);
     }
+
     let idx = n.branches[i].0.span().start.checked_sub(1)?;
     (ctx.tok_text(idx) == "elseif").then_some(idx)
 }
@@ -179,12 +197,14 @@ fn branch_then(ctx: &RuleCtx, n: &If, i: usize) -> Option<u32> {
 fn prune(ctx: &RuleCtx, n: &If, edits: &mut Vec<Edit>) {
     let mut falsy = vec![false; n.branches.len()];
     let mut truthy_at = None;
+
     for (i, (cond, _)) in n.branches.iter().enumerate() {
         match eval::eval(ctx, cond) {
             Some(v) if v.truthy() => {
                 truthy_at = Some(i);
                 break;
             }
+
             Some(_) => falsy[i] = true,
             None => {}
         }
@@ -192,6 +212,7 @@ fn prune(ctx: &RuleCtx, n: &If, edits: &mut Vec<Edit>) {
     let survivors: Vec<usize> = (0..n.branches.len())
         .filter(|&i| !falsy[i] && truthy_at.is_none_or(|t| i <= t))
         .collect();
+
     if survivors.len() == n.branches.len() && truthy_at.is_none() {
         // nothing is known, leave the statement alone
         return;
@@ -201,6 +222,7 @@ fn prune(ctx: &RuleCtx, n: &If, edits: &mut Vec<Edit>) {
     if ctx.tok_text(end_tok) != "end" {
         return;
     }
+
     let if_start = tok_bytes(ctx, n.span.start).0;
 
     // every branch is dead, the else block is all that is left
@@ -210,9 +232,11 @@ fn prune(ctx: &RuleCtx, n: &If, edits: &mut Vec<Edit>) {
                 let Some(else_tok) = block.span.start.checked_sub(1) else {
                     return;
                 };
+
                 if ctx.tok_text(else_tok) != "else" {
                     return;
                 }
+
                 unwrap_block(
                     ctx,
                     block,
@@ -222,6 +246,7 @@ fn prune(ctx: &RuleCtx, n: &If, edits: &mut Vec<Edit>) {
                     edits,
                 );
             }
+
             None => ctx.delete_keep_lines(n.span, edits),
         }
         return;
@@ -240,6 +265,7 @@ fn prune(ctx: &RuleCtx, n: &If, edits: &mut Vec<Edit>) {
             end_tok,
             edits,
         );
+
         return;
     }
 
@@ -248,12 +274,15 @@ fn prune(ctx: &RuleCtx, n: &If, edits: &mut Vec<Edit>) {
         if survivors.contains(&i) {
             continue;
         }
+
         let Some(kw) = branch_keyword(ctx, n, i) else {
             continue;
         };
+
         let to = ctx.bytes(n.branches[i].1.span).1;
         ctx.delete_bytes_keep_lines(tok_bytes(ctx, kw).0, to, edits);
     }
+
     if truthy_at.is_some()
         && let Some(block) = &n.else_block
         && let Some(else_tok) = block.span.start.checked_sub(1)
@@ -262,6 +291,7 @@ fn prune(ctx: &RuleCtx, n: &If, edits: &mut Vec<Edit>) {
         let to = ctx.bytes(block.span).1;
         ctx.delete_bytes_keep_lines(tok_bytes(ctx, else_tok).0, to, edits);
     }
+
     // the first branch left standing has to spell itself `if`
     if let Some(&first) = survivors.first()
         && first > 0
@@ -286,6 +316,7 @@ fn unwrap_block(
 ) {
     let body_end = ctx.bytes(block.span).1;
     let (end_a, end_b) = tok_bytes(ctx, end_tok);
+
     if support::declares_local(block) {
         support::replace_keep_lines(ctx, if_start, head_end, "do", edits);
         ctx.delete_bytes_keep_lines(body_end, end_a, edits);
@@ -295,10 +326,41 @@ fn unwrap_block(
     }
 }
 
+/*
+remove_empty_do, drop `do end` blocks that contain nothing
+*/
+pub fn remove_empty_do(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
+    struct V<'a, 'b> {
+        ctx: &'a RuleCtx<'b>,
+        edits: &'a mut Vec<Edit>,
+    }
+
+    impl Visit for V<'_, '_> {
+        fn stmt(&mut self, s: &Stmt) {
+            let Stmt::Do(d) = s else { return };
+            if d.block.stmts.is_empty() {
+                self.ctx.delete_keep_lines(d.span, self.edits);
+            }
+        }
+    }
+
+    walk_chunk(ctx.chunk, &mut V { ctx, edits });
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::testing::{assert_lines_kept, run};
     use super::*;
+
+    #[test]
+    fn empty_do_blocks_go() {
+        assert_eq!(run("do end\nprint(1)\n", remove_empty_do), "\nprint(1)\n");
+        // strict definition, a semicolon means someone typed something
+        let src = "do ; end\n";
+        assert_eq!(run(src, remove_empty_do), src);
+        // nested empties shed one layer per pass, the outer survives this run
+        assert_eq!(run("do do end end\n", remove_empty_do), "do  end\n");
+    }
 
     #[test]
     fn dead_statements_after_an_early_return_go() {

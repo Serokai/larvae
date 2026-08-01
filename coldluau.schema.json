@@ -466,8 +466,9 @@
           ]
         },
         "remove_empty_do": {
-          "$ref": "#/$defs/rule",
-          "description": "Remove empty do end blocks. Not implemented yet, lands in M2."
+          "type": "boolean",
+          "default": false,
+          "description": "Drop `do end` blocks that contain nothing. A lone semicolon counts as content. Nested empties shed one layer per run. Implemented."
         },
         "remove_floor_division": {
           "type": "boolean",
