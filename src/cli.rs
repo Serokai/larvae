@@ -79,23 +79,35 @@ fn run() -> Result<ExitCode> {
 
     if cli.help {
         // sub -h prints that subcommand's help, bare -h gets the fancy layout
-        if let Some(name) = matches.subcommand_name() {
-            let mut cmd = Cli::command().styles(ui::help_styles());
+        let mut chain = Vec::new();
+        let mut level = &matches;
 
-            let sub = cmd
-                .find_subcommand_mut(name)
-                .expect("parsed subcommand exists");
+        // follow the whole path so `self update -h` lands on update, not self
+        while let Some((name, sub)) = level.subcommand() {
+            chain.push(name.to_string());
+            level = sub;
+        }
 
-            if let Err(e) = sub.print_help()
-                && e.kind() != std::io::ErrorKind::BrokenPipe
-            {
-                return Err(e.into());
-            }
+        if chain.is_empty() {
+            print_fancy_help(ui::want_color())?;
 
             return Ok(ExitCode::SUCCESS);
         }
 
-        print_fancy_help(ui::want_color())?;
+        let mut cmd = Cli::command().styles(ui::help_styles());
+        let mut target = &mut cmd;
+
+        for name in &chain {
+            target = target
+                .find_subcommand_mut(name)
+                .expect("parsed subcommand exists");
+        }
+
+        if let Err(e) = target.print_help()
+            && e.kind() != std::io::ErrorKind::BrokenPipe
+        {
+            return Err(e.into());
+        }
 
         return Ok(ExitCode::SUCCESS);
     }
