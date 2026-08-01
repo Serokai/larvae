@@ -7,6 +7,7 @@ use anyhow::{Result, bail};
 
 use crate::config::Config;
 use crate::pipeline::{self, Outcome};
+use crate::rules::Family;
 use crate::ui;
 
 pub fn run(
@@ -69,6 +70,21 @@ pub(crate) fn report(outcome: &Outcome, wrote: bool) -> Result<ExitCode> {
         s.requires_rewritten,
         s.requires_dynamic,
     );
+
+    /*
+    Only the families that did something get a line, a project running no
+    rules sees the same one line summary it always did
+    */
+    for (family, label) in [
+        (Family::Native, "native rules applied"),
+        (Family::Extension, "extension rules applied"),
+    ] {
+        let n = s.applied(family);
+
+        if n > 0 {
+            eprintln!("  {}: {n}", ui::accent(label, color));
+        }
+    }
 
     if let Some(bp) = &outcome.build_project {
         eprintln!(

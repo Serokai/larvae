@@ -18,6 +18,7 @@ use notify_debouncer_full::notify::event::{EventKind, ModifyKind};
 
 use crate::config::Config;
 use crate::pipeline;
+use crate::rules::Family;
 use crate::ui;
 
 /// Coalesce bursts of editor writes into one rebuild
@@ -103,8 +104,20 @@ fn build_once(root: &Path, config: &Config, color: bool) {
                     s.files_processed
                 ));
             } else {
+                let mut rules = String::new();
+
+                for (family, label) in
+                    [(Family::Native, "native"), (Family::Extension, "extension")]
+                {
+                    let n = s.applied(family);
+
+                    if n > 0 {
+                        rules.push_str(&format!(", {n} {label} rule(s) applied"));
+                    }
+                }
+
                 ui::print_success(&format!(
-                    "{} file(s), {} require(s) rewritten{cached}{pruned}",
+                    "{} file(s), {} require(s) rewritten{rules}{cached}{pruned}",
                     s.files_processed, s.requires_rewritten
                 ));
             }
