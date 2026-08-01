@@ -17,10 +17,13 @@ pub fn apply(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     let Some(Stmt::Return(ret)) = stmts.iter().rev().find(|s| !matches!(s, Stmt::Empty(_))) else {
         return;
     };
+
     if ret.values.len() != 1 {
         return;
     }
+
     let value = &ret.values[0];
+
     match value {
         // returning the literal directly, nothing else can reach it
         Expr::Table { span, .. } => {
@@ -28,13 +31,17 @@ pub fn apply(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
             edits.push((start, start, "table.freeze(".to_string()));
             edits.push((end, end, ")".to_string()));
         }
+
         Expr::Name(name_span) => {
             let name = name_text(ctx, *name_span);
+
             if !defined_once_as_table(ctx, name) || is_touched(ctx, name) {
                 return;
             }
+
             ctx.replace(*name_span, format!("table.freeze({name})"), edits);
         }
+
         _ => {}
     }
 }
@@ -42,25 +49,31 @@ pub fn apply(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
 /// The name has exactly one top level definition and it is a table literal
 fn defined_once_as_table(ctx: &RuleCtx, name: &str) -> bool {
     let mut found = false;
+
     for stmt in &ctx.chunk.block.stmts {
         let Stmt::Local(local) = stmt else {
             continue;
         };
+
         if !local.names.iter().any(|b| name_text(ctx, b.name) == name) {
             continue;
         }
+
         // redefined, the returned one may not be the literal
         if found {
             return false;
         }
+
         if local.names.len() != 1
             || local.values.len() != 1
             || !matches!(local.values[0], Expr::Table { .. })
         {
             return false;
         }
+
         found = true;
     }
+
     found
 }
 
@@ -71,7 +84,9 @@ fn is_touched(ctx: &RuleCtx, name: &str) -> bool {
         name,
         touched: false,
     };
+
     engine::walk_chunk(ctx.chunk, &mut watch);
+
     watch.touched
 }
 
@@ -86,8 +101,11 @@ impl Watch<'_, '_> {
     fn rooted_at_name(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Name(span) => name_text(self.ctx, *span) == self.name,
+
             Expr::Index { object, .. } => self.rooted_at_name(object),
+
             Expr::Paren { inner, .. } => self.rooted_at_name(inner),
+
             _ => false,
         }
     }
@@ -97,6 +115,7 @@ impl Watch<'_, '_> {
             watch: &'b Watch<'c, 'src>,
             found: bool,
         }
+
         impl Visit for Mentions<'_, '_, '_> {
             fn expr(&mut self, expr: &Expr) {
                 if let Expr::Name(span) = expr
@@ -106,11 +125,14 @@ impl Watch<'_, '_> {
                 }
             }
         }
+
         let mut mentions = Mentions {
             watch: self,
             found: false,
         };
+
         engine::walk_expr(expr, &mut mentions);
+
         mentions.found
     }
 }
@@ -124,6 +146,7 @@ impl Visit for Watch<'_, '_> {
                     self.touched = true;
                 }
             }
+
             // `function M.foo()` is a field write wearing a different hat
             Stmt::Function(f) => {
                 self.touched |= f
@@ -131,6 +154,7 @@ impl Visit for Watch<'_, '_> {
                     .first()
                     .is_some_and(|p| name_text(self.ctx, *p) == self.name);
             }
+
             _ => {}
         }
     }
@@ -148,6 +172,7 @@ impl Visit for Watch<'_, '_> {
                     self.touched = true;
                 }
             }
+
             Expr::Index {
                 object,
                 key: IndexKey::Field(field),
@@ -156,6 +181,7 @@ impl Visit for Watch<'_, '_> {
                 self.touched |=
                     name_text(self.ctx, *field) == "__index" && self.rooted_at_name(object);
             }
+
             _ => {}
         }
     }

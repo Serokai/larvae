@@ -25,6 +25,7 @@ pub fn installed_exe() -> Result<PathBuf> {
 pub fn same_file(a: &Path, b: &Path) -> bool {
     match (a.canonicalize(), b.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
+
         _ => false,
     }
 }

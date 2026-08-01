@@ -43,14 +43,17 @@ impl<'a> RuleCtx<'a> {
                 .unwrap_or(self.src.len() as u32);
             return (at, at);
         }
+
         let first = &self.toks[span.start as usize];
         let last = &self.toks[span.end as usize - 1];
+
         (first.start, last.end)
     }
 
     /// Source text covered by a token span
     pub fn text(&self, span: TokSpan) -> &'a str {
         let (a, b) = self.bytes(span);
+
         &self.src[a as usize..b as usize]
     }
 
@@ -92,6 +95,7 @@ before their statements and statements before their expressions
 pub trait Visit {
     fn block(&mut self, _b: &Block) {}
     fn stmt(&mut self, _s: &Stmt) {}
+
     fn expr(&mut self, _e: &Expr) {}
 }
 
@@ -101,6 +105,7 @@ pub fn walk_chunk(chunk: &Chunk, v: &mut impl Visit) {
 
 pub fn walk_block(b: &Block, v: &mut impl Visit) {
     v.block(b);
+
     for s in &b.stmts {
         walk_stmt(s, v);
     }
@@ -108,6 +113,7 @@ pub fn walk_block(b: &Block, v: &mut impl Visit) {
 
 pub fn walk_stmt(s: &Stmt, v: &mut impl Visit) {
     v.stmt(s);
+
     match s {
         Stmt::Empty(_) | Stmt::Break(_) | Stmt::Continue(_) | Stmt::TypeAlias(_) => {}
         Stmt::Local(n) => {
@@ -115,49 +121,65 @@ pub fn walk_stmt(s: &Stmt, v: &mut impl Visit) {
                 walk_expr(e, v);
             }
         }
+
         Stmt::Assign(n) => {
             for e in &n.targets {
                 walk_expr(e, v);
             }
+
             for e in &n.values {
                 walk_expr(e, v);
             }
         }
+
         Stmt::Call(e, _) => walk_expr(e, v),
+
         Stmt::Do(n) => walk_block(&n.block, v),
+
         Stmt::While(n) => {
             walk_expr(&n.cond, v);
             walk_block(&n.block, v);
         }
+
         Stmt::Repeat(n) => {
             walk_block(&n.block, v);
             walk_expr(&n.cond, v);
         }
+
         Stmt::If(n) => {
             for (cond, body) in &n.branches {
                 walk_expr(cond, v);
                 walk_block(body, v);
             }
+
             if let Some(e) = &n.else_block {
                 walk_block(e, v);
             }
         }
+
         Stmt::NumericFor(n) => {
             walk_expr(&n.start, v);
             walk_expr(&n.limit, v);
+
             if let Some(step) = &n.step {
                 walk_expr(step, v);
             }
+
             walk_block(&n.block, v);
         }
+
         Stmt::GenericFor(n) => {
             for e in &n.exprs {
                 walk_expr(e, v);
             }
+
             walk_block(&n.block, v);
         }
+
         Stmt::Function(n) => walk_block(&n.body.block, v),
+
         Stmt::LocalFunction(n) => walk_block(&n.body.block, v),
+
         Stmt::Return(n) => {
             for e in &n.values {
                 walk_expr(e, v);
@@ -168,6 +190,7 @@ pub fn walk_stmt(s: &Stmt, v: &mut impl Visit) {
 
 pub fn walk_expr(e: &Expr, v: &mut impl Visit) {
     v.expr(e);
+
     match e {
         Expr::Nil(_)
         | Expr::True(_)
@@ -178,11 +201,14 @@ pub fn walk_expr(e: &Expr, v: &mut impl Visit) {
         | Expr::InterpString(_)
         | Expr::Name(_) => {}
         Expr::Function { body, .. } => walk_block(&body.block, v),
+
         Expr::Table { fields, .. } => {
             for f in fields {
                 match f {
                     TableField::Positional(e) => walk_expr(e, v),
+
                     TableField::Named { value, .. } => walk_expr(value, v),
+
                     TableField::Computed { key, value } => {
                         walk_expr(key, v);
                         walk_expr(value, v);
@@ -190,30 +216,39 @@ pub fn walk_expr(e: &Expr, v: &mut impl Visit) {
                 }
             }
         }
+
         Expr::Binary { lhs, rhs, .. } => {
             walk_expr(lhs, v);
             walk_expr(rhs, v);
         }
+
         Expr::Unary { operand, .. } => walk_expr(operand, v),
+
         Expr::Paren { inner, .. } => walk_expr(inner, v),
+
         Expr::Index { object, key, .. } => {
             walk_expr(object, v);
+
             if let IndexKey::Computed(k) = key {
                 walk_expr(k, v);
             }
         }
+
         Expr::Call { func, args, .. } => {
             walk_expr(func, v);
+
             match args {
                 CallArgs::Paren(list) => {
                     for a in list {
                         walk_expr(a, v);
                     }
                 }
+
                 CallArgs::Table(t) => walk_expr(t, v),
                 CallArgs::Str(_) => {}
             }
         }
+
         Expr::IfElse {
             branches,
             else_value,
@@ -223,8 +258,10 @@ pub fn walk_expr(e: &Expr, v: &mut impl Visit) {
                 walk_expr(c, v);
                 walk_expr(val, v);
             }
+
             walk_expr(else_value, v);
         }
+
         Expr::TypeAssert { expr, .. } => walk_expr(expr, v),
     }
 }
@@ -258,22 +295,27 @@ return function(...) return ... end
             exprs: usize,
             blocks: usize,
         }
+
         impl Visit for Counter {
             fn block(&mut self, _b: &Block) {
                 self.blocks += 1;
             }
+
             fn stmt(&mut self, _s: &Stmt) {
                 self.stmts += 1;
             }
+
             fn expr(&mut self, _e: &Expr) {
                 self.exprs += 1;
             }
         }
+
         let mut c = Counter {
             stmts: 0,
             exprs: 0,
             blocks: 0,
         };
+
         walk_chunk(&chunk, &mut c);
         // the exact counts matter less than nothing being skipped
         assert!(c.blocks >= 5, "blocks {}", c.blocks);
@@ -286,6 +328,7 @@ return function(...) return ... end
         let src = "local x = 1 + 2\n";
         let lexed = lexer::lex(src).unwrap();
         let chunk = parser::parse(src, &lexed.toks).unwrap();
+
         let ctx = RuleCtx {
             src,
             toks: &lexed.toks,
@@ -295,13 +338,16 @@ return function(...) return ... end
             dm_path: None,
             quote: '"',
         };
+
         let Stmt::Local(local) = &chunk.block.stmts[0] else {
             panic!()
         };
+
         assert_eq!(ctx.text(local.span), "local x = 1 + 2");
         let Some(Expr::Binary { span, .. }) = local.values.first() else {
             panic!()
         };
+
         assert_eq!(ctx.text(*span), "1 + 2");
     }
 }

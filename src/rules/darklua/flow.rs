@@ -24,24 +24,32 @@ pub fn filter_after_early_return(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         ctx: &'a RuleCtx<'b>,
         edits: &'a mut Vec<Edit>,
     }
+
     impl Visit for V<'_, '_> {
         fn block(&mut self, b: &Block) {
             for (i, s) in b.stmts.iter().enumerate() {
                 let Stmt::Do(d) = s else { continue };
+
                 if !matches!(last_real(&d.block), Some(Stmt::Return(_))) {
                     continue;
                 }
+
                 let rest = &b.stmts[i + 1..];
+
                 if rest.is_empty() || rest.iter().any(|s| matches!(s, Stmt::TypeAlias(_))) {
                     return;
                 }
+
                 let from = self.ctx.bytes(rest[0].span()).0;
                 let to = self.ctx.bytes(rest[rest.len() - 1].span()).1;
+
                 self.ctx.delete_bytes_keep_lines(from, to, self.edits);
+
                 return;
             }
         }
     }
+
     walk_chunk(ctx.chunk, &mut V { ctx, edits });
 }
 
@@ -66,6 +74,7 @@ pub fn remove_unused_while(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
             self.ctx.delete_keep_lines(w.span, self.edits);
         }
     }
+
     walk_chunk(ctx.chunk, &mut V { ctx, edits });
 }
 
@@ -89,8 +98,11 @@ pub fn remove_continue(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         fn stmt(&mut self, s: &Stmt) {
             let (block, span) = match s {
                 Stmt::While(n) => (&n.block, n.span),
+
                 Stmt::NumericFor(n) => (&n.block, n.span),
+
                 Stmt::GenericFor(n) => (&n.block, n.span),
+
                 _ => return,
             };
 
@@ -116,6 +128,7 @@ fn rewrite(ctx: &RuleCtx, block: &Block, span: TokSpan, edits: &mut Vec<Edit>) {
     };
 
     let end_tok = span.end - 1;
+
     if ctx.tok_text(do_tok) != "do" || ctx.tok_text(end_tok) != "end" {
         return;
     }
@@ -145,10 +158,12 @@ fn scan_level(b: &Block, continues: &mut Vec<TokSpan>, has_break: &mut bool) {
                 for (_, body) in &n.branches {
                     scan_level(body, continues, has_break);
                 }
+
                 if let Some(e) = &n.else_block {
                     scan_level(e, continues, has_break);
                 }
             }
+
             _ => {}
         }
     }
@@ -185,12 +200,14 @@ fn branch_keyword(ctx: &RuleCtx, n: &If, i: usize) -> Option<u32> {
     }
 
     let idx = n.branches[i].0.span().start.checked_sub(1)?;
+
     (ctx.tok_text(idx) == "elseif").then_some(idx)
 }
 
 /// Token index of the `then` that closes branch `i`'s condition
 fn branch_then(ctx: &RuleCtx, n: &If, i: usize) -> Option<u32> {
     let idx = n.branches[i].1.span.start.checked_sub(1)?;
+
     (ctx.tok_text(idx) == "then").then_some(idx)
 }
 
@@ -209,6 +226,7 @@ fn prune(ctx: &RuleCtx, n: &If, edits: &mut Vec<Edit>) {
             None => {}
         }
     }
+
     let survivors: Vec<usize> = (0..n.branches.len())
         .filter(|&i| !falsy[i] && truthy_at.is_none_or(|t| i <= t))
         .collect();
@@ -219,6 +237,7 @@ fn prune(ctx: &RuleCtx, n: &If, edits: &mut Vec<Edit>) {
     }
 
     let end_tok = n.span.end - 1;
+
     if ctx.tok_text(end_tok) != "end" {
         return;
     }
@@ -249,6 +268,7 @@ fn prune(ctx: &RuleCtx, n: &If, edits: &mut Vec<Edit>) {
 
             None => ctx.delete_keep_lines(n.span, edits),
         }
+
         return;
     }
 
@@ -338,6 +358,7 @@ pub fn remove_empty_do(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     impl Visit for V<'_, '_> {
         fn stmt(&mut self, s: &Stmt) {
             let Stmt::Do(d) = s else { return };
+
             if d.block.stmts.is_empty() {
                 self.ctx.delete_keep_lines(d.span, self.edits);
             }
@@ -366,6 +387,7 @@ mod tests {
     fn dead_statements_after_an_early_return_go() {
         let src = "do return end\nprint(1)\nprint(2)\n";
         let out = run(src, filter_after_early_return);
+
         assert!(out.starts_with("do return end\n"), "{out}");
         assert!(!out.contains("print"), "{out}");
         assert_lines_kept(src, &out);
@@ -384,6 +406,7 @@ mod tests {
     fn while_false_disappears() {
         let src = "while false do\n    print(1)\nend\nprint(2)\n";
         let out = run(src, remove_unused_while);
+
         assert!(!out.contains("print(1)"), "{out}");
         assert!(out.contains("print(2)"), "{out}");
         assert_lines_kept(src, &out);
@@ -406,6 +429,7 @@ mod tests {
     fn continue_becomes_a_repeat_until_true() {
         let src = "for i = 1, 10 do\n    if skip then continue end\n    work(i)\nend\n";
         let out = run(src, remove_continue);
+
         assert!(out.contains("do repeat"), "{out}");
         assert!(out.contains("break"), "{out}");
         assert!(out.contains("until true end"), "{out}");
@@ -433,6 +457,7 @@ mod tests {
     fn a_nested_loop_keeps_its_own_continue() {
         let src = "for i = 1, 2 do\n    for j = 1, 2 do\n        if x then continue end\n    end\n    if y then break end\nend\n";
         let out = run(src, remove_continue);
+
         // the inner loop is rewritten, the outer one breaks so it is not
         assert_eq!(out.matches("repeat").count(), 1, "{out}");
         assert!(out.contains("if y then break end"), "{out}");
@@ -442,6 +467,7 @@ mod tests {
     fn a_constant_true_branch_unwraps() {
         let src = "if true then\n    print(1)\nend\n";
         let out = run(src, remove_unused_if_branch);
+
         assert!(out.contains("print(1)"), "{out}");
         assert!(!out.contains("if"), "{out}");
         assert_lines_kept(src, &out);
@@ -452,6 +478,7 @@ mod tests {
         // unwrapping would leak x into the enclosing scope
         let src = "if true then\n    local x = 1\nend\n";
         let out = run(src, remove_unused_if_branch);
+
         assert!(out.starts_with("do\n"), "{out}");
         assert!(out.contains("local x = 1"), "{out}");
         assert!(out.trim_end().ends_with("end"), "{out}");
@@ -462,6 +489,7 @@ mod tests {
     fn a_constant_false_branch_falls_through_to_else() {
         let src = "if false then\n    print(1)\nelse\n    print(2)\nend\n";
         let out = run(src, remove_unused_if_branch);
+
         assert!(!out.contains("print(1)"), "{out}");
         assert!(out.contains("print(2)"), "{out}");
         assert_lines_kept(src, &out);
@@ -471,6 +499,7 @@ mod tests {
     fn a_false_if_with_no_else_disappears() {
         let src = "if false then\n    print(1)\nend\nprint(2)\n";
         let out = run(src, remove_unused_if_branch);
+
         assert!(!out.contains("print(1)"), "{out}");
         assert!(out.contains("print(2)"), "{out}");
         assert_lines_kept(src, &out);
@@ -480,6 +509,7 @@ mod tests {
     fn a_dead_elseif_is_removed_and_the_rest_stands() {
         let src = "if a then\n    one()\nelseif false then\n    two()\nelse\n    three()\nend\n";
         let out = run(src, remove_unused_if_branch);
+
         assert!(out.contains("one()"), "{out}");
         assert!(!out.contains("two()"), "{out}");
         assert!(out.contains("three()"), "{out}");
@@ -490,6 +520,7 @@ mod tests {
     fn a_leading_dead_branch_promotes_the_next_one() {
         let src = "if false then\n    one()\nelseif b then\n    two()\nend\n";
         let out = run(src, remove_unused_if_branch);
+
         assert!(!out.contains("one()"), "{out}");
         assert!(out.contains("if b then"), "{out}");
         assert!(out.contains("two()"), "{out}");

@@ -16,6 +16,7 @@ pub fn apply(cfg: &RemoveCalls, ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         preserve: cfg.preserve_arguments_side_effects(),
         edits,
     };
+
     engine::walk_chunk(ctx.chunk, &mut remover);
 }
 
@@ -31,6 +32,7 @@ impl Visit for Remover<'_, '_> {
         let Stmt::Call(call, span) = stmt else {
             return;
         };
+
         let Expr::Call {
             func,
             method: None,
@@ -41,16 +43,20 @@ impl Visit for Remover<'_, '_> {
             // a method call has a receiver, matching it by name would be a guess
             return;
         };
+
         // plain Name or Name.Name chains only, a computed index is not a name
         let Some(path) = dotted_path(self.ctx, func) else {
             return;
         };
+
         if !self.names.contains(&path) {
             return;
         }
+
         if self.preserve && args_may_do_work(args) {
             return;
         }
+
         let (start, end) = self.ctx.bytes(*span);
         // eat the indent too so the line does not keep trailing blanks
         let from = blank_line_start(self.ctx, start);
@@ -62,7 +68,9 @@ impl Visit for Remover<'_, '_> {
 fn args_may_do_work(args: &CallArgs) -> bool {
     match args {
         CallArgs::Paren(list) => list.iter().any(contains_call),
+
         CallArgs::Table(e) => contains_call(e),
+
         CallArgs::Str(_) => false,
     }
 }

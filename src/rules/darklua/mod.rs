@@ -79,12 +79,15 @@ pub fn apply(
     if cfg.remove_method_definition && !cfg.convert_function_to_assignment {
         methods::remove_method_definition(ctx, edits);
     }
+
     if cfg.convert_function_to_assignment {
         methods::convert_function_to_assignment(ctx, edits);
     }
+
     if cfg.convert_local_function_to_assign {
         methods::convert_local_function_to_assign(ctx, edits);
     }
+
     if cfg.remove_method_call {
         methods::remove_method_call(ctx, edits);
     }
@@ -92,15 +95,19 @@ pub fn apply(
     if cfg.remove_compound_assignment {
         assign::remove_compound_assignment(ctx, edits, cfg.remove_floor_division);
     }
+
     if cfg.remove_floor_division {
         assign::remove_floor_division(ctx, edits);
     }
+
     if cfg.make_assignment_local {
         assign::make_assignment_local(ctx, edits);
     }
+
     if cfg.remove_nil_declaration {
         assign::remove_nil_declaration(ctx, edits);
     }
+
     if cfg.group_local_assignment {
         assign::group_local_assignment(ctx, edits);
     }
@@ -108,15 +115,19 @@ pub fn apply(
     if cfg.remove_if_expression {
         exprs::remove_if_expression(ctx, edits);
     }
+
     if cfg.convert_index_to_field {
         exprs::convert_index_to_field(ctx, edits);
     }
+
     if cfg.convert_luau_number {
         exprs::convert_luau_number(ctx, edits);
     }
+
     if cfg.remove_function_call_parens {
         exprs::remove_function_call_parens(ctx, edits);
     }
+
     if cfg.convert_square_root_call {
         exprs::convert_square_root_call(ctx, edits);
     }
@@ -124,6 +135,7 @@ pub fn apply(
     if cfg.remove_types {
         types::remove_types(ctx, edits);
     }
+
     if let Some(r) = &cfg.remove_attribute
         && r.enabled()
     {
@@ -139,12 +151,15 @@ pub fn apply(
     if cfg.filter_after_early_return {
         flow::filter_after_early_return(ctx, edits);
     }
+
     if cfg.remove_continue {
         flow::remove_continue(ctx, edits);
     }
+
     if cfg.remove_unused_while {
         flow::remove_unused_while(ctx, edits);
     }
+
     if cfg.remove_unused_if_branch {
         flow::remove_unused_if_branch(ctx, edits);
     }
@@ -158,6 +173,7 @@ pub fn apply(
     {
         calls::remove_assertions(ctx, edits, r.preserve());
     }
+
     if let Some(r) = &cfg.remove_debug_profiling
         && r.enabled()
     {
@@ -181,6 +197,7 @@ pub(crate) mod testing {
     pub fn run(src: &str, rule: impl Fn(&RuleCtx, &mut Vec<Edit>)) -> String {
         let lexed = lexer::lex(src).expect("lexes");
         let chunk = parser::parse(src, &lexed.toks).expect("parses");
+
         let ctx = RuleCtx {
             src,
             toks: &lexed.toks,
@@ -190,25 +207,32 @@ pub(crate) mod testing {
             dm_path: None,
             quote: '"',
         };
+
         let mut edits: Vec<Edit> = Vec::new();
         rule(&ctx, &mut edits);
+
         splice(src, &mut edits)
     }
 
     /// Same ordering and overlap policy as the pipeline splice
     pub fn splice(src: &str, edits: &mut [Edit]) -> String {
         edits.sort_by_key(|e| (e.0, e.1));
+
         let mut out = String::new();
         let mut cursor = 0usize;
+
         for (start, end, new) in edits.iter() {
             if (*start as usize) < cursor {
                 continue;
             }
+
             out.push_str(&src[cursor..*start as usize]);
             out.push_str(new);
             cursor = *end as usize;
         }
+
         out.push_str(&src[cursor..]);
+
         out
     }
 

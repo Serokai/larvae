@@ -15,10 +15,12 @@ use crate::syntax::ast::{Expr, Stmt};
 
 pub fn apply(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     let mut first: HashMap<&str, &str> = HashMap::new();
+
     for stmt in &ctx.chunk.block.stmts {
         let Some((name, value)) = simple_require_local(ctx, stmt) else {
             continue;
         };
+
         let (start, end) = ctx.bytes(value.span());
         // the site inside this value carries the form the rewriter settled on
         let Some((_, form)) = ctx
@@ -28,14 +30,17 @@ pub fn apply(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         else {
             continue;
         };
+
         let Some(&kept) = first.get(form.as_str()) else {
             first.insert(form.as_str(), name);
             continue;
         };
+
         // a second local of the same name would alias itself, leave it alone
         if kept == name {
             continue;
         }
+
         let padding = "\n".repeat(newlines_in(ctx, start, end));
         edits.push((start, end, format!("{kept}{padding}")));
     }
@@ -53,13 +58,17 @@ fn simple_require_local<'a, 'src>(
     let Stmt::Local(local) = stmt else {
         return None;
     };
+
     if local.is_const || local.names.len() != 1 || local.values.len() != 1 {
         return None;
     }
+
     let binding = &local.names[0];
+
     if binding.ty.is_some() {
         return None;
     }
+
     let value = &local.values[0];
     let Expr::Call {
         func, method: None, ..
@@ -67,9 +76,11 @@ fn simple_require_local<'a, 'src>(
     else {
         return None;
     };
+
     if !matches!(&**func, Expr::Name(n) if name_text(ctx, *n) == "require") {
         return None;
     }
+
     Some((name_text(ctx, binding.name), value))
 }
 

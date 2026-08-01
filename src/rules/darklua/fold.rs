@@ -20,6 +20,7 @@ pub fn compute_expression(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         /// inside one of these is part of a value we have already written
         done: Vec<(u32, u32)>,
     }
+
     impl Visit for V<'_, '_> {
         fn expr(&mut self, e: &Expr) {
             // only composites are worth folding, a literal is already itself
@@ -29,19 +30,25 @@ pub fn compute_expression(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
             ) {
                 return;
             }
+
             let (a, b) = self.ctx.bytes(e.span());
+
             if self.done.iter().any(|&(fa, fb)| a >= fa && b <= fb) {
                 return;
             }
+
             let Some(value) = eval::eval(self.ctx, e) else {
                 return;
             };
+
             let Some(mut text) = eval::print(&value, self.ctx.quote) else {
                 return;
             };
+
             if text == self.ctx.src[a as usize..b as usize] {
                 return;
             }
+
             /*
             a negative result butting up against a minus would read as a
             comment, `a-(1-3)` must not collapse to `a--2`
@@ -49,11 +56,13 @@ pub fn compute_expression(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
             if text.starts_with('-') && a > 0 && self.ctx.src.as_bytes()[a as usize - 1] == b'-' {
                 text.insert(0, ' ');
             }
+
             if support::replace_keep_lines(self.ctx, a, b, &text, self.edits) {
                 self.done.push((a, b));
             }
         }
     }
+
     walk_chunk(
         ctx.chunk,
         &mut V {
@@ -134,6 +143,7 @@ mod tests {
     fn folding_across_lines_keeps_the_line_count() {
         let src = "local x = 1 +\n    2\nreturn x\n";
         let out = run(src, compute_expression);
+
         assert!(out.starts_with("local x = 3\n"), "{out}");
         assert_lines_kept(src, &out);
     }

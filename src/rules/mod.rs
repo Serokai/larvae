@@ -41,6 +41,7 @@ pub fn apply_ast_rules(
 ) {
     let chunk = match crate::syntax::parser::parse(src, &lexed.toks) {
         Ok(c) => c,
+
         Err(e) => {
             diags.push(
                 Diag::error(
@@ -52,9 +53,11 @@ pub fn apply_ast_rules(
                 )
                 .at(src, e.offset),
             );
+
             return;
         }
     };
+
     let ctx = engine::RuleCtx {
         src,
         toks: &lexed.toks,
@@ -64,6 +67,7 @@ pub fn apply_ast_rules(
         dm_path,
         quote,
     };
+
     darklua::apply(cfg, &ctx, edits, diags, path);
     native::apply(cfg, &ctx, edits, diags, path);
 }
@@ -85,7 +89,9 @@ pub fn const_requires(
         if i < 3 {
             continue;
         }
+
         let (eq, name, local) = (&toks[i - 1], &toks[i - 2], &toks[i - 3]);
+
         if eq.kind == TokKind::Symbol
             && eq.text(src) == "="
             && name.kind == TokKind::Ident
@@ -109,16 +115,21 @@ pub fn remove_comments(
     replacements: &mut Vec<(u32, u32, String)>,
 ) {
     let bytes = src.as_bytes();
+
     for &(start, end) in comments {
         let text = &src[start as usize..end as usize];
+
         if except.iter().any(|re| re.is_match(text)) {
             continue;
         }
+
         // eat the horizontal space in front so no trailing blanks are left
         let mut from = start as usize;
+
         while from > 0 && matches!(bytes[from - 1], b' ' | b'\t') {
             from -= 1;
         }
+
         let newlines = text.bytes().filter(|&b| b == b'\n').count();
         replacements.push((from as u32, end, "\n".repeat(newlines)));
     }
@@ -131,24 +142,32 @@ explicit choice in the source always wins
 */
 pub fn add_luau_directive(src: &str, directive: &str) -> Option<(u32, u32, String)> {
     let wanted = format!("--!{directive}");
+
     for line in src.lines() {
         let line = line.trim();
+
         if line.is_empty() {
             continue;
         }
+
         if let Some(rest) = line.strip_prefix("--!") {
             // same family, ex: strict vs nonstrict, respect what is there
             let head = |s: &str| s.split_whitespace().next().unwrap_or("").to_string();
+
             if line == wanted || mode_family(&head(rest)) == mode_family(&head(directive)) {
                 return None;
             }
+
             continue;
         }
+
         if line.starts_with("--") {
             continue;
         }
+
         break;
     }
+
     Some((0, 0, format!("{wanted}\n")))
 }
 
@@ -156,8 +175,11 @@ pub fn add_luau_directive(src: &str, directive: &str) -> Option<(u32, u32, Strin
 fn mode_family(word: &str) -> &'static str {
     match word {
         "strict" | "nonstrict" | "nocheck" => "typecheck",
+
         "native" => "native",
+
         "optimize" => "optimize",
+
         _ => "other",
     }
 }
@@ -174,6 +196,7 @@ pub fn append_text_comment(src: &str, text: &str, at_start: bool) -> Option<(u32
     } else {
         let end = src.len() as u32;
         let lead = if src.ends_with('\n') { "" } else { "\n" };
+
         Some((end, end, format!("{lead}{comment}")))
     }
 }
@@ -187,16 +210,21 @@ mod tests {
         let toks = lexer::lex(src).unwrap().toks;
         let scanned = scan::scan(src, &toks);
         let mut reps = Vec::new();
+
         const_requires(src, &toks, &scanned.sites, &mut reps);
         reps.sort_by_key(|r| r.0);
+
         let mut out = String::new();
         let mut cursor = 0usize;
+
         for (s, e, new) in reps {
             out.push_str(&src[cursor..s as usize]);
             out.push_str(&new);
             cursor = e as usize;
         }
+
         out.push_str(&src[cursor..]);
+
         out
     }
 
@@ -236,15 +264,19 @@ mod tests {
         let lexed = lexer::lex(src).unwrap();
         let except = vec![regex::Regex::new("^--!").unwrap()];
         let mut reps = Vec::new();
+
         remove_comments(src, &lexed.comments, &except, &mut reps);
         reps.sort_by_key(|r| r.0);
+
         let mut out = String::new();
         let mut cursor = 0usize;
+
         for (s, e, new) in reps {
             out.push_str(&src[cursor..s as usize]);
             out.push_str(&new);
             cursor = e as usize;
         }
+
         out.push_str(&src[cursor..]);
         // directive kept, others gone, line count unchanged
         assert!(out.starts_with("--!strict"));
@@ -287,6 +319,7 @@ mod tests {
 
         let src = "return 1";
         let (s, e, text) = append_text_comment(src, "two\nlines", false).unwrap();
+
         assert_eq!((s, e), (8, 8));
         assert_eq!(text, "\n-- two\n-- lines\n");
     }

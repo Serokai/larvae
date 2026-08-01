@@ -45,6 +45,7 @@ impl<'a> FileCtx<'a> {
         let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
         let is_init = script_instance_name(file_name).is_none();
         let dir = path.parent().unwrap_or(Path::new("")).to_owned();
+
         Self {
             path,
             dm: mounts.dm_of(path),
@@ -67,7 +68,9 @@ impl<'a> FileCtx<'a> {
     fn realm(&self) -> Option<Realm> {
         match self.kind {
             ScriptKind::Server => Some(Realm::ServerOnly),
+
             ScriptKind::Client => Some(Realm::StarterClone),
+
             ScriptKind::Module => self.dm.as_ref().map(|d| d.realm()),
         }
     }
@@ -111,12 +114,15 @@ impl<'a> Resolver<'a> {
         if let Some(rest) = strip_alias(spec, "self") {
             return self.resolve_self(ctx, spec, rest, src, offset, diags);
         }
+
         if let Some(rest) = strip_alias(spec, "game") {
             return self.resolve_game_passthrough(ctx, rest, src, offset, diags);
         }
+
         if let Some(alias_rest) = spec.strip_prefix('@') {
             return self.resolve_alias(ctx, spec, alias_rest, src, offset, diags);
         }
+
         if spec.starts_with("./") || spec.starts_with("../") {
             let base = ctx.dot_base().to_owned();
             let Some(target_base) = normalize_join(&base, spec) else {
@@ -127,10 +133,13 @@ impl<'a> Resolver<'a> {
                     )
                     .at(src, offset),
                 );
+
                 return Rewrite::Keep;
             };
+
             return self.emit_fs(ctx, spec, &target_base, src, offset, diags);
         }
+
         diags.push(
             Diag::error(
                 ctx.path,
@@ -141,6 +150,7 @@ impl<'a> Resolver<'a> {
             .at(src, offset)
             .with_help("write it as an explicitly relative path or define an alias"),
         );
+
         Rewrite::Keep
     }
 
@@ -159,6 +169,7 @@ impl<'a> Resolver<'a> {
                     .at(src, offset),
             );
         }
+
         // instance target resolves @self on disk like any other require
         if self.target == Target::RobloxInstance {
             let Some(target_base) = normalize_join(&ctx.dir, rest) else {
@@ -169,10 +180,13 @@ impl<'a> Resolver<'a> {
                     )
                     .at(src, offset),
                 );
+
                 return Rewrite::Keep;
             };
+
             return self.emit_fs(ctx, spec, &target_base, src, offset, diags);
         }
+
         // @self is natively valid for the other targets, pass through
         Rewrite::Keep
     }
@@ -191,8 +205,10 @@ impl<'a> Resolver<'a> {
                 Diag::warning(ctx.path, format!("require(\"@game/{rest}\") cannot be converted for the path target; leaving it alone"))
                     .at(src, offset),
             );
+
             return Rewrite::Keep;
         }
+
         let segments: Vec<String> = rest
             .split('/')
             .filter(|s| !s.is_empty())
@@ -201,16 +217,20 @@ impl<'a> Resolver<'a> {
         if let Some(service) = segments.first() {
             self.check_container_rules(ctx, service, src, offset, diags);
         }
+
         if self.target == Target::RobloxInstance {
             if segments.is_empty() {
                 diags.push(
                     Diag::error(ctx.path, "require(\"@game\") has no path".to_string())
                         .at(src, offset),
                 );
+
                 return Rewrite::Keep;
             }
+
             return Rewrite::Expr(absolute_instance(self.style, self.quote, &segments));
         }
+
         Rewrite::Keep
     }
 
@@ -237,8 +257,10 @@ impl<'a> Resolver<'a> {
                     )
                     .at(src, offset),
                 );
+
                 return Rewrite::Keep;
             }
+
             // coldluau.toml wins per key, then .luaurc upward walk
             let (value, base_dir): (&str, &Path) = if let Some(v) = self.toml_aliases.get(&name) {
                 (v.as_str(), self.root)
@@ -253,6 +275,7 @@ impl<'a> Resolver<'a> {
                     .at(src, offset)
                     .with_help("define it under [aliases] in coldluau.toml or in a .luaurc"),
                 );
+
                 return Rewrite::Keep;
             };
 
@@ -263,14 +286,17 @@ impl<'a> Resolver<'a> {
                         Diag::error(ctx.path, format!("require(\"{spec}\"): alias @{name} points at the DataModel ({value}), which the path target cannot express"))
                             .at(src, offset),
                     );
+
                     return Rewrite::Keep;
                 }
+
                 let mut segments = dm_base;
                 segments.extend(
                     rest.split('/')
                         .filter(|s| !s.is_empty())
                         .map(str::to_string),
                 );
+
                 if segments.is_empty() {
                     diags.push(
                         Diag::error(
@@ -281,22 +307,28 @@ impl<'a> Resolver<'a> {
                         )
                         .at(src, offset),
                     );
+
                     return Rewrite::Keep;
                 }
+
                 self.check_container_rules(ctx, &segments[0], src, offset, diags);
                 self.validate_dm_target_on_disk(ctx, spec, &segments, src, offset, diags);
+
                 if self.target == Target::RobloxInstance {
                     return Rewrite::Expr(absolute_instance(self.style, self.quote, &segments));
                 }
+
                 return Rewrite::Replace(format!("@game/{}", segments.join("/")));
             }
 
             // Alias-to-alias chain (ex: a = "@b/sub")
             if let Some(chained) = value.strip_prefix('@') {
                 let (next_name, value_rest) = split_alias(chained);
+
                 if next_name.eq_ignore_ascii_case("game") {
                     unreachable!("handled by parse_game_path");
                 }
+
                 name = next_name.to_lowercase();
                 rest = join_specs(value_rest, &rest);
                 continue;
@@ -308,13 +340,16 @@ impl<'a> Resolver<'a> {
             } else {
                 join_specs(value, &rest)
             };
+
             let Some(target_base) = normalize_join(base_dir, &joined) else {
                 diags.push(
                     Diag::error(ctx.path, format!("require(\"{spec}\"): alias @{name} resolves outside the filesystem root"))
                         .at(src, offset),
                 );
+
                 return Rewrite::Keep;
             };
+
             return self.emit_fs(ctx, spec, &target_base, src, offset, diags);
         }
     }
@@ -339,10 +374,13 @@ impl<'a> Resolver<'a> {
                 )
                 .at(src, offset),
             );
+
             return Rewrite::Keep;
         }
+
         let node = match resolve_module(target_base) {
             Ok(Some(node)) => node,
+
             Ok(None) => {
                 let d = Diag::warning(
                     ctx.path,
@@ -360,31 +398,39 @@ impl<'a> Resolver<'a> {
                 } else {
                     d
                 });
+
                 return Rewrite::Keep;
             }
+
             Err(msg) => {
                 diags.push(
                     Diag::error(ctx.path, format!("require(\"{spec}\"): {msg}")).at(src, offset),
                 );
+
                 return Rewrite::Keep;
             }
         };
 
         let out = match self.target {
             Target::Path => self.emit_path_target(ctx, &node),
+
             Target::RobloxString => {
                 match self.emit_roblox_string(ctx, spec, &node, src, offset, diags) {
                     Some(s) => s,
+
                     None => return Rewrite::Keep,
                 }
             }
+
             Target::RobloxInstance => {
                 return match self.emit_roblox_instance(ctx, spec, &node, src, offset, diags) {
                     Some(expr) => Rewrite::Expr(expr),
+
                     None => Rewrite::Keep,
                 };
             }
         };
+
         if out == spec {
             Rewrite::Keep
         } else {
@@ -395,8 +441,10 @@ impl<'a> Resolver<'a> {
     fn emit_path_target(&self, ctx: &FileCtx, node: &ModuleNode) -> String {
         let target = match node {
             ModuleNode::Dir(d) => d.clone(),
+
             ModuleNode::File(f) => f.with_extension(""),
         };
+
         fs_relative(ctx.dot_base(), &target)
     }
 
@@ -416,8 +464,10 @@ impl<'a> Resolver<'a> {
                     .at(src, offset)
                     .with_help("add a Rojo project file (default.project.json) or [requires.mounts] to coldluau.toml"),
             );
+
             return None;
         }
+
         let Some(target_dm) = self.mounts.dm_of(node.dm_key_path()) else {
             diags.push(
                 Diag::error(
@@ -430,19 +480,23 @@ impl<'a> Resolver<'a> {
                 .at(src, offset)
                 .with_help("add it to [requires.mounts] or mount it in the Rojo project file"),
             );
+
             return None;
         };
+
         let Some(req_dm) = ctx.dm.clone() else {
             diags.push(
                 Diag::error(ctx.path, format!("this file is not covered by any mount, so require(\"{spec}\") cannot be rewritten"))
                     .at(src, offset),
             );
+
             return None;
         };
 
         // Container/realm checks (plan §3.3)
         let target_realm = target_dm.realm();
         let req_realm = ctx.realm();
+
         if target_realm == Realm::ServerOnly {
             match req_realm {
                 Some(Realm::StarterClone) => {
@@ -451,17 +505,21 @@ impl<'a> Resolver<'a> {
                             .at(src, offset)
                             .with_help("move the module to ReplicatedStorage"),
                     );
+
                     return None;
                 }
+
                 Some(Realm::Shared) | None => {
                     diags.push(
                         Diag::warning(ctx.path, format!("require(\"{spec}\") targets {} from shared code; this breaks if the requirer ever runs on the client", target_dm.service()))
                             .at(src, offset),
                     );
                 }
+
                 Some(Realm::ServerOnly) => {}
             }
         }
+
         if target_realm == Realm::StarterClone {
             // absolute @game into a Starter container hits the template, only same container relatives work
             if req_dm.service() != target_dm.service() {
@@ -470,6 +528,7 @@ impl<'a> Resolver<'a> {
                         .at(src, offset)
                         .with_help("move the module to ReplicatedStorage"),
                 );
+
                 return None;
             }
         }
@@ -483,6 +542,7 @@ impl<'a> Resolver<'a> {
                 )
                 .at(src, offset),
             );
+
             return None;
         }
 
@@ -505,12 +565,14 @@ impl<'a> Resolver<'a> {
             && target_dm.segments[..req_dm.segments.len()] == req_dm.segments[..]
         {
             let tail = target_dm.segments[req_dm.segments.len()..].join("/");
+
             return Some(format!("@self/{tail}"));
         }
 
         // relative within the same mount, absolute @game otherwise, Starter targets must be relative
         let same_mount = req_dm.mount == target_dm.mount;
         let base = &req_dm.segments[..req_dm.segments.len() - 1];
+
         let common = base
             .iter()
             .zip(&target_dm.segments)
@@ -524,17 +586,22 @@ impl<'a> Resolver<'a> {
                     Diag::error(ctx.path, format!("require(\"{spec}\") cannot be expressed as a relative require within {}", target_dm.service()))
                         .at(src, offset),
                 );
+
                 return None;
             }
+
             let ups = base.len() - common;
             let mut parts: Vec<&str> = std::iter::repeat_n("..", ups).collect();
+
             parts.extend(target_dm.segments[common..].iter().map(String::as_str));
+
             return Some(if ups == 0 {
                 format!("./{}", parts.join("/"))
             } else {
                 parts.join("/")
             });
         }
+
         Some(target_dm.game_path())
     }
 
@@ -555,6 +622,7 @@ impl<'a> Resolver<'a> {
         preferred in the same mount, everything else goes absolute
         */
         let same_mount = req_dm.mount == target_dm.mount;
+
         if same_mount || target_dm.realm() == Realm::StarterClone {
             let common = req_dm
                 .segments
@@ -564,17 +632,21 @@ impl<'a> Resolver<'a> {
                 .count();
             let ups = req_dm.segments.len() - common;
             let mut expr = String::from("script");
+
             for _ in 0..ups {
                 expr.push_str(".Parent");
             }
+
             push_downs(
                 &mut expr,
                 self.style,
                 self.quote,
                 &target_dm.segments[common..],
             );
+
             return Some(expr);
         }
+
         Some(absolute_instance(
             self.style,
             self.quote,
@@ -596,12 +668,16 @@ impl<'a> Resolver<'a> {
             if segments.len() < mount.dm.len() || segments[..mount.dm.len()] != mount.dm[..] {
                 continue;
             }
+
             let mut fs = mount.fs.clone();
+
             for seg in &segments[mount.dm.len()..] {
                 fs.push(seg);
             }
+
             match resolve_module(&fs) {
                 Ok(Some(_)) => return,
+
                 _ => {
                     let d = Diag::warning(
                         ctx.path,
@@ -616,10 +692,12 @@ impl<'a> Resolver<'a> {
                     } else {
                         d
                     });
+
                     return;
                 }
             }
         }
+
         // No mount covers the alias target, nothing to validate against
     }
 
@@ -645,6 +723,7 @@ impl<'a> Resolver<'a> {
                     );
                 }
             }
+
             Realm::Shared => {}
         }
     }
@@ -658,8 +737,10 @@ method styles use GetService so service renames don't break them
 */
 fn absolute_instance(style: IndexingStyle, quote: char, segments: &[String]) -> String {
     let mut expr = String::from("game");
+
     match style {
         IndexingStyle::Property => push_downs(&mut expr, style, quote, segments),
+
         IndexingStyle::FindFirstChild | IndexingStyle::WaitForChild => {
             expr.push_str(&format!(
                 ":GetService({})",
@@ -668,6 +749,7 @@ fn absolute_instance(style: IndexingStyle, quote: char, segments: &[String]) -> 
             push_downs(&mut expr, style, quote, &segments[1..]);
         }
     }
+
     expr
 }
 
@@ -683,9 +765,11 @@ fn push_downs(expr: &mut String, style: IndexingStyle, quote: char, segments: &[
                     expr.push_str(&format!("[{}]", lua_quote(seg, quote)));
                 }
             }
+
             IndexingStyle::FindFirstChild => {
                 expr.push_str(&format!(":FindFirstChild({})", lua_quote(seg, quote)));
             }
+
             IndexingStyle::WaitForChild => {
                 expr.push_str(&format!(":WaitForChild({})", lua_quote(seg, quote)));
             }
@@ -703,6 +787,7 @@ fn is_luau_ident(name: &str) -> bool {
     let Some(first) = chars.next() else {
         return false;
     };
+
     (first.is_ascii_alphabetic() || first == '_')
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
         && !KEYWORDS.contains(&name)
@@ -720,10 +805,13 @@ pub fn lua_quote(name: &str, quote: char) -> String {
 
 fn strip_alias<'s>(spec: &'s str, name: &str) -> Option<&'s str> {
     let body = spec.strip_prefix('@')?;
+
     if body.eq_ignore_ascii_case(name) {
         return Some("");
     }
+
     let rest = body.get(..name.len() + 1)?;
+
     if rest[..name.len()].eq_ignore_ascii_case(name) && rest.ends_with('/') {
         Some(&body[name.len() + 1..])
     } else {
@@ -734,6 +822,7 @@ fn strip_alias<'s>(spec: &'s str, name: &str) -> Option<&'s str> {
 fn split_alias(body: &str) -> (&str, &str) {
     match body.find('/') {
         Some(i) => (&body[..i], &body[i + 1..]),
+
         None => (body, ""),
     }
 }
@@ -741,7 +830,9 @@ fn split_alias(body: &str) -> (&str, &str) {
 fn join_specs(a: &str, b: &str) -> String {
     match (a.is_empty(), b.is_empty()) {
         (true, _) => b.to_string(),
+
         (_, true) => a.to_string(),
+
         _ => format!("{}/{}", a.trim_end_matches('/'), b),
     }
 }
@@ -753,6 +844,7 @@ fn has_module_extension(spec: &str) -> bool {
 /// Join a spec onto a base dir resolving dots, None when it escapes the root
 fn normalize_join(base: &Path, spec: &str) -> Option<PathBuf> {
     let mut out = base.to_owned();
+
     for part in spec.split('/') {
         match part {
             "" | "." => {}
@@ -761,27 +853,35 @@ fn normalize_join(base: &Path, spec: &str) -> Option<PathBuf> {
                     return None;
                 }
             }
+
             seg => out.push(seg),
         }
     }
+
     Some(out)
 }
 
 /// RFC module resolution, file or dir with init, more than one match is ambiguous
 fn resolve_module(base: &Path) -> Result<Option<ModuleNode>, String> {
     let mut found: Vec<ModuleNode> = Vec::new();
+
     for ext in ["luau", "lua"] {
         let candidate = base.with_extension(ext);
+
         if candidate.is_file() {
             found.push(ModuleNode::File(candidate));
         }
     }
+
     if base.is_dir() && (base.join("init.luau").is_file() || base.join("init.lua").is_file()) {
         found.push(ModuleNode::Dir(base.to_owned()));
     }
+
     match found.len() {
         0 => Ok(None),
+
         1 => Ok(Some(found.remove(0))),
+
         _ => Err(format!(
             "ambiguous module at {} (multiple of .luau/.lua/dir-with-init exist; the RFC makes this an error)",
             base.display()
@@ -793,6 +893,7 @@ fn resolve_module(base: &Path) -> Result<Option<ModuleNode>, String> {
 fn fs_relative(from_dir: &Path, to: &Path) -> String {
     let from: Vec<_> = from_dir.components().collect();
     let to_comps: Vec<_> = to.components().collect();
+
     let common = from
         .iter()
         .zip(&to_comps)
@@ -800,11 +901,13 @@ fn fs_relative(from_dir: &Path, to: &Path) -> String {
         .count();
     let ups = from.len() - common;
     let mut parts: Vec<String> = std::iter::repeat_n("..".to_string(), ups).collect();
+
     parts.extend(
         to_comps[common..]
             .iter()
             .map(|c| c.as_os_str().to_string_lossy().into_owned()),
     );
+
     if ups == 0 {
         format!("./{}", parts.join("/"))
     } else {

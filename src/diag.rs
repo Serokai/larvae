@@ -38,11 +38,13 @@ impl Diag {
 
     pub fn at(mut self, source: &str, byte_offset: usize) -> Self {
         self.line_col = Some(line_col(source, byte_offset));
+
         self
     }
 
     pub fn with_help(mut self, help: impl Into<String>) -> Self {
         self.help = Some(help.into());
+
         self
     }
 }
@@ -51,6 +53,7 @@ impl Diag {
     fn location(&self) -> String {
         match self.line_col {
             Some((line, col)) => format!("{}:{line}:{col}", crate::ui::rel(&self.file)),
+
             None => crate::ui::rel(&self.file),
         }
     }
@@ -71,17 +74,22 @@ impl Diag {
         if !color {
             return self.to_string();
         }
+
         use crate::ui::{BOLD, BRAND_FG, DARK_FG, DARKER_FG, DEEP_FG, RESET};
 
         let (glyph, head_color, sev) = match self.severity {
             Severity::Error => ("✗", DEEP_FG, "error"),
+
             Severity::Warning => ("!", BRAND_FG, "warning"),
         };
+
         let mut out = format!("{head_color}{BOLD}{glyph} {sev}:{RESET} {}", self.message);
         out.push_str(&format!("\n    {DARK_FG}at {}{RESET}", self.location()));
+
         if let Some(help) = &self.help {
             out.push_str(&format!("\n    {DARKER_FG}help: {help}{RESET}"));
         }
+
         out
     }
 }
@@ -90,13 +98,17 @@ impl fmt::Display for Diag {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let sev = match self.severity {
             Severity::Error => "error",
+
             Severity::Warning => "warning",
         };
+
         write!(f, "{sev}: {}", self.message)?;
         write!(f, "\n    at {}", self.location())?;
+
         if let Some(help) = &self.help {
             write!(f, "\n    help: {help}")?;
         }
+
         Ok(())
     }
 }
@@ -107,6 +119,7 @@ pub fn line_col(source: &str, byte_offset: usize) -> (u32, u32) {
     let line = before.bytes().filter(|&b| b == b'\n').count() as u32 + 1;
     let line_start = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
     let col = before[line_start..].chars().count() as u32 + 1;
+
     (line, col)
 }
 

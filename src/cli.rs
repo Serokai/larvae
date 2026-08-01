@@ -66,6 +66,7 @@ pub fn main() -> ExitCode {
 
         Err(e) => {
             ui::print_error(&format!("{e:#}"));
+
             ExitCode::FAILURE
         }
     }
@@ -95,12 +96,14 @@ fn run() -> Result<ExitCode> {
         }
 
         print_fancy_help(ui::want_color())?;
+
         return Ok(ExitCode::SUCCESS);
     }
 
     // Bare `coldluau` gets the fastfetch style logo + help layout too
     let Some(command) = cli.command else {
         print_fancy_help(ui::want_color())?;
+
         return Ok(ExitCode::SUCCESS);
     };
 
@@ -119,15 +122,18 @@ fn run() -> Result<ExitCode> {
 
         Command::SelfManage { command } => match command {
             Some(cmd) => commands::self_cmd::run(cmd),
+
             None => {
                 // Bare `coldluau self`, show the group's help
                 let mut cmd = Cli::command().styles(ui::help_styles());
                 let sub = cmd.find_subcommand_mut("self").expect("self exists");
+
                 if let Err(e) = sub.print_help()
                     && e.kind() != std::io::ErrorKind::BrokenPipe
                 {
                     return Err(e.into());
                 }
+
                 Ok(ExitCode::SUCCESS)
             }
         },

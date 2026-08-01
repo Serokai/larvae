@@ -22,8 +22,10 @@ pub fn row_color(row: usize, rows: usize) -> (u8, u8, u8) {
     let mix = |a: u8, b: u8, t: u32, span: u32| -> u8 {
         let a = a as i32;
         let b = b as i32;
+
         (a + (b - a) * t as i32 / span as i32) as u8
     };
+
     if t <= 500 {
         (
             mix(TOP.0, BRAND.0, t, 500),
@@ -42,20 +44,28 @@ pub fn row_color(row: usize, rows: usize) -> (u8, u8, u8) {
 /// Paint art with the gradient, denser ramp chars glow brighter, plain when color is off
 fn render_gradient(art: &str, color: bool) -> String {
     let art = art.trim_matches('\n');
+
     if !color {
         return art.to_owned();
     }
+
     // Density shading, brighter for denser ramp characters
     fn density(c: char) -> Option<u16> {
         match c {
             '.' => Some(45),
+
             ':' | '-' => Some(60),
+
             '=' | '+' => Some(78),
+
             '*' | '#' => Some(92),
+
             '%' | '@' => Some(100),
+
             _ => None,
         }
     }
+
     let lines: Vec<&str> = art.lines().collect();
     let rows = lines.len();
     let mut out = String::with_capacity(art.len() * 3);
@@ -69,23 +79,31 @@ fn render_gradient(art: &str, color: bool) -> String {
                 let scale = |v: u8| (v as u16 * pct / 100) as u8;
                 (scale(row_rgb.0), scale(row_rgb.1), scale(row_rgb.2))
             });
+
             if want != current {
                 match want {
                     Some(rgb) => out.push_str(&fg(rgb)),
+
                     None => out.push_str(RESET),
                 }
+
                 current = want;
             }
+
             out.push(ch);
         }
+
         if current.is_some() {
             out.push_str(RESET);
             current = None;
         }
+
         out.push('\n');
     }
+
     // The art has no trailing newline, drop the one we just added
     out.pop();
+
     out
 }
 

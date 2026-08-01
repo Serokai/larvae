@@ -11,5 +11,6 @@ use crate::pipeline;
 pub fn run(root: &Path, config: Option<PathBuf>) -> Result<ExitCode> {
     let config = load_config(root, config)?;
     let outcome = pipeline::run(root, &config, false)?;
+
     report(&outcome, false)
 }

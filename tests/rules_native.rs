@@ -24,6 +24,7 @@ rules under test are the only ones enabled, `rules` is the body of [rules]
 fn project(rules: &str) -> tempfile::TempDir {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
+
     write(
         root,
         "default.project.json",
@@ -34,6 +35,7 @@ fn project(rules: &str) -> tempfile::TempDir {
                 "ReplicatedStorage": {
                     "shared": { "$path": "src/shared" }
                 },
+
                 "ServerScriptService": { "$path": "src/server" }
             }
         }"#,
@@ -44,6 +46,7 @@ fn project(rules: &str) -> tempfile::TempDir {
         &format!("[aliases]\npkg = \"@game/ReplicatedStorage/shared/util\"\n\n[rules]\n{rules}\n"),
     );
     write(root, "src/shared/util/math.luau", "return {}\n");
+
     tmp
 }
 
@@ -51,10 +54,13 @@ fn project(rules: &str) -> tempfile::TempDir {
 fn build(root: &Path) -> Vec<coldluau::diag::Diag> {
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, true).unwrap();
+
     for d in &outcome.diags {
         eprintln!("{d}");
     }
+
     assert!(!outcome.has_errors(), "unexpected errors");
+
     outcome.diags
 }
 
@@ -71,6 +77,7 @@ fn same_line_count(before: &str, after: &str) {
 fn remove_calls_drops_statement_calls_only() {
     let tmp = project("remove_calls = [\"print\", \"debug.profilebegin\"]");
     let root = tmp.path();
+
     let before = concat!(
         "--!strict\n",
         "print(\"loading\")\n",
@@ -116,6 +123,7 @@ fn remove_calls_can_ignore_argument_side_effects() {
 fn use_get_service_rewrites_known_services() {
     let tmp = project("use_get_service = true");
     let root = tmp.path();
+
     let before = concat!(
         "local rs = game.ReplicatedStorage\n",
         "local player = game.Players.LocalPlayer\n",
@@ -137,6 +145,7 @@ fn use_get_service_rewrites_known_services() {
 fn use_get_service_skips_a_file_that_shadows_game() {
     let tmp = project("use_get_service = true");
     let root = tmp.path();
+
     let before = concat!(
         "local game = { Players = {} }\n",
         "local p = game.Players\n",
@@ -152,6 +161,7 @@ fn use_get_service_skips_a_file_that_shadows_game() {
 fn dedupe_requires_folds_specs_that_resolve_together() {
     let tmp = project("dedupe_requires = true");
     let root = tmp.path();
+
     // two different specs, the rewriter lands both on the same @game path
     let before = concat!(
         "local A = require(\"@pkg/math\")\n",
@@ -175,6 +185,7 @@ fn dedupe_requires_folds_specs_that_resolve_together() {
 fn dedupe_requires_leaves_distinct_modules_alone() {
     let tmp = project("dedupe_requires = true");
     let root = tmp.path();
+
     write(root, "src/shared/util/vec.luau", "return {}\n");
     let before = concat!(
         "local A = require(\"./util/math\")\n",
@@ -195,6 +206,7 @@ fn dedupe_requires_leaves_distinct_modules_alone() {
 fn inject_module_path_defines_the_constant() {
     let tmp = project("inject_module_path = \"MODULE_PATH\"");
     let root = tmp.path();
+
     let before = concat!(
         "--!strict\n",
         "-- header\n",
@@ -222,6 +234,7 @@ fn inject_module_path_defines_the_constant() {
 fn inject_module_path_stays_quiet_or_warns() {
     let tmp = project("inject_module_path = \"MODULE_PATH\"");
     let root = tmp.path();
+
     // never referenced, nothing to inject
     write(root, "src/shared/quiet.luau", "return 1\n");
     // referenced but no mount covers this directory
@@ -244,6 +257,7 @@ fn freeze_module_wraps_only_what_it_can_prove() {
     let tmp = project("freeze_module = true");
     let root = tmp.path();
     let safe = concat!("local M = {\n", "    answer = 42,\n", "}\n", "return M\n",);
+
     write(root, "src/shared/safe.luau", safe);
     let methods = concat!("local M = {}\n", "function M.run() end\n", "return M\n",);
     write(root, "src/shared/methods.luau", methods);
@@ -265,6 +279,7 @@ fn freeze_module_wraps_only_what_it_can_prove() {
 fn rules_off_by_default() {
     let tmp = project("");
     let root = tmp.path();
+
     let before = concat!(
         "print(\"kept\")\n",
         "local rs = game.ReplicatedStorage\n",

@@ -33,6 +33,7 @@ fn fixture() -> tempfile::TempDir {
                     "shared": { "$path": "src/shared" },
                     "Packages": { "$path": "Packages" }
                 },
+
                 "ServerScriptService": { "$path": "src/server" }
             }
         }"#,
@@ -77,6 +78,7 @@ fn fixture() -> tempfile::TempDir {
     );
     // Non code asset that must be copied through
     write(root, "src/shared/data.json", "{\"k\":1}\n");
+
     tmp
 }
 
@@ -90,6 +92,7 @@ fn processes_fixture_end_to_end() {
     for d in &outcome.diags {
         eprintln!("{d}");
     }
+
     assert!(!outcome.has_errors(), "unexpected errors");
 
     // Alias expanded to a native @game require
@@ -146,15 +149,18 @@ fn idempotent_reprocessing() {
     let tmp = fixture();
     let root = tmp.path();
     let config = Config::load_or_default(root).unwrap();
+
     pipeline::run(root, &config, true).unwrap();
     let first = read(root, "dist/server/main.server.luau");
 
     // Process the dist tree as input, already-native requires pass through
     write(root, "src/server/main.server.luau", &first);
     let outcome = pipeline::run(root, &config, true).unwrap();
+
     for d in &outcome.diags {
         eprintln!("{d}");
     }
+
     assert!(!outcome.has_errors());
     assert_eq!(read(root, "dist/server/main.server.luau"), first);
 }
@@ -163,9 +169,12 @@ fn idempotent_reprocessing() {
 fn unknown_alias_is_error() {
     let tmp = fixture();
     let root = tmp.path();
+
     write(root, "src/shared/bad.luau", "return require(\"@nope/x\")\n");
+
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, false).unwrap();
+
     assert!(outcome.has_errors());
     assert!(
         outcome
@@ -179,6 +188,7 @@ fn unknown_alias_is_error() {
 fn client_requiring_server_is_error() {
     let tmp = fixture();
     let root = tmp.path();
+
     // Client-marked script requiring a server only module
     write(root, "src/server/secret.luau", "return {}\n");
     write(
@@ -186,8 +196,10 @@ fn client_requiring_server_is_error() {
         "src/shared/ui.client.luau",
         "return require(\"@game/ServerScriptService/secret\")\n",
     );
+
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, false).unwrap();
+
     assert!(outcome.has_errors());
     assert!(
         outcome
@@ -202,13 +214,16 @@ fn client_requiring_server_is_error() {
 fn absolute_into_starter_container_is_error() {
     let tmp = fixture();
     let root = tmp.path();
+
     write(
         root,
         "src/shared/bad_starter.luau",
         "return require(\"@game/StarterGui/hud/logic\")\n",
     );
+
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, false).unwrap();
+
     assert!(outcome.has_errors());
     assert!(outcome.diags.iter().any(|d| d.message.contains("clones")));
 }
@@ -217,13 +232,16 @@ fn absolute_into_starter_container_is_error() {
 fn unprefixed_require_is_error() {
     let tmp = fixture();
     let root = tmp.path();
+
     write(
         root,
         "src/shared/legacy.luau",
         "return require(\"sibling\")\n",
     );
+
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, false).unwrap();
+
     assert!(outcome.has_errors());
     assert!(
         outcome
@@ -237,13 +255,16 @@ fn unprefixed_require_is_error() {
 fn missing_target_warns_then_errors_under_strict() {
     let tmp = fixture();
     let root = tmp.path();
+
     write(
         root,
         "src/shared/dangling.luau",
         "return require(\"./ghost\")\n",
     );
+
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, false).unwrap();
+
     assert!(
         !outcome.has_errors(),
         "missing target should be a warning by default"
@@ -265,8 +286,10 @@ fn missing_target_warns_then_errors_under_strict() {
             strict = true
         "#,
     );
+
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, false).unwrap();
+
     assert!(
         outcome.has_errors(),
         "strict should upgrade missing-target to error"
@@ -277,6 +300,7 @@ fn missing_target_warns_then_errors_under_strict() {
 fn luaurc_aliases_work_zero_config() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
+
     write(
         root,
         "default.project.json",
@@ -299,9 +323,11 @@ fn luaurc_aliases_work_zero_config() {
     // No coldluau.toml at all
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, true).unwrap();
+
     for d in &outcome.diags {
         eprintln!("{d}");
     }
+
     assert!(!outcome.has_errors());
     let main = read(root, "dist/main.luau");
     // util maps into the same mount -> relative require
@@ -311,6 +337,7 @@ fn luaurc_aliases_work_zero_config() {
 fn instance_fixture(indexing_style: &str) -> tempfile::TempDir {
     let tmp = fixture();
     let root = tmp.path();
+
     write(
         root,
         "coldluau.toml",
@@ -318,6 +345,7 @@ fn instance_fixture(indexing_style: &str) -> tempfile::TempDir {
             "[aliases]\npkg = \"@game/ReplicatedStorage/Packages\"\n\n[requires]\ntarget = \"roblox-instance\"\nindexing_style = \"{indexing_style}\"\n"
         ),
     );
+
     tmp
 }
 
@@ -327,9 +355,11 @@ fn instance_target_find_first_child() {
     let root = tmp.path();
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, true).unwrap();
+
     for d in &outcome.diags {
         eprintln!("{d}");
     }
+
     assert!(!outcome.has_errors());
 
     let main = read(root, "dist/server/main.server.luau");
@@ -366,6 +396,7 @@ fn instance_target_wait_for_child() {
     let root = tmp.path();
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, true).unwrap();
+
     assert!(!outcome.has_errors());
     let geometry = read(root, "dist/shared/util/geometry.luau");
     assert!(
@@ -378,17 +409,21 @@ fn instance_target_wait_for_child() {
 fn instance_target_property_style() {
     let tmp = instance_fixture("property");
     let root = tmp.path();
+
     // A parenless require must get wrapped in parens
     write(
         root,
         "src/shared/parenless.luau",
         "return require \"./util/math\"\n",
     );
+
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, true).unwrap();
+
     for d in &outcome.diags {
         eprintln!("{d}");
     }
+
     assert!(!outcome.has_errors());
 
     let main = read(root, "dist/server/main.server.luau");
@@ -413,6 +448,7 @@ fn instance_target_property_style() {
 fn instance_style_accepts_kebab_alias() {
     let tmp = instance_fixture("property-instance");
     let config = Config::load_or_default(tmp.path()).unwrap();
+
     assert_eq!(
         config.requires.indexing_style,
         Some(coldluau::config::IndexingStyle::Property)
@@ -423,6 +459,7 @@ fn instance_style_accepts_kebab_alias() {
 fn indexing_style_requires_instance_target() {
     let tmp = fixture();
     let root = tmp.path();
+
     write(
         root,
         "coldluau.toml",
@@ -435,15 +472,19 @@ fn indexing_style_requires_instance_target() {
 fn path_target_for_lune() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
+
     write(root, ".luaurc", r#"{ "aliases": { "lib": "./lib" } }"#);
     write(root, "lib/json.luau", "return {}\n");
     write(root, "coldluau.toml", "[requires]\ntarget = \"path\"\n");
     write(root, "src/main.luau", "return require(\"@lib/json\")\n");
+
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, true).unwrap();
+
     for d in &outcome.diags {
         eprintln!("{d}");
     }
+
     assert!(!outcome.has_errors());
     assert_eq!(
         read(root, "dist/main.luau"),
@@ -455,16 +496,20 @@ fn path_target_for_lune() {
 fn quote_style_single_applies_everywhere() {
     let tmp = fixture();
     let root = tmp.path();
+
     write(
         root,
         "coldluau.toml",
         "[aliases]\npkg = \"@game/ReplicatedStorage/Packages\"\n\n[process]\nquotes = \"single\"\n",
     );
+
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, true).unwrap();
+
     for d in &outcome.diags {
         eprintln!("{d}");
     }
+
     assert!(!outcome.has_errors());
 
     // rewritten require uses single quotes
@@ -485,6 +530,7 @@ fn quote_style_single_applies_everywhere() {
 fn quote_style_threads_into_instance_exprs() {
     let tmp = instance_fixture("find_first_child");
     let root = tmp.path();
+
     write(
         root,
         "coldluau.toml",
@@ -494,8 +540,10 @@ fn quote_style_threads_into_instance_exprs() {
             "[requires]\ntarget = \"roblox-instance\"\n",
         ),
     );
+
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, true).unwrap();
+
     assert!(!outcome.has_errors());
     let geometry = read(root, "dist/shared/util/geometry.luau");
     assert!(
@@ -508,16 +556,20 @@ fn quote_style_threads_into_instance_exprs() {
 fn const_requires_rule() {
     let tmp = fixture();
     let root = tmp.path();
+
     write(
         root,
         "coldluau.toml",
         "[aliases]\npkg = \"@game/ReplicatedStorage/Packages\"\n\n[rules]\nconst_requires = true\n",
     );
+
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, true).unwrap();
+
     for d in &outcome.diags {
         eprintln!("{d}");
     }
+
     assert!(!outcome.has_errors());
 
     let main = read(root, "dist/server/main.server.luau");
@@ -538,6 +590,7 @@ fn const_requires_rule() {
 fn unknown_rule_errors_with_milestone() {
     let tmp = fixture();
     let root = tmp.path();
+
     // still planned, it needs the scope tracking that lands with M2
     write(root, "coldluau.toml", "[rules]\nrename_variables = true\n");
     let err = Config::load_or_default(root).unwrap_err().to_string();
@@ -551,6 +604,7 @@ fn unknown_rule_errors_with_milestone() {
 fn remove_comments_rule() {
     let tmp = fixture();
     let root = tmp.path();
+
     write(
         root,
         "coldluau.toml",
@@ -561,8 +615,10 @@ fn remove_comments_rule() {
         "src/shared/doc.luau",
         "--!strict\n-- a note\nlocal x = 1 -- trailing\nreturn x\n",
     );
+
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, true).unwrap();
+
     assert!(!outcome.has_errors());
 
     let doc = read(root, "dist/shared/doc.luau");
@@ -578,6 +634,7 @@ fn remove_comments_rule() {
 fn append_text_comment_rule() {
     let tmp = fixture();
     let root = tmp.path();
+
     write(
         root,
         "coldluau.toml",
@@ -586,8 +643,10 @@ fn append_text_comment_rule() {
             "[rules.append_text_comment]\ntext = \"generated by coldluau\"\nlocation = \"start\"\n",
         ),
     );
+
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, true).unwrap();
+
     assert!(!outcome.has_errors());
     let consumer = read(root, "dist/shared/consumer.luau");
     assert!(
@@ -601,17 +660,20 @@ fn append_text_comment_rule() {
 fn darklua_rule_names_get_useful_errors() {
     let tmp = fixture();
     let root = tmp.path();
+
     let cases = [
         ("rename_variables = true", "M2"),
         ("convert_require = true", "[requires]"),
         ("inject_global_value = true", "[defines]"),
         ("remove_spaces = true", "dense"),
     ];
+
     for (line, expect) in cases {
         write(root, "coldluau.toml", &format!("[rules]\n{line}\n"));
         let err = Config::load_or_default(root).unwrap_err().to_string();
         assert!(err.contains(expect), "{line} -> {err}");
     }
+
     // a name darklua does not have either
     write(root, "coldluau.toml", "[rules]\nmake_it_fast = true\n");
     let err = Config::load_or_default(root).unwrap_err().to_string();
@@ -653,6 +715,7 @@ fn luaurc_change_invalidates_the_whole_cache() {
     let tmp = fixture();
     let root = tmp.path();
     let config = Config::load_or_default(root).unwrap();
+
     pipeline::run(root, &config, true).unwrap();
     let warm = pipeline::run(root, &config, true).unwrap();
     assert!(warm.stats.files_cached > 0);
@@ -671,6 +734,7 @@ fn deleting_a_source_removes_its_output() {
     let tmp = fixture();
     let root = tmp.path();
     let config = Config::load_or_default(root).unwrap();
+
     write(root, "src/shared/temporary.luau", "return 1\n");
     pipeline::run(root, &config, true).unwrap();
     assert!(root.join("dist/shared/temporary.luau").exists());
@@ -688,9 +752,12 @@ fn deleting_a_source_removes_its_output() {
 fn check_reports_syntax_errors() {
     let tmp = fixture();
     let root = tmp.path();
+
     write(root, "src/shared/broken.luau", "local x = = 1\n");
+
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, false).unwrap();
+
     assert!(outcome.has_errors());
     assert!(
         outcome
@@ -708,6 +775,7 @@ fn rules_that_touch_the_same_byte_do_not_corrupt_output() {
     // `local` that also starts at byte 0
     let tmp = fixture();
     let root = tmp.path();
+
     write(
         root,
         "coldluau.toml",
@@ -721,8 +789,10 @@ fn rules_that_touch_the_same_byte_do_not_corrupt_output() {
         "src/shared/first.luau",
         "local S = require(\"@pkg/signal\")\nreturn S\n",
     );
+
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, true).unwrap();
+
     assert!(!outcome.has_errors());
     assert_eq!(
         read(root, "dist/shared/first.luau"),

@@ -19,6 +19,7 @@ pub fn remove_if_expression(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         ctx: &'a RuleCtx<'b>,
         edits: &'a mut Vec<Edit>,
     }
+
     impl Visit for V<'_, '_> {
         fn expr(&mut self, e: &Expr) {
             let Expr::IfElse {
@@ -29,13 +30,16 @@ pub fn remove_if_expression(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
             else {
                 return;
             };
+
             let Some(text) = build_and_or(self.ctx, branches, else_value, 0) else {
                 return;
             };
+
             let (a, b) = self.ctx.bytes(*span);
             support::replace_keep_lines(self.ctx, a, b, &text, self.edits);
         }
     }
+
     walk_chunk(ctx.chunk, &mut V { ctx, edits });
 }
 
@@ -48,10 +52,13 @@ fn build_and_or(
     if idx == branches.len() {
         return Some(support::operand_text(ctx, else_value));
     }
+
     let (cond, value) = &branches[idx];
+
     if !support::is_never_falsy(value) {
         return None;
     }
+
     let tail = build_and_or(ctx, branches, else_value, idx + 1)?;
     // a nested chain has to stay one operand of the or above it
     let tail = if idx + 1 < branches.len() {
@@ -59,6 +66,7 @@ fn build_and_or(
     } else {
         tail
     };
+
     Some(format!(
         "{} and {} or {}",
         support::operand_text(ctx, cond),
@@ -77,6 +85,7 @@ pub fn convert_index_to_field(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         ctx: &'a RuleCtx<'b>,
         edits: &'a mut Vec<Edit>,
     }
+
     impl Visit for V<'_, '_> {
         fn expr(&mut self, e: &Expr) {
             match e {
@@ -88,6 +97,7 @@ pub fn convert_index_to_field(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
                         self.edits.push((from, to, format!(".{name}")));
                     }
                 }
+
                 Expr::Table { fields, .. } => {
                     for f in fields {
                         if let TableField::Computed { key, .. } = f
@@ -97,10 +107,12 @@ pub fn convert_index_to_field(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
                         }
                     }
                 }
+
                 _ => {}
             }
         }
     }
+
     walk_chunk(ctx.chunk, &mut V { ctx, edits });
 }
 
@@ -108,14 +120,18 @@ pub fn convert_index_to_field(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
 fn bracket_swap<'a>(ctx: &RuleCtx<'a>, key: &Expr) -> Option<(u32, u32, &'a str)> {
     let Expr::String(span) = key else { return None };
     let name = support::plain_string_value(ctx, *span)?;
+
     if !support::is_ident(name) {
         return None;
     }
+
     let open = span.start.checked_sub(1)?;
     let close = span.end;
+
     if ctx.tok_text(open) != "[" || ctx.toks.len() as u32 <= close || ctx.tok_text(close) != "]" {
         return None;
     }
+
     Some((tok_bytes(ctx, open).0, tok_bytes(ctx, close).1, name))
 }
 
@@ -128,29 +144,36 @@ pub fn convert_luau_number(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         ctx: &'a RuleCtx<'b>,
         edits: &'a mut Vec<Edit>,
     }
+
     impl Visit for V<'_, '_> {
         fn expr(&mut self, e: &Expr) {
             let Expr::Number(span) = e else { return };
             let text = self.ctx.text(*span);
+
             if let Some(new) = rewrite_number(text) {
                 let (a, b) = self.ctx.bytes(*span);
                 self.edits.push((a, b, new));
             }
         }
     }
+
     walk_chunk(ctx.chunk, &mut V { ctx, edits });
 }
 
 fn rewrite_number(text: &str) -> Option<String> {
     let cleaned: String = text.chars().filter(|&c| c != '_').collect();
     let lower = cleaned.to_ascii_lowercase();
+
     if let Some(bits) = lower.strip_prefix("0b") {
         if bits.is_empty() || !bits.chars().all(|c| c == '0' || c == '1') {
             return None;
         }
+
         let value = u64::from_str_radix(bits, 2).ok()?;
+
         return Some(format!("0x{value:X}"));
     }
+
     (cleaned != text).then_some(cleaned)
 }
 
@@ -163,32 +186,43 @@ pub fn remove_function_call_parens(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         ctx: &'a RuleCtx<'b>,
         edits: &'a mut Vec<Edit>,
     }
+
     impl Visit for V<'_, '_> {
         fn expr(&mut self, e: &Expr) {
             let Expr::Call { args, span, .. } = e else {
                 return;
             };
+
             let CallArgs::Paren(list) = args else { return };
+
             if list.len() != 1 {
                 return;
             }
+
             let arg = &list[0];
+
             if !matches!(arg, Expr::String(_) | Expr::Table { .. }) {
                 return;
             }
+
             let Some(open) = arg.span().start.checked_sub(1) else {
                 return;
             };
+
             let close = span.end - 1;
+
             if self.ctx.tok_text(open) != "(" || self.ctx.tok_text(close) != ")" {
                 return;
             }
+
             let (oa, ob) = tok_bytes(self.ctx, open);
             let (ca, cb) = tok_bytes(self.ctx, close);
+
             self.edits.push((oa, ob, String::new()));
             self.edits.push((ca, cb, String::new()));
         }
     }
+
     walk_chunk(ctx.chunk, &mut V { ctx, edits });
 }
 
@@ -206,6 +240,7 @@ pub fn convert_square_root_call(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         /// Calls used as statements, an expression cannot replace those
         statement_calls: Vec<TokSpan>,
     }
+
     impl Visit for V<'_, '_> {
         fn stmt(&mut self, s: &Stmt) {
             if let Stmt::Call(e, _) = s {
@@ -223,18 +258,24 @@ pub fn convert_square_root_call(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
             else {
                 return;
             };
+
             if method.is_some() || !is_math_sqrt(self.ctx, func) {
                 return;
             }
+
             let CallArgs::Paren(list) = args else { return };
+
             if list.len() != 1 || self.statement_calls.contains(span) {
                 return;
             }
+
             let base = support::operand_text(self.ctx, &list[0]);
             let (a, b) = self.ctx.bytes(*span);
+
             support::replace_keep_lines(self.ctx, a, b, &format!("({base} ^ 0.5)"), self.edits);
         }
     }
+
     walk_chunk(
         ctx.chunk,
         &mut V {
@@ -254,9 +295,11 @@ fn is_math_sqrt(ctx: &RuleCtx, func: &Expr) -> bool {
     else {
         return false;
     };
+
     let Expr::Name(base) = object.as_ref() else {
         return false;
     };
+
     ctx.text(*base) == "math" && ctx.text(*field) == "sqrt"
 }
 
@@ -408,6 +451,7 @@ mod tests {
     fn multiline_if_expression_keeps_its_lines() {
         let src = "local x = if c then\n    1\nelse\n    2\n";
         let out = run(src, remove_if_expression);
+
         assert_lines_kept(src, &out);
     }
 }

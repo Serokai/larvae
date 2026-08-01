@@ -22,11 +22,13 @@ pub fn apply(name: &str, ctx: &RuleCtx, edits: &mut Vec<Edit>, diags: &mut Vec<D
         referenced: false,
         bound: false,
     };
+
     engine::walk_chunk(ctx.chunk, &mut usage);
     // the file already owns the name, ours would only shadow or be shadowed
     if !usage.referenced || usage.bound {
         return;
     }
+
     let Some(dm_path) = ctx.dm_path else {
         diags.push(Diag::warning(
             path,
@@ -34,8 +36,10 @@ pub fn apply(name: &str, ctx: &RuleCtx, edits: &mut Vec<Edit>, diags: &mut Vec<D
                 "{name} is referenced but no mount covers this file, so its DataModel path is unknown"
             ),
         ).with_help("add it to [requires.mounts] or mount it in the Rojo project file"));
+
         return;
     };
+
     let at = insert_at(ctx);
     edits.push((
         at,
@@ -52,10 +56,13 @@ fn insert_at(ctx: &RuleCtx) -> u32 {
     let Some(first) = ctx.toks.first() else {
         return ctx.src.len() as u32;
     };
+
     let line_start = match ctx.src[..first.start as usize].rfind('\n') {
         Some(i) => i as u32 + 1,
+
         None => 0,
     };
+
     if ctx.src[line_start as usize..first.start as usize]
         .bytes()
         .all(|b| b == b' ' || b == b'\t')
@@ -89,26 +96,33 @@ impl Visit for Usage<'_, '_> {
                     self.mark(binding.name);
                 }
             }
+
             Stmt::LocalFunction(f) => {
                 self.mark(f.name);
+
                 for param in &f.body.params {
                     self.mark(param.name);
                 }
             }
+
             Stmt::Function(f) => {
                 if let Some(first) = f.path.first() {
                     self.mark(*first);
                 }
+
                 for param in &f.body.params {
                     self.mark(param.name);
                 }
             }
+
             Stmt::NumericFor(n) => self.mark(n.var.name),
+
             Stmt::GenericFor(n) => {
                 for var in &n.vars {
                     self.mark(var.name);
                 }
             }
+
             _ => {}
         }
     }
@@ -120,11 +134,13 @@ impl Visit for Usage<'_, '_> {
                     self.referenced = true;
                 }
             }
+
             Expr::Function { body, .. } => {
                 for param in &body.params {
                     self.mark(param.name);
                 }
             }
+
             _ => {}
         }
     }
@@ -169,6 +185,7 @@ mod tests {
     fn warns_when_the_path_is_unknown() {
         let mut diags = Vec::new();
         let src = "return MODULE_PATH\n";
+
         assert_eq!(run_full(ON, src, None, &mut diags), src);
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].severity, Severity::Warning);

@@ -20,15 +20,18 @@ fn read(root: &Path, rel: &str) -> String {
 fn project(rules: &str) -> tempfile::TempDir {
     let tmp = tempfile::tempdir().unwrap();
     write(tmp.path(), "coldluau.toml", &format!("[rules]\n{rules}\n"));
+
     tmp
 }
 
 fn build(root: &Path) {
     let config = Config::load_or_default(root).unwrap();
     let outcome = pipeline::run(root, &config, true).unwrap();
+
     for d in &outcome.diags {
         eprintln!("{d}");
     }
+
     assert!(!outcome.has_errors(), "unexpected errors");
 }
 
@@ -48,10 +51,12 @@ what came out the other side
 fn transform(rules: &str, before: &str) -> String {
     let tmp = project(rules);
     let root = tmp.path();
+
     write(root, "src/init.luau", before);
     build(root);
     let after = read(root, "dist/init.luau");
     same_line_count(before, &after);
+
     after
 }
 
@@ -481,5 +486,6 @@ fn method_definitions_never_gain_two_self_parameters() {
 fn planned_rules_still_name_their_milestone() {
     let tmp = project("remove_unused_variable = true");
     let err = Config::load_or_default(tmp.path()).unwrap_err().to_string();
+
     assert!(err.contains("M2"), "{err}");
 }

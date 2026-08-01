@@ -65,6 +65,7 @@ pub fn term_width() -> usize {
     if let Some(cols) = std::env::var("COLUMNS").ok().and_then(|c| c.parse().ok()) {
         return cols;
     }
+
     terminal_size::terminal_size()
         .map(|(w, _)| w.0 as usize)
         .unwrap_or(100)
@@ -82,10 +83,12 @@ pub fn rel(path: &std::path::Path) -> String {
         {
             if let Ok(stripped) = candidate.strip_prefix(&cwd) {
                 let s = stripped.display().to_string();
+
                 return if s.is_empty() { ".".to_owned() } else { s };
             }
         }
     }
+
     path.display().to_string()
 }
 
@@ -93,6 +96,7 @@ pub fn rel(path: &std::path::Path) -> String {
 pub fn visible_width(line: &str) -> usize {
     let mut width = 0;
     let mut chars = line.chars();
+
     while let Some(c) = chars.next() {
         if c == '\x1b' {
             for e in chars.by_ref() {
@@ -104,6 +108,7 @@ pub fn visible_width(line: &str) -> usize {
             width += 1;
         }
     }
+
     width
 }
 
@@ -125,21 +130,30 @@ pub fn print_error(message: &str) {
 /// Themed y/N prompt on stderr, empty input or no tty picks the default
 pub fn confirm(question: &str, default: bool) -> bool {
     use std::io::Write;
+
     if !std::io::stdin().is_terminal() {
         return default;
     }
+
     let color = want_color_stderr();
     let hint = if default { "[Y/n]" } else { "[y/N]" };
+
     eprint!("{} {question} {hint} ", accent("?", color));
+
     let _ = std::io::stderr().flush();
     let mut line = String::new();
+
     if std::io::stdin().read_line(&mut line).is_err() {
         return default;
     }
+
     match line.trim().to_lowercase().as_str() {
         "y" | "yes" => true,
+
         "n" | "no" => false,
+
         "" => default,
+
         _ => false,
     }
 }

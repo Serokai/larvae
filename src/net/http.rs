@@ -38,6 +38,7 @@ pub fn get_bytes(url: &str) -> Result<Vec<u8>> {
             let Some(next) = resp.header("Location") else {
                 bail!("redirect from {url} without a Location header");
             };
+
             url = next.to_string();
             continue;
         }

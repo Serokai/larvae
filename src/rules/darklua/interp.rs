@@ -29,18 +29,23 @@ pub fn remove_interpolated_string(ctx: &RuleCtx, edits: &mut Vec<Edit>, strategy
         edits: &'a mut Vec<Edit>,
         tostring_strategy: bool,
     }
+
     impl Visit for V<'_, '_> {
         fn expr(&mut self, e: &Expr) {
             let Expr::InterpString(span) = e else { return };
             let raw = self.ctx.text(*span);
+
             let Some(pieces) = split(raw, self.ctx.quote) else {
                 return;
             };
+
             let text = render(&pieces, self.ctx.quote, self.tostring_strategy);
             let (a, b) = self.ctx.bytes(*span);
+
             self.edits.push((a, b, text));
         }
     }
+
     walk_chunk(
         ctx.chunk,
         &mut V {
@@ -70,10 +75,13 @@ fn split(raw: &str, quote: char) -> Option<Vec<Piece>> {
         match bytes[i] {
             b'\\' => {
                 let next = *bytes.get(i + 1)?;
+
                 match next {
                     // only meaningful inside backticks, a quoted string takes it plain
                     b'{' => text.push('{'),
+
                     b'`' => text.push('`'),
+
                     _ => {
                         let c = body[i + 1..].chars().next()?;
                         text.push('\\');
@@ -82,29 +90,36 @@ fn split(raw: &str, quote: char) -> Option<Vec<Piece>> {
                         continue;
                     }
                 }
+
                 i += 2;
             }
+
             b'{' => {
                 let (expr, next) = scan_expr(body, i)?;
                 // a nested backtick string would never be visited again
                 if expr.contains('`') || expr.trim().is_empty() {
                     return None;
                 }
+
                 pieces.push(Piece::Text(std::mem::take(&mut text)));
                 pieces.push(Piece::Value(expr.to_string()));
                 i = next;
             }
+
             // a quoted string cannot hold a raw newline without shifting lines
             b'\n' => return None,
+
             b'%' => {
                 text.push_str("%%");
                 i += 1;
             }
+
             c if c == quote as u8 => {
                 text.push('\\');
                 text.push(quote);
                 i += 1;
             }
+
             _ => {
                 let c = body[i..].chars().next()?;
                 text.push(c);
@@ -112,7 +127,9 @@ fn split(raw: &str, quote: char) -> Option<Vec<Piece>> {
             }
         }
     }
+
     pieces.push(Piece::Text(text));
+
     Some(pieces)
 }
 
@@ -121,34 +138,44 @@ fn scan_expr(body: &str, open: usize) -> Option<(&str, usize)> {
     let bytes = body.as_bytes();
     let mut depth = 0usize;
     let mut i = open;
+
     while i < bytes.len() {
         match bytes[i] {
             b'{' => {
                 depth += 1;
                 i += 1;
             }
+
             b'}' => {
                 depth -= 1;
                 i += 1;
+
                 if depth == 0 {
                     return Some((&body[open + 1..i - 1], i));
                 }
             }
+
             // a string inside the braces must not unbalance the scan
             q @ (b'"' | b'\'') => {
                 i += 1;
+
                 while i < bytes.len() && bytes[i] != q {
                     if bytes[i] == b'\\' {
                         i += 1;
                     }
+
                     i += 1;
                 }
+
                 i += 1;
             }
+
             b'\\' => i += 2,
+
             _ => i += 1,
         }
     }
+
     None
 }
 
@@ -157,14 +184,17 @@ fn render(pieces: &[Piece], quote: char, tostring_strategy: bool) -> String {
         .iter()
         .filter_map(|p| match p {
             Piece::Value(v) => Some(v),
+
             Piece::Text(_) => None,
         })
         .collect();
 
     let mut format = String::new();
+
     for p in pieces {
         match p {
             Piece::Text(t) => format.push_str(t),
+
             Piece::Value(_) => format.push_str(if tostring_strategy { "%*" } else { "%s" }),
         }
     }

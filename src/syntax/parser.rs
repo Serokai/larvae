@@ -28,10 +28,13 @@ pub fn parse(src: &str, toks: &[Tok]) -> Result<Chunk, ParseError> {
         pos: 0,
         depth: 0,
     };
+
     let block = p.block()?;
+
     if !p.at_end() {
         return Err(p.err("unexpected token"));
     }
+
     Ok(Chunk { block })
 }
 
@@ -52,6 +55,7 @@ impl<'a> Parser<'a> {
     fn text_at(&self, n: usize) -> &'a str {
         match self.toks.get(self.pos + n) {
             Some(t) => t.text(self.src),
+
             None => "",
         }
     }
@@ -75,6 +79,7 @@ impl<'a> Parser<'a> {
     fn bump(&mut self) -> usize {
         let i = self.pos;
         self.pos += 1;
+
         i
     }
 
@@ -115,8 +120,10 @@ impl<'a> Parser<'a> {
     fn err(&self, message: &str) -> ParseError {
         let offset = match self.toks.get(self.pos) {
             Some(t) => t.start as usize,
+
             None => self.src.len(),
         };
+
         ParseError {
             offset,
             message: message.to_string(),
@@ -125,9 +132,11 @@ impl<'a> Parser<'a> {
 
     fn enter(&mut self) -> Result<(), ParseError> {
         self.depth += 1;
+
         if self.depth > MAX_DEPTH {
             return Err(self.err("expression or statement nests too deeply"));
         }
+
         Ok(())
     }
 
@@ -143,20 +152,25 @@ impl<'a> Parser<'a> {
 
     fn block(&mut self) -> Result<Block, ParseError> {
         self.enter()?;
+
         let start = self.pos;
         let mut stmts = Vec::new();
+
         while !self.at_end() && !self.at_block_end() {
             let is_return = self.at("return");
             stmts.push(self.stmt()?);
+
             if is_return {
                 // a return ends its block, only `;` may follow
                 if self.at(";") {
                     let i = self.bump();
                     stmts.push(Stmt::Empty(TokSpan::new(i, i + 1)));
                 }
+
                 break;
             }
         }
+
         self.leave();
         Ok(Block {
             stmts,
@@ -168,17 +182,22 @@ impl<'a> Parser<'a> {
         self.enter()?;
         let r = self.stmt_inner();
         self.leave();
+
         r
     }
 
     fn stmt_inner(&mut self) -> Result<Stmt, ParseError> {
         let start = self.pos;
+
         match self.text() {
             ";" => {
                 self.bump();
+
                 Ok(Stmt::Empty(TokSpan::new(start, self.pos)))
             }
+
             "if" => self.if_stmt(start),
+
             "while" => {
                 self.bump();
                 let cond = self.expr()?;
@@ -191,6 +210,7 @@ impl<'a> Parser<'a> {
                     span: TokSpan::new(start, self.pos),
                 }))
             }
+
             "do" => {
                 self.bump();
                 let block = self.block()?;
@@ -200,7 +220,9 @@ impl<'a> Parser<'a> {
                     span: TokSpan::new(start, self.pos),
                 }))
             }
+
             "for" => self.for_stmt(start),
+
             "repeat" => {
                 self.bump();
                 let block = self.block()?;
@@ -212,8 +234,11 @@ impl<'a> Parser<'a> {
                     span: TokSpan::new(start, self.pos),
                 }))
             }
+
             "function" => self.function_stmt(start, Vec::new()),
+
             "local" | "const" => self.local_stmt(start),
+
             "return" => {
                 self.bump();
                 let values = if self.at_end() || self.at_block_end() || self.at(";") {
@@ -221,21 +246,28 @@ impl<'a> Parser<'a> {
                 } else {
                     self.expr_list()?
                 };
+
                 Ok(Stmt::Return(Return {
                     values,
                     span: TokSpan::new(start, self.pos),
                 }))
             }
+
             "break" => {
                 self.bump();
+
                 Ok(Stmt::Break(TokSpan::new(start, self.pos)))
             }
+
             "continue" if self.continue_is_keyword() => {
                 self.bump();
+
                 Ok(Stmt::Continue(TokSpan::new(start, self.pos)))
             }
+
             "@" => {
                 let attributes = self.attributes()?;
+
                 if self.at("local") {
                     self.bump();
                     self.local_function(start, attributes)
@@ -243,8 +275,11 @@ impl<'a> Parser<'a> {
                     self.function_stmt(start, attributes)
                 }
             }
+
             "export" if self.text_at(1) == "type" => self.type_alias(start),
+
             "type" if self.type_is_alias() => self.type_alias(start),
+
             _ => self.expr_stmt(start),
         }
     }
@@ -263,6 +298,7 @@ impl<'a> Parser<'a> {
         if self.text_at(1) == "function" {
             return true;
         }
+
         matches!(self.kind_at(1), Some(TokKind::Ident))
             && !is_reserved(self.text_at(1))
             && matches!(self.text_at(2), "=" | "<")
@@ -270,31 +306,38 @@ impl<'a> Parser<'a> {
 
     fn attributes(&mut self) -> Result<Vec<TokSpan>, ParseError> {
         let mut out = Vec::new();
+
         while self.at("@") {
             let start = self.bump();
             self.expect_name()?;
             out.push(TokSpan::new(start, self.pos));
         }
+
         Ok(out)
     }
 
     fn if_stmt(&mut self, start: usize) -> Result<Stmt, ParseError> {
         self.expect("if")?;
+
         let mut branches = Vec::new();
         let cond = self.expr()?;
+
         self.expect("then")?;
         branches.push((cond, self.block()?));
+
         while self.at("elseif") {
             self.bump();
             let cond = self.expr()?;
             self.expect("then")?;
             branches.push((cond, self.block()?));
         }
+
         let else_block = if self.eat("else") {
             Some(self.block()?)
         } else {
             None
         };
+
         self.expect("end")?;
         Ok(Stmt::If(If {
             branches,
@@ -306,6 +349,7 @@ impl<'a> Parser<'a> {
     fn for_stmt(&mut self, start: usize) -> Result<Stmt, ParseError> {
         self.expect("for")?;
         let first = self.binding()?;
+
         if self.eat("=") {
             let from = self.expr()?;
             self.expect(",")?;
@@ -315,9 +359,11 @@ impl<'a> Parser<'a> {
             } else {
                 None
             };
+
             self.expect("do")?;
             let block = self.block()?;
             self.expect("end")?;
+
             return Ok(Stmt::NumericFor(NumericFor {
                 var: first,
                 start: from,
@@ -327,10 +373,13 @@ impl<'a> Parser<'a> {
                 span: TokSpan::new(start, self.pos),
             }));
         }
+
         let mut vars = vec![first];
+
         while self.eat(",") {
             vars.push(self.binding()?);
         }
+
         self.expect("in")?;
         let exprs = self.expr_list()?;
         self.expect("do")?;
@@ -347,23 +396,30 @@ impl<'a> Parser<'a> {
     fn local_stmt(&mut self, start: usize) -> Result<Stmt, ParseError> {
         let is_const = self.at("const");
         self.bump();
+
         if self.at("function") {
             return self.local_function(start, Vec::new());
         }
+
         if self.at("@") {
             let attributes = self.attributes()?;
+
             return self.local_function(start, attributes);
         }
+
         let keyword = TokSpan::new(start, start + 1);
         let mut names = vec![self.binding()?];
+
         while self.eat(",") {
             names.push(self.binding()?);
         }
+
         let values = if self.eat("=") {
             self.expr_list()?
         } else {
             Vec::new()
         };
+
         Ok(Stmt::Local(Local {
             keyword,
             is_const,
@@ -379,8 +435,10 @@ impl<'a> Parser<'a> {
         attributes: Vec<TokSpan>,
     ) -> Result<Stmt, ParseError> {
         self.expect("function")?;
+
         let name = self.expect_name()?;
         let body = self.function_body()?;
+
         Ok(Stmt::LocalFunction(LocalFunction {
             attributes,
             name,
@@ -395,8 +453,10 @@ impl<'a> Parser<'a> {
         attributes: Vec<TokSpan>,
     ) -> Result<Stmt, ParseError> {
         self.expect("function")?;
+
         let mut path = vec![self.expect_name()?];
         let mut is_method = false;
+
         loop {
             if self.eat(".") {
                 path.push(self.expect_name()?);
@@ -409,6 +469,7 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
+
         let body = self.function_body()?;
         Ok(Stmt::Function(Function {
             attributes,
@@ -426,8 +487,10 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
+
         self.expect("(")?;
         let mut params = Vec::new();
+
         if !self.at(")") {
             loop {
                 if self.at("...") {
@@ -437,30 +500,36 @@ impl<'a> Parser<'a> {
                     } else {
                         None
                     };
+
                     params.push(Param {
                         name: TokSpan::new(i, i + 1),
                         is_vararg: true,
                         ty,
                     });
+
                     break;
                 }
+
                 let b = self.binding()?;
                 params.push(Param {
                     name: b.name,
                     is_vararg: false,
                     ty: b.ty,
                 });
+
                 if !self.eat(",") {
                     break;
                 }
             }
         }
+
         self.expect(")")?;
         let ret_type = if self.eat(":") {
             Some(self.type_ret()?)
         } else {
             None
         };
+
         let block = self.block()?;
         self.expect("end")?;
         Ok(FunctionBody {
@@ -479,27 +548,33 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
+
         Ok(Binding { name, ty })
     }
 
     fn type_alias(&mut self, start: usize) -> Result<Stmt, ParseError> {
         let exported = self.eat("export");
         self.expect("type")?;
+
         if self.at("function") {
             // `type function f() ... end`, a user defined type function
             self.bump();
             let name = self.expect_name()?;
             self.function_body()?;
+
             return Ok(Stmt::TypeAlias(TypeAlias {
                 exported,
                 name,
                 span: TokSpan::new(start, self.pos),
             }));
         }
+
         let name = self.expect_name()?;
+
         if self.at("<") {
             self.angle_span()?;
         }
+
         self.expect("=")?;
         self.type_()?;
         Ok(Stmt::TypeAlias(TypeAlias {
@@ -514,15 +589,19 @@ impl<'a> Parser<'a> {
         // assignment, plain or compound
         if self.at("=") || self.at(",") || is_compound_op(self.text()) {
             let mut targets = vec![first];
+
             while self.eat(",") {
                 targets.push(self.suffixed_expr()?);
             }
+
             let op_idx = if is_compound_op(self.text()) {
                 self.bump()
             } else {
                 self.expect("=")?
             };
+
             let values = self.expr_list()?;
+
             return Ok(Stmt::Assign(Assign {
                 targets,
                 op: TokSpan::new(op_idx, op_idx + 1),
@@ -530,17 +609,21 @@ impl<'a> Parser<'a> {
                 span: TokSpan::new(start, self.pos),
             }));
         }
+
         match &first {
             Expr::Call { .. } => Ok(Stmt::Call(first, TokSpan::new(start, self.pos))),
+
             _ => Err(self.err("this expression is not a statement")),
         }
     }
 
     fn expr_list(&mut self) -> Result<Vec<Expr>, ParseError> {
         let mut out = vec![self.expr()?];
+
         while self.eat(",") {
             out.push(self.expr()?);
         }
+
         Ok(out)
     }
 
@@ -556,6 +639,7 @@ impl<'a> Parser<'a> {
         let mut left = if is_unary_op(self.text()) {
             let op = self.bump();
             let operand = self.sub_expr(UNARY_PRIORITY)?;
+
             Expr::Unary {
                 op: TokSpan::new(op, op + 1),
                 operand: Box::new(operand),
@@ -569,8 +653,10 @@ impl<'a> Parser<'a> {
             if left_prec <= limit {
                 break;
             }
+
             let op = self.bump();
             let rhs = self.sub_expr(right_prec)?;
+
             left = Expr::Binary {
                 op: TokSpan::new(op, op + 1),
                 lhs: Box::new(left),
@@ -578,7 +664,9 @@ impl<'a> Parser<'a> {
                 span: TokSpan::new(start, self.pos),
             };
         }
+
         self.leave();
+
         Ok(left)
     }
 
@@ -587,20 +675,28 @@ impl<'a> Parser<'a> {
         let mut e = match self.text() {
             "nil" => {
                 self.bump();
+
                 Expr::Nil(TokSpan::new(start, self.pos))
             }
+
             "true" => {
                 self.bump();
+
                 Expr::True(TokSpan::new(start, self.pos))
             }
+
             "false" => {
                 self.bump();
+
                 Expr::False(TokSpan::new(start, self.pos))
             }
+
             "..." => {
                 self.bump();
+
                 Expr::Vararg(TokSpan::new(start, self.pos))
             }
+
             "function" => {
                 self.bump();
                 let body = self.function_body()?;
@@ -610,6 +706,7 @@ impl<'a> Parser<'a> {
                     span: TokSpan::new(start, self.pos),
                 }
             }
+
             "@" => {
                 let attributes = self.attributes()?;
                 self.expect("function")?;
@@ -620,24 +717,34 @@ impl<'a> Parser<'a> {
                     span: TokSpan::new(start, self.pos),
                 }
             }
+
             "{" => self.table_expr()?,
+
             "if" => self.if_else_expr()?,
+
             _ => match self.kind_at(0) {
                 Some(TokKind::Number) => {
                     self.bump();
+
                     Expr::Number(TokSpan::new(start, self.pos))
                 }
+
                 Some(TokKind::Str { .. }) => {
                     self.bump();
+
                     Expr::String(TokSpan::new(start, self.pos))
                 }
+
                 Some(TokKind::InterpStr) => {
                     self.bump();
+
                     Expr::InterpString(TokSpan::new(start, self.pos))
                 }
+
                 _ => self.suffixed_expr()?,
             },
         };
+
         // `expr :: T` binds tighter than any binary operator
         while self.at("::") {
             self.bump();
@@ -648,28 +755,35 @@ impl<'a> Parser<'a> {
                 span: TokSpan::new(start, self.pos),
             };
         }
+
         Ok(e)
     }
 
     fn primary_expr(&mut self) -> Result<Expr, ParseError> {
         let start = self.pos;
+
         if self.at("(") {
             self.bump();
             let inner = self.expr()?;
             self.expect(")")?;
+
             return Ok(Expr::Paren {
                 inner: Box::new(inner),
                 span: TokSpan::new(start, self.pos),
             });
         }
+
         let name = self.expect_name()?;
+
         Ok(Expr::Name(name))
     }
 
     fn suffixed_expr(&mut self) -> Result<Expr, ParseError> {
         self.enter()?;
+
         let start = self.pos;
         let mut e = self.primary_expr()?;
+
         loop {
             match self.text() {
                 "." => {
@@ -681,6 +795,7 @@ impl<'a> Parser<'a> {
                         span: TokSpan::new(start, self.pos),
                     };
                 }
+
                 "[" => {
                     self.bump();
                     let key = self.expr()?;
@@ -691,10 +806,13 @@ impl<'a> Parser<'a> {
                         span: TokSpan::new(start, self.pos),
                     };
                 }
+
                 ":" => {
                     self.bump();
+
                     let method = self.expect_name()?;
                     let args = self.call_args()?;
+
                     e = Expr::Call {
                         func: Box::new(e),
                         method: Some(method),
@@ -702,6 +820,7 @@ impl<'a> Parser<'a> {
                         span: TokSpan::new(start, self.pos),
                     };
                 }
+
                 "(" | "{" => {
                     let args = self.call_args()?;
                     e = Expr::Call {
@@ -711,6 +830,7 @@ impl<'a> Parser<'a> {
                         span: TokSpan::new(start, self.pos),
                     };
                 }
+
                 _ => {
                     if matches!(self.kind_at(0), Some(TokKind::Str { .. })) {
                         let args = self.call_args()?;
@@ -726,7 +846,9 @@ impl<'a> Parser<'a> {
                 }
             }
         }
+
         self.leave();
+
         Ok(e)
     }
 
@@ -738,17 +860,24 @@ impl<'a> Parser<'a> {
             } else {
                 self.expr_list()?
             };
+
             self.expect(")")?;
+
             return Ok(CallArgs::Paren(args));
         }
+
         if self.at("{") {
             let table = self.table_expr()?;
+
             return Ok(CallArgs::Table(Box::new(table)));
         }
+
         if matches!(self.kind_at(0), Some(TokKind::Str { .. })) {
             let i = self.bump();
+
             return Ok(CallArgs::Str(TokSpan::new(i, i + 1)));
         }
+
         Err(self.err(&format!("expected call arguments, found {}", self.found())))
     }
 
@@ -756,10 +885,12 @@ impl<'a> Parser<'a> {
         let start = self.pos;
         self.expect("{")?;
         let mut fields = Vec::new();
+
         while !self.at("}") {
             if self.at_end() {
                 return Err(self.err("unterminated table"));
             }
+
             if self.at("[") {
                 self.bump();
                 let key = self.expr()?;
@@ -775,10 +906,12 @@ impl<'a> Parser<'a> {
             } else {
                 fields.push(TableField::Positional(self.expr()?));
             }
+
             if !self.eat(",") && !self.eat(";") {
                 break;
             }
         }
+
         self.expect("}")?;
         Ok(Expr::Table {
             fields,
@@ -789,16 +922,20 @@ impl<'a> Parser<'a> {
     fn if_else_expr(&mut self) -> Result<Expr, ParseError> {
         let start = self.pos;
         self.expect("if")?;
+
         let mut branches = Vec::new();
         let cond = self.expr()?;
+
         self.expect("then")?;
         branches.push((cond, self.expr()?));
+
         while self.at("elseif") {
             self.bump();
             let cond = self.expr()?;
             self.expect("then")?;
             branches.push((cond, self.expr()?));
         }
+
         self.expect("else")?;
         let else_value = self.expr()?;
         Ok(Expr::IfElse {
@@ -815,29 +952,39 @@ impl<'a> Parser<'a> {
         let start = self.pos;
         self.expect("<")?;
         let mut depth = 1usize;
+
         while depth > 0 {
             if self.at_end() {
                 return Err(self.err("unterminated generic parameter list"));
             }
+
             match self.text() {
                 "<" => depth += 1,
+
                 ">" => depth -= 1,
+
                 ">=" if depth == 1 => {
                     return Err(self.err("write `> =` here, `>=` reads as one operator"));
                 }
+
                 _ => {}
             }
+
             self.bump();
         }
+
         Ok(TokSpan::new(start, self.pos))
     }
 
     fn type_(&mut self) -> Result<TokSpan, ParseError> {
         self.enter()?;
+
         let start = self.pos;
         let r = self.type_body();
+
         self.leave();
         r?;
+
         Ok(TokSpan::new(start, self.pos))
     }
 
@@ -846,11 +993,14 @@ impl<'a> Parser<'a> {
         if self.at("|") || self.at("&") {
             self.bump();
         }
+
         self.type_suffixed()?;
+
         while self.at("|") || self.at("&") {
             self.bump();
             self.type_suffixed()?;
         }
+
         Ok(())
     }
 
@@ -861,6 +1011,7 @@ impl<'a> Parser<'a> {
 
     fn type_suffixed(&mut self) -> Result<(), ParseError> {
         self.type_primary()?;
+
         loop {
             if self.at("?") {
                 self.bump();
@@ -871,6 +1022,7 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
+
         Ok(())
     }
 
@@ -878,6 +1030,7 @@ impl<'a> Parser<'a> {
         self.enter()?;
         let r = self.type_primary_inner();
         self.leave();
+
         r
     }
 
@@ -885,32 +1038,42 @@ impl<'a> Parser<'a> {
         match self.text() {
             "nil" | "true" | "false" => {
                 self.bump();
+
                 Ok(())
             }
+
             "typeof" if self.text_at(1) == "(" => {
                 self.bump();
                 self.bump();
                 self.expr()?;
                 self.expect(")")?;
+
                 Ok(())
             }
+
             "..." => {
                 // variadic element of a type pack
                 self.bump();
+
                 self.type_suffixed()
             }
+
             // a generic function type, `<T>(T) -> T`
             "<" => {
                 self.angle_span()?;
+
                 self.type_primary_inner()
             }
+
             "(" => {
                 // either a parenthesized type or a function type's parameters
                 self.bump();
+
                 if !self.at(")") {
                     loop {
                         if self.at("...") {
                             self.bump();
+
                             if !self.at(")") && !self.at(",") {
                                 self.type_suffixed()?;
                             }
@@ -920,38 +1083,51 @@ impl<'a> Parser<'a> {
                                 self.bump();
                                 self.bump();
                             }
+
                             self.type_body()?;
                         }
+
                         if !self.eat(",") {
                             break;
                         }
                     }
                 }
+
                 self.expect(")")?;
+
                 Ok(())
             }
+
             "{" => self.type_table(),
+
             _ => match self.kind_at(0) {
                 Some(TokKind::Str { .. }) => {
                     // a singleton string type
                     self.bump();
+
                     Ok(())
                 }
+
                 Some(TokKind::Ident) if !is_reserved(self.text()) => {
                     self.bump();
+
                     if self.at(".") {
                         self.bump();
                         self.expect_name()?;
                     }
+
                     if self.at("<") {
                         self.angle_span()?;
                     }
+
                     // a generic type pack, `T...`
                     if self.at("...") {
                         self.bump();
                     }
+
                     Ok(())
                 }
+
                 _ => Err(self.err(&format!("expected a type, found {}", self.found()))),
             },
         }
@@ -959,10 +1135,12 @@ impl<'a> Parser<'a> {
 
     fn type_table(&mut self) -> Result<(), ParseError> {
         self.expect("{")?;
+
         while !self.at("}") {
             if self.at_end() {
                 return Err(self.err("unterminated table type"));
             }
+
             if self.at("[") {
                 self.bump();
                 self.type_body()?;
@@ -976,6 +1154,7 @@ impl<'a> Parser<'a> {
                 {
                     self.bump();
                 }
+
                 if self.at_name() && self.text_at(1) == ":" {
                     self.bump();
                     self.bump();
@@ -985,11 +1164,14 @@ impl<'a> Parser<'a> {
                     self.type_body()?;
                 }
             }
+
             if !self.eat(",") && !self.eat(";") {
                 break;
             }
         }
+
         self.expect("}")?;
+
         Ok(())
     }
 }
@@ -1033,12 +1215,19 @@ fn is_compound_op(s: &str) -> bool {
 fn binop_priority(s: &str) -> Option<(u8, u8)> {
     Some(match s {
         "or" => (1, 1),
+
         "and" => (2, 2),
+
         "<" | ">" | "<=" | ">=" | "~=" | "==" => (3, 3),
+
         ".." => (9, 8),
+
         "+" | "-" => (10, 10),
+
         "*" | "/" | "//" | "%" => (11, 11),
+
         "^" => (14, 13),
+
         _ => return None,
     })
 }

@@ -45,25 +45,30 @@ impl LuaurcIndex {
             .map_err(|e| format!("invalid .luaurc at {}: {e}", crate::ui::rel(path)))?;
         let dir = path.parent().unwrap_or(Path::new("")).to_owned();
         let entry = self.dirs.entry(dir).or_default();
+
         for (name, value) in parsed.aliases {
             let name = name.strip_prefix('@').unwrap_or(&name).to_lowercase();
             entry.aliases.insert(name, value);
         }
+
         Ok(())
     }
 
     /// Look up an alias for a file, walking upward to the root, returns the value and its defining dir
     pub fn lookup(&self, from_dir: &Path, alias: &str) -> Option<(&str, &Path)> {
         let mut dir = from_dir;
+
         loop {
             if let Some((key, d)) = self.dirs.get_key_value(dir)
                 && let Some(found) = d.aliases.get(alias)
             {
                 return Some((found.as_str(), key.as_path()));
             }
+
             if dir == self.root {
                 return None;
             }
+
             dir = dir.parent()?;
             // Never walk above the project root
             if !dir.starts_with(&self.root) && dir != self.root {

@@ -10,19 +10,24 @@ use coldluau::syntax::{lexer, parser, printer};
 fn round_trip(src: &str) {
     let lexed = match lexer::lex(src) {
         Ok(l) => l,
+
         Err(e) => panic!("lex error at {}: {}\nsource:\n{src}", e.offset, e.message),
     };
+
     let chunk = match parser::parse(src, &lexed.toks) {
         Ok(c) => c,
+
         Err(e) => {
             let upto = &src[..e.offset.min(src.len())];
             let line = upto.matches('\n').count() + 1;
+
             panic!(
                 "parse error at line {line} (byte {}): {}\nsource:\n{src}",
                 e.offset, e.message
             );
         }
     };
+
     let holes = printer::coverage_errors(&chunk);
     assert!(holes.is_empty(), "coverage holes {holes:?}\nsource:\n{src}");
     let out = printer::print_chunk(src, &lexed.toks, &chunk);
@@ -222,10 +227,12 @@ fn deep_nesting_errors_instead_of_crashing() {
     // a stack overflow here is the darklua bug class we designed out
     let deep = format!("local x = {}1{}", "(".repeat(5000), ")".repeat(5000));
     let lexed = lexer::lex(&deep).unwrap();
+
     assert!(parser::parse(&deep, &lexed.toks).is_err());
 
     let deep_tables = format!("local t = {}{}", "{".repeat(5000), "}".repeat(5000));
     let lexed = lexer::lex(&deep_tables).unwrap();
+
     assert!(parser::parse(&deep_tables, &lexed.toks).is_err());
 }
 
@@ -238,8 +245,10 @@ fn mutations_never_panic() {
     let interesting = br#""'`[]{}()\\
 -"#;
     let mut checked = 0usize;
+
     for src in CORPUS.iter().filter(|s| s.len() < 400) {
         let bytes = src.as_bytes();
+
         for pos in 0..bytes.len() {
             for &b in interesting {
                 let mut m = bytes.to_vec();
@@ -247,14 +256,17 @@ fn mutations_never_panic() {
                 let Ok(text) = String::from_utf8(m) else {
                     continue;
                 };
+
                 if let Ok(lexed) = lexer::lex(&text) {
                     // must terminate and must not panic, either result is fine
                     let _ = parser::parse(&text, &lexed.toks);
                 }
+
                 checked += 1;
             }
         }
     }
+
     assert!(
         checked > 1000,
         "expected a decent mutation count, got {checked}"
@@ -268,7 +280,9 @@ fn truncations_never_panic() {
             if !src.is_char_boundary(cut) {
                 continue;
             }
+
             let text = &src[..cut];
+
             if let Ok(lexed) = lexer::lex(text) {
                 let _ = parser::parse(text, &lexed.toks);
             }

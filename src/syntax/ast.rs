@@ -19,6 +19,7 @@ impl TokSpan {
             end: end as u32,
         }
     }
+
     pub fn is_empty(&self) -> bool {
         self.start == self.end
     }
@@ -61,17 +62,29 @@ impl Stmt {
     pub fn span(&self) -> TokSpan {
         match self {
             Stmt::Empty(s) | Stmt::Break(s) | Stmt::Continue(s) | Stmt::Call(_, s) => *s,
+
             Stmt::Local(n) => n.span,
+
             Stmt::Assign(n) => n.span,
+
             Stmt::Do(n) => n.span,
+
             Stmt::While(n) => n.span,
+
             Stmt::Repeat(n) => n.span,
+
             Stmt::If(n) => n.span,
+
             Stmt::NumericFor(n) => n.span,
+
             Stmt::GenericFor(n) => n.span,
+
             Stmt::Function(n) => n.span,
+
             Stmt::LocalFunction(n) => n.span,
+
             Stmt::Return(n) => n.span,
+
             Stmt::TypeAlias(n) => n.span,
         }
     }
@@ -215,31 +228,37 @@ pub enum Expr {
         body: Box<FunctionBody>,
         span: TokSpan,
     },
+
     Table {
         fields: Vec<TableField>,
         span: TokSpan,
     },
+
     Binary {
         op: TokSpan,
         lhs: Box<Expr>,
         rhs: Box<Expr>,
         span: TokSpan,
     },
+
     Unary {
         op: TokSpan,
         operand: Box<Expr>,
         span: TokSpan,
     },
+
     Paren {
         inner: Box<Expr>,
         span: TokSpan,
     },
+
     /// `obj.field` or `obj[key]`
     Index {
         object: Box<Expr>,
         key: IndexKey,
         span: TokSpan,
     },
+
     /// `f(args)`, `obj:method(args)`
     Call {
         func: Box<Expr>,
@@ -247,12 +266,14 @@ pub enum Expr {
         args: CallArgs,
         span: TokSpan,
     },
+
     /// `if c then a else b` as an expression
     IfElse {
         branches: Vec<(Expr, Expr)>,
         else_value: Box<Expr>,
         span: TokSpan,
     },
+
     /// `expr :: T`
     TypeAssert {
         expr: Box<Expr>,

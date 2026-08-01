@@ -13,13 +13,21 @@ use crate::syntax::ast::*;
 fn compound_op(op: &str) -> Option<&'static str> {
     Some(match op {
         "+=" => "+",
+
         "-=" => "-",
+
         "*=" => "*",
+
         "/=" => "/",
+
         "%=" => "%",
+
         "^=" => "^",
+
         "..=" => "..",
+
         "//=" => "//",
+
         _ => return None,
     })
 }
@@ -27,9 +35,11 @@ fn compound_op(op: &str) -> Option<&'static str> {
 /// Back up over the spaces in front of an offset so no trailing blank is left
 fn trim_back(ctx: &RuleCtx, mut from: u32) -> u32 {
     let b = ctx.src.as_bytes();
+
     while from > 0 && matches!(b[from as usize - 1], b' ' | b'\t') {
         from -= 1;
     }
+
     from
 }
 
@@ -41,17 +51,21 @@ fn compound_parts<'a>(ctx: &RuleCtx<'a>, a: &'a Assign) -> Option<(&'a str, &'a 
     if a.targets.len() != 1 || a.values.len() != 1 {
         return None;
     }
+
     let op = ctx.text(a.op);
     let plain = compound_op(op)?;
     let target = &a.targets[0];
+
     if !support::is_reemittable(target) {
         return None;
     }
+
     let target_text = ctx.text(target.span());
     // saying it twice must not move any code onto a new line
     if target_text.contains('\n') {
         return None;
     }
+
     Some((target_text, &a.values[0], plain))
 }
 
@@ -60,6 +74,7 @@ fn guard_value(ctx: &RuleCtx, value: &Expr, edits: &mut Vec<Edit>) {
     if support::is_atomic(value) {
         return;
     }
+
     let (a, b) = ctx.bytes(value.span());
     insert(a, "(", edits);
     insert(b, ")", edits);
@@ -76,20 +91,25 @@ pub fn remove_compound_assignment(ctx: &RuleCtx, edits: &mut Vec<Edit>, floor_di
         edits: &'a mut Vec<Edit>,
         skip_floor: bool,
     }
+
     impl Visit for V<'_, '_> {
         fn stmt(&mut self, s: &Stmt) {
             let Stmt::Assign(a) = s else { return };
+
             if self.skip_floor && self.ctx.text(a.op) == "//=" {
                 return;
             }
+
             let Some((target, value, plain)) = compound_parts(self.ctx, a) else {
                 return;
             };
+
             let (oa, ob) = self.ctx.bytes(a.op);
             self.edits.push((oa, ob, format!("= {target} {plain}")));
             guard_value(self.ctx, value, self.edits);
         }
     }
+
     walk_chunk(
         ctx.chunk,
         &mut V {
@@ -113,14 +133,17 @@ pub fn remove_floor_division(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         ctx: &'a RuleCtx<'b>,
         edits: &'a mut Vec<Edit>,
     }
+
     impl Visit for V<'_, '_> {
         fn expr(&mut self, e: &Expr) {
             let Expr::Binary { op, span, .. } = e else {
                 return;
             };
+
             if self.ctx.text(*op) != "//" {
                 return;
             }
+
             let (a, b) = self.ctx.bytes(*span);
             insert(a, "math.floor(", self.edits);
             let (oa, ob) = self.ctx.bytes(*op);
@@ -130,24 +153,30 @@ pub fn remove_floor_division(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
 
         fn stmt(&mut self, s: &Stmt) {
             let Stmt::Assign(a) = s else { return };
+
             if self.ctx.text(a.op) != "//=" {
                 return;
             }
+
             let Some((target, value, _)) = compound_parts(self.ctx, a) else {
                 return;
             };
+
             let (oa, ob) = self.ctx.bytes(a.op);
             self.edits
                 .push((oa, ob, format!("= math.floor({target} /")));
             // the closing paren goes outside any guard the value needs
             let (va, vb) = self.ctx.bytes(value.span());
+
             if !support::is_atomic(value) {
                 insert(va, "(", self.edits);
                 insert(vb, ")", self.edits);
             }
+
             insert(vb, ")", self.edits);
         }
     }
+
     walk_chunk(ctx.chunk, &mut V { ctx, edits });
 }
 
@@ -157,15 +186,19 @@ pub fn make_assignment_local(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         ctx: &'a RuleCtx<'b>,
         edits: &'a mut Vec<Edit>,
     }
+
     impl Visit for V<'_, '_> {
         fn stmt(&mut self, s: &Stmt) {
             let Stmt::Local(l) = s else { return };
+
             if !l.is_const {
                 return;
             }
+
             self.ctx.replace(l.keyword, "local".to_string(), self.edits);
         }
     }
+
     walk_chunk(ctx.chunk, &mut V { ctx, edits });
 }
 
@@ -178,41 +211,53 @@ pub fn remove_nil_declaration(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         ctx: &'a RuleCtx<'b>,
         edits: &'a mut Vec<Edit>,
     }
+
     impl Visit for V<'_, '_> {
         fn stmt(&mut self, s: &Stmt) {
             let Stmt::Local(l) = s else { return };
+
             if l.is_const || l.values.is_empty() {
                 return;
             }
+
             let mut keep = l.values.len();
+
             while keep > 0 && matches!(l.values[keep - 1], Expr::Nil(_)) {
                 keep -= 1;
             }
+
             if keep == l.values.len() {
                 return;
             }
+
             let last_end = self.ctx.bytes(l.values.last().unwrap().span()).1;
             let from = if keep == 0 {
                 // every value was nil, the `=` goes with them
                 let Some(eq) = l.values[0].span().start.checked_sub(1) else {
                     return;
                 };
+
                 if self.ctx.tok_text(eq) != "=" {
                     return;
                 }
+
                 trim_back(self.ctx, tok_bytes(self.ctx, eq).0)
             } else {
                 let Some(comma) = l.values[keep].span().start.checked_sub(1) else {
                     return;
                 };
+
                 if self.ctx.tok_text(comma) != "," {
                     return;
                 }
+
                 tok_bytes(self.ctx, comma).0
             };
+
             self.ctx.delete_bytes_keep_lines(from, last_end, self.edits);
         }
     }
+
     walk_chunk(ctx.chunk, &mut V { ctx, edits });
 }
 
@@ -230,11 +275,14 @@ pub fn group_local_assignment(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         ctx: &'a RuleCtx<'b>,
         edits: &'a mut Vec<Edit>,
     }
+
     impl Visit for V<'_, '_> {
         fn block(&mut self, b: &Block) {
             let mut i = 0;
+
             while i < b.stmts.len() {
                 let run = run_length(self.ctx, &b.stmts, i);
+
                 if run >= 2 {
                     emit_group(self.ctx, &b.stmts[i..i + run], self.edits);
                     i += run;
@@ -244,18 +292,22 @@ pub fn group_local_assignment(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
             }
         }
     }
+
     walk_chunk(ctx.chunk, &mut V { ctx, edits });
 }
 
 /// A local declaration simple enough to fold into its neighbours
 fn groupable(s: &Stmt) -> bool {
     let Stmt::Local(l) = s else { return false };
+
     if l.is_const || l.values.is_empty() || l.values.len() != l.names.len() {
         return false;
     }
+
     if l.names.iter().any(|n| n.ty.is_some()) {
         return false;
     }
+
     !l.values
         .iter()
         .any(|v| support::has_call(v) || matches!(v, Expr::Vararg(_)))
@@ -266,38 +318,48 @@ fn run_length(ctx: &RuleCtx, stmts: &[Stmt], from: usize) -> usize {
     if !groupable(&stmts[from]) {
         return 0;
     }
+
     let mut bound: Vec<&str> = local_names(ctx, &stmts[from]);
     let mut end = from + 1;
+
     while end < stmts.len() {
         if !groupable(&stmts[end]) {
             break;
         }
+
         let Stmt::Local(l) = &stmts[end] else { break };
         // only whitespace may sit between two statements we are joining
         let gap_from = ctx.bytes(stmts[end - 1].span()).1;
         let gap_to = ctx.bytes(stmts[end].span()).0;
+
         if !ctx.src[gap_from as usize..gap_to as usize]
             .bytes()
             .all(|c| c.is_ascii_whitespace())
         {
             break;
         }
+
         if l.values.iter().any(|v| reads_any(ctx, v, &bound)) {
             break;
         }
+
         let names = local_names(ctx, &stmts[end]);
+
         if names.iter().any(|n| bound.contains(n)) {
             break;
         }
+
         bound.extend(names);
         end += 1;
     }
+
     end - from
 }
 
 fn local_names<'a>(ctx: &RuleCtx<'a>, s: &Stmt) -> Vec<&'a str> {
     match s {
         Stmt::Local(l) => l.names.iter().map(|n| ctx.text(n.name)).collect(),
+
         _ => Vec::new(),
     }
 }
@@ -309,6 +371,7 @@ fn reads_any(ctx: &RuleCtx, e: &Expr, names: &[&str]) -> bool {
         names: &'a [&'a str],
         found: bool,
     }
+
     impl Visit for V<'_, '_> {
         fn expr(&mut self, e: &Expr) {
             if let Expr::Name(s) = e
@@ -318,33 +381,42 @@ fn reads_any(ctx: &RuleCtx, e: &Expr, names: &[&str]) -> bool {
             }
         }
     }
+
     let mut v = V {
         ctx,
         names,
         found: false,
     };
+
     crate::rules::engine::walk_expr(e, &mut v);
+
     v.found
 }
 
 fn emit_group(ctx: &RuleCtx, run: &[Stmt], edits: &mut Vec<Edit>) {
     let from = ctx.bytes(run[0].span()).0;
     let to = ctx.bytes(run[run.len() - 1].span()).1;
+
     // a comment inside the run would be swallowed by the replacement
     if support::has_comment_in(ctx, from, to) {
         return;
     }
+
     let mut names: Vec<&str> = Vec::new();
     let mut values: Vec<&str> = Vec::new();
+
     for s in run {
         let Stmt::Local(l) = s else { return };
+
         for n in &l.names {
             names.push(ctx.text(n.name));
         }
+
         for v in &l.values {
             values.push(ctx.text(v.span()));
         }
     }
+
     let text = format!("local {} = {}", names.join(", "), values.join(", "));
     support::replace_keep_lines(ctx, from, to, &text, edits);
 }
@@ -470,6 +542,7 @@ mod tests {
     fn adjacent_locals_group() {
         let src = "local a = 1\nlocal b = 2\n";
         let out = run(src, group_local_assignment);
+
         assert!(out.starts_with("local a, b = 1, 2\n"), "{out}");
         assert_lines_kept(src, &out);
     }

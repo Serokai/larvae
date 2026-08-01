@@ -19,19 +19,23 @@ fn insert_self(ctx: &RuleCtx, body: &FunctionBody, edits: &mut Vec<Edit>) -> boo
     let Some(lparen) = support::params_lparen(ctx, body) else {
         return false;
     };
+
     let (_, after) = tok_bytes(ctx, lparen);
     let text = if body.params.is_empty() {
         "self"
     } else {
         "self, "
     };
+
     insert(after, text, edits);
+
     true
 }
 
 /// Token index of the `:` in front of a method name, verified against source
 fn method_colon(ctx: &RuleCtx, name: TokSpan) -> Option<u32> {
     let idx = name.start.checked_sub(1)?;
+
     (ctx.tok_text(idx) == ":").then_some(idx)
 }
 
@@ -41,26 +45,33 @@ pub fn remove_method_definition(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         ctx: &'a RuleCtx<'b>,
         edits: &'a mut Vec<Edit>,
     }
+
     impl Visit for V<'_, '_> {
         fn stmt(&mut self, s: &Stmt) {
             let Stmt::Function(f) = s else { return };
+
             if !f.is_method {
                 return;
             }
+
             let Some(&last) = f.path.last() else { return };
             let Some(colon) = method_colon(self.ctx, last) else {
                 return;
             };
+
             // both edits or neither, a dangling `.` would not compile
             let mut staged = Vec::new();
+
             if !insert_self(self.ctx, &f.body, &mut staged) {
                 return;
             }
+
             let (a, b) = tok_bytes(self.ctx, colon);
             self.edits.push((a, b, ".".to_string()));
             self.edits.append(&mut staged);
         }
     }
+
     walk_chunk(ctx.chunk, &mut V { ctx, edits });
 }
 
@@ -74,31 +85,40 @@ pub fn convert_function_to_assignment(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         ctx: &'a RuleCtx<'b>,
         edits: &'a mut Vec<Edit>,
     }
+
     impl Visit for V<'_, '_> {
         fn stmt(&mut self, s: &Stmt) {
             let Stmt::Function(f) = s else { return };
+
             if !f.attributes.is_empty() || f.path.is_empty() {
                 return;
             }
+
             let Some(kw) = f.path[0].start.checked_sub(1) else {
                 return;
             };
+
             if self.ctx.tok_text(kw) != "function" {
                 return;
             }
+
             let mut staged = Vec::new();
+
             if f.is_method && !insert_self(self.ctx, &f.body, &mut staged) {
                 return;
             }
+
             let path: Vec<&str> = f.path.iter().map(|&p| self.ctx.text(p)).collect();
             let target = path.join(".");
             let from = tok_bytes(self.ctx, kw).0;
             let to = self.ctx.bytes(*f.path.last().unwrap()).1;
+
             // the head is always one line, no newline bookkeeping needed here
             self.edits.push((from, to, format!("{target} = function")));
             self.edits.append(&mut staged);
         }
     }
+
     walk_chunk(ctx.chunk, &mut V { ctx, edits });
 }
 
@@ -112,27 +132,36 @@ pub fn convert_local_function_to_assign(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         ctx: &'a RuleCtx<'b>,
         edits: &'a mut Vec<Edit>,
     }
+
     impl Visit for V<'_, '_> {
         fn stmt(&mut self, s: &Stmt) {
             let Stmt::LocalFunction(f) = s else { return };
+
             if !f.attributes.is_empty() {
                 return;
             }
+
             let name = self.ctx.text(f.name);
+
             if references_name(self.ctx, &f.body.block, name) {
                 return;
             }
+
             let Some(kw) = f.name.start.checked_sub(1) else {
                 return;
             };
+
             if self.ctx.tok_text(kw) != "function" {
                 return;
             }
+
             let from = tok_bytes(self.ctx, kw).0;
             let to = self.ctx.bytes(f.name).1;
+
             self.edits.push((from, to, format!("{name} = function")));
         }
     }
+
     walk_chunk(ctx.chunk, &mut V { ctx, edits });
 }
 
@@ -146,6 +175,7 @@ fn references_name(ctx: &RuleCtx, block: &Block, name: &str) -> bool {
         name: &'a str,
         found: bool,
     }
+
     impl Visit for V<'_, '_> {
         fn expr(&mut self, e: &Expr) {
             if let Expr::Name(s) = e
@@ -155,12 +185,15 @@ fn references_name(ctx: &RuleCtx, block: &Block, name: &str) -> bool {
             }
         }
     }
+
     let mut v = V {
         ctx,
         name,
         found: false,
     };
+
     walk_block(block, &mut v);
+
     v.found
 }
 
@@ -173,6 +206,7 @@ pub fn remove_method_call(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         ctx: &'a RuleCtx<'b>,
         edits: &'a mut Vec<Edit>,
     }
+
     impl Visit for V<'_, '_> {
         fn expr(&mut self, e: &Expr) {
             let Expr::Call {
@@ -181,48 +215,59 @@ pub fn remove_method_call(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
             else {
                 return;
             };
+
             let Some(m) = method else { return };
             let Expr::Name(recv_span) = func.as_ref() else {
                 return;
             };
+
             let recv = self.ctx.text(*recv_span);
             let Some(colon) = method_colon(self.ctx, *m) else {
                 return;
             };
 
             let mut staged: Vec<Edit> = Vec::new();
+
             match args {
                 CallArgs::Paren(list) => {
                     // the `(` sits right after the method name
                     let lparen = m.end;
+
                     if self.ctx.tok_text(lparen) != "(" {
                         return;
                     }
+
                     let after = tok_bytes(self.ctx, lparen).1;
                     let text = if list.is_empty() {
                         recv.to_string()
                     } else {
                         format!("{recv}, ")
                     };
+
                     insert(after, &text, &mut staged);
                 }
+
                 // a parenless call has to grow parentheses to take the receiver
                 CallArgs::Str(s) => {
                     let (a, b) = self.ctx.bytes(*s);
                     let lit = &self.ctx.src[a as usize..b as usize];
+
                     staged.push((a, b, format!("({recv}, {lit})")));
                 }
+
                 CallArgs::Table(t) => {
                     let (a, b) = self.ctx.bytes(t.span());
                     insert(a, &format!("({recv}, "), &mut staged);
                     insert(b, ")", &mut staged);
                 }
             }
+
             let (ca, cb) = tok_bytes(self.ctx, colon);
             self.edits.push((ca, cb, ".".to_string()));
             self.edits.append(&mut staged);
         }
     }
+
     walk_chunk(ctx.chunk, &mut V { ctx, edits });
 }
 
@@ -327,6 +372,7 @@ mod tests {
     fn multiline_definitions_keep_their_lines() {
         let src = "function C:m(\n    a,\n    b\n)\nend\n";
         let out = run(src, remove_method_definition);
+
         assert_lines_kept(src, &out);
         assert!(out.contains("C.m(self, "), "{out}");
     }

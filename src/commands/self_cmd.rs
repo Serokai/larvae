@@ -28,7 +28,9 @@ pub enum SelfCommand {
 pub fn run(cmd: SelfCommand) -> Result<ExitCode> {
     match cmd {
         SelfCommand::Install => install(),
+
         SelfCommand::Update => update(),
+
         SelfCommand::Uninstall => uninstall(),
     }
 }
@@ -52,6 +54,7 @@ fn install() -> Result<ExitCode> {
     }
 
     print_path_instructions(&bin_dir);
+
     Ok(ExitCode::SUCCESS)
 }
 
@@ -67,6 +70,7 @@ fn update() -> Result<ExitCode> {
 
     if latest <= current {
         ui::print_success("coldluau is already up to date");
+
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -100,6 +104,7 @@ fn update() -> Result<ExitCode> {
     let _ = std::fs::remove_file(&staged);
 
     ui::print_success(&format!("Updated coldluau v{current} -> v{latest}"));
+
     Ok(ExitCode::SUCCESS)
 }
 
@@ -112,6 +117,7 @@ fn uninstall() -> Result<ExitCode> {
 
     if !ui::confirm(&format!("Remove {}?", dir.display()), false) {
         eprintln!("Aborted.");
+
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -133,6 +139,7 @@ fn uninstall() -> Result<ExitCode> {
     let bin = paths::bin_dir()?;
 
     eprintln!("You can now drop {} from your PATH.", bin.display());
+
     Ok(ExitCode::SUCCESS)
 }
 

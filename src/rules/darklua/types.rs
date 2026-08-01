@@ -19,15 +19,19 @@ fn drop_type_with_lead(ctx: &RuleCtx, ty: TokSpan, lead: &str, edits: &mut Vec<E
     let Some(idx) = ty.start.checked_sub(1) else {
         return;
     };
+
     if ctx.tok_text(idx) != lead {
         return;
     }
+
     let mut from = tok_bytes(ctx, idx).0;
     // take the space in front too, `y :: T` should not leave `y ` behind
     let bytes = ctx.src.as_bytes();
+
     while from > 0 && matches!(bytes[from as usize - 1], b' ' | b'\t') {
         from -= 1;
     }
+
     let to = ctx.bytes(ty).1;
     ctx.delete_bytes_keep_lines(from, to, edits);
 }
@@ -42,9 +46,11 @@ fn drop_body_types(ctx: &RuleCtx, body: &FunctionBody, edits: &mut Vec<Edit>) {
     if let Some(g) = body.generics {
         ctx.delete_keep_lines(g, edits);
     }
+
     for p in &body.params {
         drop_binding_type(ctx, p.ty, edits);
     }
+
     if let Some(r) = body.ret_type {
         drop_type_with_lead(ctx, r, ":", edits);
     }
@@ -59,6 +65,7 @@ pub fn remove_types(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         ctx: &'a RuleCtx<'b>,
         edits: &'a mut Vec<Edit>,
     }
+
     impl Visit for V<'_, '_> {
         fn stmt(&mut self, s: &Stmt) {
             match s {
@@ -67,13 +74,17 @@ pub fn remove_types(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
                         drop_binding_type(self.ctx, n.ty, self.edits);
                     }
                 }
+
                 Stmt::NumericFor(f) => drop_binding_type(self.ctx, f.var.ty, self.edits),
+
                 Stmt::GenericFor(f) => {
                     for v in &f.vars {
                         drop_binding_type(self.ctx, v.ty, self.edits);
                     }
                 }
+
                 Stmt::Function(f) => drop_body_types(self.ctx, &f.body, self.edits),
+
                 Stmt::LocalFunction(f) => drop_body_types(self.ctx, &f.body, self.edits),
                 // an alias only exists for the type checker, it goes whole
                 Stmt::TypeAlias(t) => self.ctx.delete_keep_lines(t.span, self.edits),
@@ -84,11 +95,13 @@ pub fn remove_types(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
         fn expr(&mut self, e: &Expr) {
             match e {
                 Expr::Function { body, .. } => drop_body_types(self.ctx, body, self.edits),
+
                 Expr::TypeAssert { ty, .. } => drop_type_with_lead(self.ctx, *ty, "::", self.edits),
                 _ => {}
             }
         }
     }
+
     walk_chunk(ctx.chunk, &mut V { ctx, edits });
 }
 
@@ -111,28 +124,35 @@ pub fn remove_attribute(ctx: &RuleCtx, edits: &mut Vec<Edit>, patterns: &[String
         edits: &'a mut Vec<Edit>,
         patterns: Vec<regex::Regex>,
     }
+
     impl V<'_, '_> {
         fn strip(&mut self, attrs: &[TokSpan]) {
             for &a in attrs {
                 let text = self.ctx.text(a);
                 let name = text.trim_start_matches('@');
+
                 if !self.patterns.is_empty() && !self.patterns.iter().any(|re| re.is_match(name)) {
                     continue;
                 }
+
                 let (from, mut to) = self.ctx.bytes(a);
                 // take the spaces after it so the line does not start blank
                 let bytes = self.ctx.src.as_bytes();
+
                 while (to as usize) < bytes.len() && matches!(bytes[to as usize], b' ' | b'\t') {
                     to += 1;
                 }
+
                 self.ctx.delete_bytes_keep_lines(from, to, self.edits);
             }
         }
     }
+
     impl Visit for V<'_, '_> {
         fn stmt(&mut self, s: &Stmt) {
             match s {
                 Stmt::Function(f) => self.strip(&f.attributes),
+
                 Stmt::LocalFunction(f) => self.strip(&f.attributes),
                 _ => {}
             }
@@ -144,6 +164,7 @@ pub fn remove_attribute(ctx: &RuleCtx, edits: &mut Vec<Edit>, patterns: &[String
             }
         }
     }
+
     walk_chunk(
         ctx.chunk,
         &mut V {
@@ -184,12 +205,14 @@ mod tests {
     fn aliases_go_whole_and_keep_lines() {
         let src = "type Point = { x: number }\nlocal p = 1\n";
         let out = run(src, remove_types);
+
         assert!(!out.contains("Point"), "{out}");
         assert!(out.contains("local p = 1"), "{out}");
         assert_lines_kept(src, &out);
 
         let src = "export type A = {\n    x: number,\n}\nreturn 1\n";
         let out = run(src, remove_types);
+
         assert!(!out.contains("export"), "{out}");
         assert_lines_kept(src, &out);
     }
@@ -233,6 +256,7 @@ mod tests {
         fn only_native(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
             remove_attribute(ctx, edits, &["^native$".to_string()]);
         }
+
         assert_eq!(
             run("@native @checked function f() end\n", only_native),
             "@checked function f() end\n"

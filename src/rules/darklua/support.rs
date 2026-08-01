@@ -43,11 +43,14 @@ pub fn is_ident(s: &str) -> bool {
     if s.is_empty() || is_reserved(s) {
         return false;
     }
+
     let mut chars = s.chars();
     let first = chars.next().unwrap();
+
     if !(first.is_ascii_alphabetic() || first == '_') {
         return false;
     }
+
     chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
@@ -60,6 +63,7 @@ pub fn has_call(e: &Expr) -> bool {
     struct Probe {
         found: bool,
     }
+
     impl Visit for Probe {
         fn expr(&mut self, e: &Expr) {
             if matches!(e, Expr::Call { .. }) {
@@ -67,8 +71,10 @@ pub fn has_call(e: &Expr) -> bool {
             }
         }
     }
+
     let mut p = Probe { found: false };
     walk_expr(e, &mut p);
+
     p.found
 }
 
@@ -100,14 +106,18 @@ computed key does too as long as the key itself calls nothing
 pub fn is_reemittable(e: &Expr) -> bool {
     match e {
         Expr::Name(_) => true,
+
         Expr::Paren { inner, .. } => is_reemittable(inner),
+
         Expr::Index { object, key, .. } => {
             is_reemittable(object)
                 && match key {
                     IndexKey::Field(_) => true,
+
                     IndexKey::Computed(k) => !has_call(k),
                 }
         }
+
         _ => false,
     }
 }
@@ -121,7 +131,9 @@ pub fn is_never_falsy(e: &Expr) -> bool {
         | Expr::Table { .. }
         | Expr::True(_)
         | Expr::Function { .. } => true,
+
         Expr::Paren { inner, .. } => is_never_falsy(inner),
+
         _ => false,
     }
 }
@@ -136,6 +148,7 @@ pub fn insert(at: u32, text: &str, edits: &mut Vec<Edit>) {
 /// Byte range of one token
 pub fn tok_bytes(ctx: &RuleCtx, index: u32) -> (u32, u32) {
     let t = &ctx.toks[index as usize];
+
     (t.start, t.end)
 }
 
@@ -153,15 +166,20 @@ pub fn replace_keep_lines(
 ) -> bool {
     let had = count_newlines(&ctx.src[from as usize..to as usize]);
     let now = count_newlines(text);
+
     if now > had {
         return false;
     }
+
     let mut out = String::with_capacity(text.len() + (had - now));
     out.push_str(text);
+
     for _ in 0..had - now {
         out.push('\n');
     }
+
     edits.push((from, to, out));
+
     true
 }
 
@@ -177,6 +195,7 @@ pub fn has_comment_in(ctx: &RuleCtx, from: u32, to: u32) -> bool {
 /// Source text of an expression, wrapped in parens unless it is atomic
 pub fn operand_text(ctx: &RuleCtx, e: &Expr) -> String {
     let text = ctx.text(e.span());
+
     if is_atomic(e) {
         text.to_string()
     } else {
@@ -198,7 +217,9 @@ pub fn plain_string_value<'a>(ctx: &RuleCtx<'a>, span: TokSpan) -> Option<&'a st
     else {
         return None;
     };
+
     let inner = &ctx.src[inner_start as usize..inner_end as usize];
+
     if inner.contains('\\') {
         None
     } else {
@@ -210,8 +231,10 @@ pub fn plain_string_value<'a>(ctx: &RuleCtx<'a>, span: TokSpan) -> Option<&'a st
 pub fn params_lparen(ctx: &RuleCtx, body: &FunctionBody) -> Option<u32> {
     let from = match body.generics {
         Some(g) => g.end,
+
         None => body.span.start,
     };
+
     (ctx.toks.get(from as usize)?.kind == TokKind::LParen).then_some(from)
 }
 

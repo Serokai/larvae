@@ -29,7 +29,9 @@ pub enum Realm {
 pub fn realm_of_container(service: &str) -> Realm {
     match service {
         "ServerScriptService" | "ServerStorage" => Realm::ServerOnly,
+
         "StarterPlayer" | "StarterGui" | "StarterPack" => Realm::StarterClone,
+
         _ => Realm::Shared,
     }
 }
@@ -49,9 +51,11 @@ impl DmPath {
     pub fn service(&self) -> &str {
         &self.segments[0]
     }
+
     pub fn realm(&self) -> Realm {
         realm_of_container(self.service())
     }
+
     pub fn game_path(&self) -> String {
         format!("@game/{}", self.segments.join("/"))
     }
@@ -60,6 +64,7 @@ impl DmPath {
 impl MountTable {
     pub fn new(mut mounts: Vec<Mount>) -> Self {
         mounts.sort_by_key(|m| std::cmp::Reverse(m.fs.components().count()));
+
         Self { mounts }
     }
 
@@ -85,20 +90,24 @@ impl MountTable {
 
         let mut segments = mount.dm.clone();
         let mount_depth = segments.len();
+
         let comps: Vec<&str> = rel
             .components()
             .filter_map(|c| match c {
                 Component::Normal(s) => s.to_str(),
+
                 _ => None,
             })
             .collect();
 
         for (i, comp) in comps.iter().enumerate() {
             let is_last = i + 1 == comps.len();
+
             if !is_last {
                 segments.push((*comp).to_string());
                 continue;
             }
+
             // Final component, apply script naming rules if it's a file
             if fs_path.is_dir() {
                 segments.push((*comp).to_string());
@@ -110,9 +119,11 @@ impl MountTable {
                 }
             }
         }
+
         if segments.is_empty() {
             return None; // the mount root itself with an init collapse above it
         }
+
         Some(DmPath {
             segments,
             mount_depth,

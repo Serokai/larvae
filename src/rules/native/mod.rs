@@ -44,15 +44,19 @@ pub fn apply(
     if let Some(calls) = &cfg.remove_calls {
         remove_calls::apply(calls, ctx, edits);
     }
+
     if cfg.use_get_service {
         use_get_service::apply(ctx, edits);
     }
+
     if cfg.dedupe_requires {
         dedupe_requires::apply(ctx, edits);
     }
+
     if let Some(name) = &cfg.inject_module_path {
         inject_module_path::apply(name, ctx, edits, diags, path);
     }
+
     if cfg.freeze_module {
         freeze_module::apply(ctx, edits);
     }
@@ -92,8 +96,10 @@ fn contains_call(expr: &Expr) -> bool {
             }
         }
     }
+
     let mut finder = Finder(false);
     engine::walk_expr(expr, &mut finder);
+
     finder.0
 }
 
@@ -109,9 +115,11 @@ fn newlines_in(ctx: &RuleCtx, from: u32, to: u32) -> usize {
 fn blank_line_start(ctx: &RuleCtx, at: u32) -> u32 {
     let bytes = ctx.src.as_bytes();
     let mut i = at as usize;
+
     while i > 0 && matches!(bytes[i - 1], b' ' | b'\t') {
         i -= 1;
     }
+
     i as u32
 }
 
@@ -125,6 +133,7 @@ pub fn is_ident(name: &str) -> bool {
     let Some(first) = chars.next() else {
         return false;
     };
+
     (first.is_ascii_alphabetic() || first == '_')
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
         && !KEYWORDS.contains(&name)
@@ -146,6 +155,7 @@ pub(crate) mod test_support {
         let cfg: RulesConfig = toml::from_str(rules).expect("rule config");
         let lexed = lexer::lex(src).expect("lex");
         let chunk = parser::parse(src, &lexed.toks).expect("parse");
+
         // the unit tests stand in for the rewriter, every site keeps its own spec
         let forms: Vec<(RequireSite, String)> = scan::scan(src, &lexed.toks)
             .sites
@@ -166,25 +176,32 @@ pub(crate) mod test_support {
             dm_path: dm,
             quote: '"',
         };
+
         let mut edits = Vec::new();
         apply(&cfg, &ctx, &mut edits, diags, Path::new("test.luau"));
+
         splice(src, edits)
     }
 
     /// The splice the pipeline runs, the first of two overlapping edits wins
     pub fn splice(src: &str, mut edits: Vec<Edit>) -> String {
         edits.sort_by_key(|e| (e.0, e.1));
+
         let mut out = String::new();
         let mut cursor = 0usize;
+
         for (start, end, new) in edits {
             if (start as usize) < cursor {
                 continue;
             }
+
             out.push_str(&src[cursor..start as usize]);
             out.push_str(&new);
             cursor = end as usize;
         }
+
         out.push_str(&src[cursor..]);
+
         out
     }
 }

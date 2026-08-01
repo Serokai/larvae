@@ -88,6 +88,7 @@ impl QuoteStyle {
     pub fn char(self) -> char {
         match self {
             QuoteStyle::Single => '\'',
+
             QuoteStyle::Preserve | QuoteStyle::Double => '"',
         }
     }
@@ -266,6 +267,7 @@ impl RemoveAttribute {
     pub fn patterns(&self) -> &[String] {
         match self {
             RemoveAttribute::Enabled(_) => &[],
+
             RemoveAttribute::Options { patterns } => patterns,
         }
     }
@@ -295,6 +297,7 @@ impl RemoveInterpolatedString {
     pub fn strategy(&self) -> &str {
         match self {
             RemoveInterpolatedString::Enabled(_) => "string",
+
             RemoveInterpolatedString::Options { strategy } => strategy,
         }
     }
@@ -325,6 +328,7 @@ impl RemoveComments {
     pub fn except(&self) -> Vec<String> {
         match self {
             RemoveComments::Enabled(_) => default_comment_except(),
+
             RemoveComments::Options { except } => except.clone(),
         }
     }
@@ -441,10 +445,13 @@ pub fn rule_status(name: &str) -> Option<RuleStatus> {
         | "remove_unused_while" => Done,
         // not rules in coldluau
         "convert_require" => Elsewhere("the [requires] section handles requires"),
+
         "inject_global_value" => Elsewhere("use [defines] instead (lands in M2)"),
+
         "remove_spaces" => Elsewhere("use process.generator = \"dense\" (lands in M2)"),
         // still planned, these two need real scope tracking first
         "remove_unused_variable" | "rename_variables" => Planned("M2"),
+
         _ => return None,
     })
 }
@@ -503,6 +510,7 @@ pub enum IndexingStyle {
 pub struct RojoConfig {
     #[serde(default)]
     pub project: Option<PathBuf>,
+
     #[serde(default)]
     pub build_project: Option<PathBuf>,
 }
@@ -550,6 +558,7 @@ impl Config {
             .with_context(|| format!("invalid config in {}", crate::ui::rel(path)))?;
 
         config.validate()?;
+
         Ok(config)
     }
 
@@ -595,6 +604,7 @@ impl Config {
                 None => bail!("unknown rule \"{name}\""),
             }
         }
+
         if let Some(a) = &self.rules.append_text_comment {
             if a.text.is_some() == a.file.is_some() {
                 bail!("append_text_comment needs exactly one of `text` or `file`");
@@ -610,6 +620,7 @@ impl Config {
 
         if let Some(r) = &self.rules.remove_interpolated_string {
             let s = r.strategy();
+
             if s != "string" && s != "tostring" {
                 bail!(
                     "remove_interpolated_string strategy must be \"string\" or \"tostring\", got \"{s}\""
@@ -640,6 +651,7 @@ impl Config {
                 }
             }
         }
+
         if self.process.generator != "retain-lines" {
             bail!(
                 "generator = \"{}\" is not implemented yet (lands in M2); only \"retain-lines\" works today",
@@ -666,6 +678,7 @@ impl Config {
 
         for (name, value) in &self.aliases {
             validate_alias_name(name)?;
+
             if value.is_empty() {
                 bail!("alias \"{name}\" has an empty value");
             }
@@ -689,6 +702,7 @@ pub fn validate_alias_name(name: &str) -> Result<()> {
     }
 
     let lower = name.to_lowercase();
+
     if lower == "self" || lower == "game" {
         bail!("alias \"@{name}\" is reserved by Roblox/Luau and cannot be redefined");
     }

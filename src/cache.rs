@@ -101,6 +101,7 @@ impl Cache {
         let tmp = self.path.with_extension("json.tmp");
 
         std::fs::write(&tmp, text)?;
+
         std::fs::rename(&tmp, &self.path)
     }
 }
@@ -124,6 +125,7 @@ impl EpochInputs {
 
     pub fn add_file(&mut self, path: &Path) {
         self.add(path.to_string_lossy().as_bytes());
+
         if let Ok(bytes) = std::fs::read(path) {
             self.add(&bytes);
         }

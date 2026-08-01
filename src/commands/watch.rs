@@ -47,6 +47,7 @@ pub fn run(root: &Path, config: &Config, config_path: Option<PathBuf>) -> Result
 
     let output = root.join(&config.process.output);
     let cache_dir = root.join(&config.process.cache_dir);
+
     for events in rx {
         let Ok(events) = events else { continue };
         let relevant = events.iter().any(|e| {
@@ -65,11 +66,14 @@ pub fn run(root: &Path, config: &Config, config_path: Option<PathBuf>) -> Result
                     .iter()
                     .any(|p| !p.starts_with(&output) && !p.starts_with(&cache_dir))
         });
+
         if !relevant {
             continue;
         }
+
         build_once(root, config, color);
     }
+
     Ok(ExitCode::SUCCESS)
 }
 
@@ -79,17 +83,20 @@ fn build_once(root: &Path, config: &Config, color: bool) {
             for d in &outcome.diags {
                 eprintln!("{}", d.render(color));
             }
+
             let s = &outcome.stats;
             let cached = if s.files_cached > 0 {
                 format!(", {} unchanged", s.files_cached)
             } else {
                 String::new()
             };
+
             let pruned = if s.files_pruned > 0 {
                 format!(", {} stale removed", s.files_pruned)
             } else {
                 String::new()
             };
+
             if outcome.has_errors() {
                 ui::print_error(&format!(
                     "build finished with errors, {} file(s){cached}{pruned}",
@@ -102,6 +109,7 @@ fn build_once(root: &Path, config: &Config, color: bool) {
                 ));
             }
         }
+
         Err(e) => ui::print_error(&format!("{e:#}")),
     }
 }
@@ -109,11 +117,13 @@ fn build_once(root: &Path, config: &Config, color: bool) {
 /// Files outside the input tree that still invalidate a build
 fn watched_roots(root: &Path, config: &Config, config_path: Option<&Path>) -> Vec<PathBuf> {
     let mut out = Vec::new();
+
     if let Some(p) = config_path {
         out.push(root.join(p));
     } else {
         out.push(root.join("coldluau.toml"));
     }
+
     out.push(
         config
             .rojo
@@ -124,5 +134,6 @@ fn watched_roots(root: &Path, config: &Config, config_path: Option<&Path>) -> Ve
     );
     out.push(root.join(".luaurc"));
     out.retain(|p| p.exists());
+
     out
 }

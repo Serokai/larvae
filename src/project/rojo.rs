@@ -24,7 +24,9 @@ pub fn find_project(root: &Path, configured: Option<&Path>) -> Option<PathBuf> {
     if let Some(p) = configured {
         return Some(root.join(p));
     }
+
     let default = root.join("default.project.json");
+
     default.exists().then_some(default)
 }
 
@@ -54,6 +56,7 @@ pub fn load(path: &Path) -> Result<Project> {
 /// Derive mounts from the project tree
 pub fn mounts(project: &Project) -> Vec<Mount> {
     let mut out = Vec::new();
+
     if let Some(tree) = project.json.get("tree") {
         walk_mounts(
             tree,
@@ -63,6 +66,7 @@ pub fn mounts(project: &Project) -> Vec<Mount> {
             &mut out,
         );
     }
+
     out
 }
 
@@ -74,12 +78,16 @@ fn walk_mounts(
     out: &mut Vec<Mount>,
 ) {
     let Some(obj) = node.as_object() else { return };
+
     if let Some(path_value) = obj.get("$path") {
         let fs_rel = match path_value {
             Value::String(s) => Some(s.as_str()),
+
             Value::Object(o) => o.get("optional").and_then(Value::as_str),
+
             _ => None,
         };
+
         if let (Some(fs_rel), false) = (fs_rel, dm_path.is_empty() && is_datamodel) {
             let fs = normalize(&project_dir.join(fs_rel));
             // nested project files are skipped as mounts, copied verbatim with a warning
@@ -91,10 +99,12 @@ fn walk_mounts(
             }
         }
     }
+
     for (key, child) in obj {
         if key.starts_with('$') {
             continue;
         }
+
         dm_path.push(key.clone());
         walk_mounts(child, dm_path, project_dir, is_datamodel, out);
         dm_path.pop();
@@ -110,15 +120,18 @@ pub fn derive_build_project(
     warnings: &mut Vec<String>,
 ) -> Value {
     let mut json = project.json.clone();
+
     if let Some(name) = json
         .get_mut("name")
         .and_then(|v| v.as_str().map(str::to_owned))
     {
         json["name"] = Value::String(name); // keep name as is
     }
+
     if let Some(tree) = json.get_mut("tree") {
         rewrite_paths(tree, &project.dir, input, output, build_dir, warnings);
     }
+
     json
 }
 
@@ -133,6 +146,7 @@ fn rewrite_paths(
     let Some(obj) = node.as_object_mut() else {
         return;
     };
+
     for (key, child) in obj.iter_mut() {
         if key == "$path" {
             rewrite_one_path(child, project_dir, input, output, build_dir, warnings);
@@ -156,36 +170,45 @@ fn rewrite_one_path(
                 "$path \"{s}\" points at another project file; copied verbatim - nested projects get first-class support post-M2"
             ));
         }
+
         let abs = normalize(&project_dir.join(s));
         let mapped = match abs.strip_prefix(input) {
             Ok(rel) => output.join(rel),
+
             Err(_) => abs,
         };
+
         relative_to(build_dir, &mapped)
     };
+
     match value {
         Value::String(s) => *value = Value::String(rewrite(s)),
+
         Value::Object(o) => {
             if let Some(Value::String(s)) = o.get("optional") {
                 let new = rewrite(s);
                 o.insert("optional".into(), Value::String(new));
             }
         }
+
         _ => {}
     }
 }
 
 fn normalize(p: &Path) -> PathBuf {
     let mut out = PathBuf::new();
+
     for c in p.components() {
         match c {
             std::path::Component::CurDir => {}
             std::path::Component::ParentDir => {
                 out.pop();
             }
+
             other => out.push(other),
         }
     }
+
     out
 }
 
@@ -193,6 +216,7 @@ fn relative_to(from_dir: &Path, to: &Path) -> String {
     let from: Vec<_> = from_dir.components().collect();
     let to_c: Vec<_> = to.components().collect();
     let common = from.iter().zip(&to_c).take_while(|(a, b)| a == b).count();
+
     let mut parts: Vec<String> =
         std::iter::repeat_n("..".to_string(), from.len() - common).collect();
     parts.extend(
@@ -200,6 +224,7 @@ fn relative_to(from_dir: &Path, to: &Path) -> String {
             .iter()
             .map(|c| c.as_os_str().to_string_lossy().into_owned()),
     );
+
     if parts.is_empty() {
         ".".to_string()
     } else {
@@ -228,12 +253,15 @@ pub fn write_build_project(
             crate::ui::rel(&project.path)
         );
     }
+
     let mut warnings = Vec::new();
     let json = derive_build_project(project, input, output, &build_dir, &mut warnings);
     let text = serde_json::to_string_pretty(&json)?;
     let tmp = build_path.with_extension("json.tmp");
+
     std::fs::write(&tmp, &text)?;
     std::fs::rename(&tmp, &build_path)?;
+
     Ok((build_path, warnings))
 }
 
@@ -258,6 +286,7 @@ mod tests {
                 "shared": { "$path": "src/shared" },
                 "Packages": { "$path": "Packages" }
             },
+
             "ServerScriptService": { "$path": "src/server" }
         }
     }"#;
@@ -267,6 +296,7 @@ mod tests {
         let p = project(SAMPLE, "/proj");
         let m = mounts(&p);
         let find = |fs: &str| m.iter().find(|m| m.fs == Path::new(fs)).unwrap();
+
         assert_eq!(find("/proj/src/shared").dm, ["ReplicatedStorage", "shared"]);
         assert_eq!(find("/proj/Packages").dm, ["ReplicatedStorage", "Packages"]);
         assert_eq!(find("/proj/src/server").dm, ["ServerScriptService"]);
@@ -276,6 +306,7 @@ mod tests {
     fn derives_build_project() {
         let p = project(SAMPLE, "/proj");
         let mut warnings = Vec::new();
+
         let out = derive_build_project(
             &p,
             Path::new("/proj/src"),

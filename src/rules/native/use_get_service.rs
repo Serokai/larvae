@@ -67,11 +67,13 @@ pub fn apply(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     if binds_game(ctx) {
         return;
     }
+
     let mut rewriter = Rewriter {
         ctx,
         edits,
         targets: Vec::new(),
     };
+
     engine::walk_chunk(ctx.chunk, &mut rewriter);
 }
 
@@ -81,6 +83,7 @@ fn binds_game(ctx: &RuleCtx) -> bool {
         ctx: &'a RuleCtx<'src>,
         found: bool,
     }
+
     impl Shadow<'_, '_> {
         fn mark(&mut self, span: crate::syntax::ast::TokSpan) {
             if name_text(self.ctx, span) == "game" {
@@ -88,6 +91,7 @@ fn binds_game(ctx: &RuleCtx) -> bool {
             }
         }
     }
+
     impl Visit for Shadow<'_, '_> {
         fn stmt(&mut self, stmt: &Stmt) {
             match stmt {
@@ -96,23 +100,29 @@ fn binds_game(ctx: &RuleCtx) -> bool {
                         self.mark(binding.name);
                     }
                 }
+
                 Stmt::LocalFunction(n) => {
                     self.mark(n.name);
+
                     for param in &n.body.params {
                         self.mark(param.name);
                     }
                 }
+
                 Stmt::Function(n) => {
                     for param in &n.body.params {
                         self.mark(param.name);
                     }
                 }
+
                 Stmt::NumericFor(n) => self.mark(n.var.name),
+
                 Stmt::GenericFor(n) => {
                     for var in &n.vars {
                         self.mark(var.name);
                     }
                 }
+
                 _ => {}
             }
         }
@@ -125,8 +135,10 @@ fn binds_game(ctx: &RuleCtx) -> bool {
             }
         }
     }
+
     let mut shadow = Shadow { ctx, found: false };
     engine::walk_chunk(ctx.chunk, &mut shadow);
+
     shadow.found
 }
 
@@ -152,10 +164,13 @@ impl Visit for Rewriter<'_, '_> {
         let Some(service) = service_of(self.ctx, expr) else {
             return;
         };
+
         let (start, _) = self.ctx.bytes(expr.span());
+
         if self.targets.contains(&start) {
             return;
         }
+
         let call = format!("game:GetService({})", lua_quote(service, self.ctx.quote));
         self.ctx.replace(expr.span(), call, self.edits);
     }
@@ -171,10 +186,13 @@ fn service_of<'src>(ctx: &RuleCtx<'src>, expr: &Expr) -> Option<&'src str> {
     else {
         return None;
     };
+
     if !matches!(&**object, Expr::Name(n) if name_text(ctx,*n) == "game") {
         return None;
     }
+
     let name = name_text(ctx, *field);
+
     SERVICES.contains(&name).then_some(name)
 }
 

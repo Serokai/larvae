@@ -27,14 +27,17 @@ pub struct ScanResult {
 
 pub fn scan(src: &str, toks: &[Tok]) -> ScanResult {
     let mut out = ScanResult::default();
+
     for (i, tok) in toks.iter().enumerate() {
         if tok.kind != TokKind::Ident || tok.text(src) != "require" {
             continue;
         }
+
         // `foo.require(...)` / `foo:require(...)` is not the global require
         if i > 0 && matches!(toks[i - 1].kind, TokKind::Dot | TokKind::Colon) {
             continue;
         }
+
         match toks.get(i + 1).map(|t| t.kind) {
             // require("path")
             Some(TokKind::LParen) => match (toks.get(i + 2), toks.get(i + 3)) {
@@ -45,6 +48,7 @@ pub fn scan(src: &str, toks: &[Tok]) -> ScanResult {
                                 inner_start,
                                 inner_end,
                             },
+
                         start,
                         end,
                     }),
@@ -61,9 +65,11 @@ pub fn scan(src: &str, toks: &[Tok]) -> ScanResult {
                     at: tok.start,
                     require_idx: i,
                 }),
+
                 // require(<expr>), dynamic, (Also catches require(("x")).)
                 _ => out.dynamic.push(tok.start),
             },
+
             // require "path", parenless call sugar
             Some(TokKind::Str {
                 inner_start,
@@ -80,11 +86,13 @@ pub fn scan(src: &str, toks: &[Tok]) -> ScanResult {
                     require_idx: i,
                 });
             }
+
             Some(TokKind::InterpStr) => out.dynamic.push(tok.start),
             // bare require reference, nothing to rewrite but worth counting
             _ => out.dynamic.push(tok.start),
         }
     }
+
     out
 }
 
@@ -123,6 +131,7 @@ mod tests {
     fn counts_dynamic() {
         let src = r#"require(p) require(`@x/{y}`) local r = require"#;
         let toks = lex(src).unwrap().toks;
+
         assert_eq!(scan(src, &toks).dynamic.len(), 3);
     }
 

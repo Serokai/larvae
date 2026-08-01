@@ -31,9 +31,11 @@ pub fn remove_debug_profiling(ctx: &RuleCtx, edits: &mut Vec<Edit>, preserve: bo
         else {
             return false;
         };
+
         let Expr::Name(base) = object.as_ref() else {
             return false;
         };
+
         ctx.text(*base) == "debug" && matches!(ctx.text(*field), "profilebegin" | "profileend")
     });
 }
@@ -47,6 +49,7 @@ fn drop_calls(ctx: &RuleCtx, edits: &mut Vec<Edit>, preserve: bool, matches: &Ma
         preserve: bool,
         matches: &'a Match,
     }
+
     impl Visit for V<'_, '_> {
         fn stmt(&mut self, s: &Stmt) {
             let Stmt::Call(e, span) = s else { return };
@@ -56,15 +59,19 @@ fn drop_calls(ctx: &RuleCtx, edits: &mut Vec<Edit>, preserve: bool, matches: &Ma
             else {
                 return;
             };
+
             if method.is_some() || !(self.matches)(self.ctx, func) {
                 return;
             }
+
             if self.preserve && args_might_do_something(args) {
                 return;
             }
+
             self.ctx.delete_keep_lines(*span, self.edits);
         }
     }
+
     walk_chunk(
         ctx.chunk,
         &mut V {
@@ -79,7 +86,9 @@ fn drop_calls(ctx: &RuleCtx, edits: &mut Vec<Edit>, preserve: bool, matches: &Ma
 fn args_might_do_something(args: &CallArgs) -> bool {
     match args {
         CallArgs::Paren(list) => list.iter().any(support::has_call),
+
         CallArgs::Table(t) => support::has_call(t),
+
         CallArgs::Str(_) => false,
     }
 }
@@ -105,6 +114,7 @@ mod tests {
     fn plain_assertions_go() {
         let src = "assert(x)\nprint(1)\n";
         let out = run(src, assertions);
+
         assert!(!out.contains("assert"), "{out}");
         assert!(out.contains("print(1)"), "{out}");
         assert_lines_kept(src, &out);
@@ -132,6 +142,7 @@ mod tests {
     fn debug_profiling_goes() {
         let src = "debug.profilebegin(\"x\")\nwork()\ndebug.profileend()\n";
         let out = run(src, profiling);
+
         assert!(!out.contains("profile"), "{out}");
         assert!(out.contains("work()"), "{out}");
         assert_lines_kept(src, &out);

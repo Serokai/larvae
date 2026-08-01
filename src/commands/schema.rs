@@ -30,6 +30,7 @@ pub fn run(root: &Path) -> Result<ExitCode> {
 
     let new_content = if first == directive {
         ui::print_success("coldluau.toml already references the schema");
+
         return Ok(ExitCode::SUCCESS);
     } else if first.starts_with("#:schema") {
         // Replace a stale/other schema directive
@@ -46,6 +47,7 @@ pub fn run(root: &Path) -> Result<ExitCode> {
     ));
 
     eprintln!("Editors with Even Better TOML / Taplo now get completion and docs.");
+
     Ok(ExitCode::SUCCESS)
 }
 
