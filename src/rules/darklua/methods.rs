@@ -7,7 +7,7 @@ they share the parameter list surgery in one place
 */
 
 use super::support::{self, insert, tok_bytes};
-use crate::rules::engine::{Edit, RuleCtx, Visit, walk_block, walk_chunk};
+use crate::rules::engine::{Edit, Flow, RuleCtx, Visit, walk_block, walk_chunk};
 use crate::syntax::ast::*;
 
 /*
@@ -47,28 +47,34 @@ pub fn remove_method_definition(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn stmt(&mut self, s: &Stmt) {
-            let Stmt::Function(f) = s else { return };
+        fn stmt(&mut self, s: &Stmt) -> Flow {
+            let Stmt::Function(f) = s else {
+                return Flow::Next;
+            };
 
             if !f.is_method {
-                return;
+                return Flow::Next;
             }
 
-            let Some(&last) = f.path.last() else { return };
+            let Some(&last) = f.path.last() else {
+                return Flow::Next;
+            };
             let Some(colon) = method_colon(self.ctx, last) else {
-                return;
+                return Flow::Next;
             };
 
             // both edits or neither, a dangling `.` would not compile
             let mut staged = Vec::new();
 
             if !insert_self(self.ctx, &f.body, &mut staged) {
-                return;
+                return Flow::Next;
             }
 
             let (a, b) = tok_bytes(self.ctx, colon);
             self.edits.push((a, b, ".".to_string()));
             self.edits.append(&mut staged);
+
+            Flow::Next
         }
     }
 
@@ -87,25 +93,27 @@ pub fn convert_function_to_assignment(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn stmt(&mut self, s: &Stmt) {
-            let Stmt::Function(f) = s else { return };
+        fn stmt(&mut self, s: &Stmt) -> Flow {
+            let Stmt::Function(f) = s else {
+                return Flow::Next;
+            };
 
             if !f.attributes.is_empty() || f.path.is_empty() {
-                return;
+                return Flow::Next;
             }
 
             let Some(kw) = f.path[0].start.checked_sub(1) else {
-                return;
+                return Flow::Next;
             };
 
             if self.ctx.tok_text(kw) != "function" {
-                return;
+                return Flow::Next;
             }
 
             let mut staged = Vec::new();
 
             if f.is_method && !insert_self(self.ctx, &f.body, &mut staged) {
-                return;
+                return Flow::Next;
             }
 
             let path: Vec<&str> = f.path.iter().map(|&p| self.ctx.text(p)).collect();
@@ -116,6 +124,8 @@ pub fn convert_function_to_assignment(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
             // the head is always one line, no newline bookkeeping needed here
             self.edits.push((from, to, format!("{target} = function")));
             self.edits.append(&mut staged);
+
+            Flow::Next
         }
     }
 
@@ -134,31 +144,35 @@ pub fn convert_local_function_to_assign(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn stmt(&mut self, s: &Stmt) {
-            let Stmt::LocalFunction(f) = s else { return };
+        fn stmt(&mut self, s: &Stmt) -> Flow {
+            let Stmt::LocalFunction(f) = s else {
+                return Flow::Next;
+            };
 
             if !f.attributes.is_empty() {
-                return;
+                return Flow::Next;
             }
 
             let name = self.ctx.text(f.name);
 
             if references_name(self.ctx, &f.body.block, name) {
-                return;
+                return Flow::Next;
             }
 
             let Some(kw) = f.name.start.checked_sub(1) else {
-                return;
+                return Flow::Next;
             };
 
             if self.ctx.tok_text(kw) != "function" {
-                return;
+                return Flow::Next;
             }
 
             let from = tok_bytes(self.ctx, kw).0;
             let to = self.ctx.bytes(f.name).1;
 
             self.edits.push((from, to, format!("{name} = function")));
+
+            Flow::Next
         }
     }
 
@@ -177,12 +191,14 @@ fn references_name(ctx: &RuleCtx, block: &Block, name: &str) -> bool {
     }
 
     impl Visit for V<'_, '_> {
-        fn expr(&mut self, e: &Expr) {
+        fn expr(&mut self, e: &Expr) -> Flow {
             if let Expr::Name(s) = e
                 && self.ctx.text(*s) == self.name
             {
                 self.found = true;
             }
+
+            Flow::Next
         }
     }
 
@@ -208,22 +224,22 @@ pub fn remove_method_call(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn expr(&mut self, e: &Expr) {
+        fn expr(&mut self, e: &Expr) -> Flow {
             let Expr::Call {
                 func, method, args, ..
             } = e
             else {
-                return;
+                return Flow::Next;
             };
 
-            let Some(m) = method else { return };
+            let Some(m) = method else { return Flow::Next };
             let Expr::Name(recv_span) = func.as_ref() else {
-                return;
+                return Flow::Next;
             };
 
             let recv = self.ctx.text(*recv_span);
             let Some(colon) = method_colon(self.ctx, *m) else {
-                return;
+                return Flow::Next;
             };
 
             let mut staged: Vec<Edit> = Vec::new();
@@ -234,7 +250,7 @@ pub fn remove_method_call(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
                     let lparen = m.end;
 
                     if self.ctx.tok_text(lparen) != "(" {
-                        return;
+                        return Flow::Next;
                     }
 
                     let after = tok_bytes(self.ctx, lparen).1;
@@ -265,6 +281,8 @@ pub fn remove_method_call(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
             let (ca, cb) = tok_bytes(self.ctx, colon);
             self.edits.push((ca, cb, ".".to_string()));
             self.edits.append(&mut staged);
+
+            Flow::Next
         }
     }
 

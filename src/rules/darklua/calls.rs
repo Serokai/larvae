@@ -7,7 +7,7 @@ when an argument might do something, on by default the call stays put
 */
 
 use super::support;
-use crate::rules::engine::{Edit, RuleCtx, Visit, walk_chunk};
+use crate::rules::engine::{Edit, Flow, RuleCtx, Visit, walk_chunk};
 use crate::syntax::ast::*;
 
 /// remove_assertions, drop `assert(...)` statements
@@ -51,24 +51,28 @@ fn drop_calls(ctx: &RuleCtx, edits: &mut Vec<Edit>, preserve: bool, matches: &Ma
     }
 
     impl Visit for V<'_, '_> {
-        fn stmt(&mut self, s: &Stmt) {
-            let Stmt::Call(e, span) = s else { return };
+        fn stmt(&mut self, s: &Stmt) -> Flow {
+            let Stmt::Call(e, span) = s else {
+                return Flow::Next;
+            };
             let Expr::Call {
                 func, method, args, ..
             } = e
             else {
-                return;
+                return Flow::Next;
             };
 
             if method.is_some() || !(self.matches)(self.ctx, func) {
-                return;
+                return Flow::Next;
             }
 
             if self.preserve && args_might_do_something(args) {
-                return;
+                return Flow::Next;
             }
 
             self.ctx.delete_keep_lines(*span, self.edits);
+
+            Flow::Next
         }
     }
 

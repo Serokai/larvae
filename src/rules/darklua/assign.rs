@@ -6,7 +6,7 @@ refuse anything that is not provably safe to write twice
 */
 
 use super::support::{self, insert, tok_bytes};
-use crate::rules::engine::{Edit, RuleCtx, Visit, walk_chunk};
+use crate::rules::engine::{Edit, Flow, RuleCtx, Visit, walk_chunk};
 use crate::syntax::ast::*;
 
 /// The plain operator behind a compound one
@@ -93,20 +93,24 @@ pub fn remove_compound_assignment(ctx: &RuleCtx, edits: &mut Vec<Edit>, floor_di
     }
 
     impl Visit for V<'_, '_> {
-        fn stmt(&mut self, s: &Stmt) {
-            let Stmt::Assign(a) = s else { return };
+        fn stmt(&mut self, s: &Stmt) -> Flow {
+            let Stmt::Assign(a) = s else {
+                return Flow::Next;
+            };
 
             if self.skip_floor && self.ctx.text(a.op) == "//=" {
-                return;
+                return Flow::Next;
             }
 
             let Some((target, value, plain)) = compound_parts(self.ctx, a) else {
-                return;
+                return Flow::Next;
             };
 
             let (oa, ob) = self.ctx.bytes(a.op);
             self.edits.push((oa, ob, format!("= {target} {plain}")));
             guard_value(self.ctx, value, self.edits);
+
+            Flow::Next
         }
     }
 
@@ -135,13 +139,13 @@ pub fn remove_floor_division(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn expr(&mut self, e: &Expr) {
+        fn expr(&mut self, e: &Expr) -> Flow {
             let Expr::Binary { op, span, .. } = e else {
-                return;
+                return Flow::Next;
             };
 
             if self.ctx.text(*op) != "//" {
-                return;
+                return Flow::Next;
             }
 
             let (a, b) = self.ctx.bytes(*span);
@@ -149,17 +153,21 @@ pub fn remove_floor_division(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
             let (oa, ob) = self.ctx.bytes(*op);
             self.edits.push((oa, ob, "/".to_string()));
             insert(b, ")", self.edits);
+
+            Flow::Next
         }
 
-        fn stmt(&mut self, s: &Stmt) {
-            let Stmt::Assign(a) = s else { return };
+        fn stmt(&mut self, s: &Stmt) -> Flow {
+            let Stmt::Assign(a) = s else {
+                return Flow::Next;
+            };
 
             if self.ctx.text(a.op) != "//=" {
-                return;
+                return Flow::Next;
             }
 
             let Some((target, value, _)) = compound_parts(self.ctx, a) else {
-                return;
+                return Flow::Next;
             };
 
             let (oa, ob) = self.ctx.bytes(a.op);
@@ -174,6 +182,8 @@ pub fn remove_floor_division(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
             }
 
             insert(vb, ")", self.edits);
+
+            Flow::Next
         }
     }
 
@@ -188,14 +198,16 @@ pub fn make_assignment_local(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn stmt(&mut self, s: &Stmt) {
-            let Stmt::Local(l) = s else { return };
+        fn stmt(&mut self, s: &Stmt) -> Flow {
+            let Stmt::Local(l) = s else { return Flow::Next };
 
             if !l.is_const {
-                return;
+                return Flow::Next;
             }
 
             self.ctx.replace(l.keyword, "local".to_string(), self.edits);
+
+            Flow::Next
         }
     }
 
@@ -213,11 +225,11 @@ pub fn remove_nil_declaration(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn stmt(&mut self, s: &Stmt) {
-            let Stmt::Local(l) = s else { return };
+        fn stmt(&mut self, s: &Stmt) -> Flow {
+            let Stmt::Local(l) = s else { return Flow::Next };
 
             if l.is_const || l.values.is_empty() {
-                return;
+                return Flow::Next;
             }
 
             let mut keep = l.values.len();
@@ -227,34 +239,36 @@ pub fn remove_nil_declaration(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
             }
 
             if keep == l.values.len() {
-                return;
+                return Flow::Next;
             }
 
             let last_end = self.ctx.bytes(l.values.last().unwrap().span()).1;
             let from = if keep == 0 {
                 // every value was nil, the `=` goes with them
                 let Some(eq) = l.values[0].span().start.checked_sub(1) else {
-                    return;
+                    return Flow::Next;
                 };
 
                 if self.ctx.tok_text(eq) != "=" {
-                    return;
+                    return Flow::Next;
                 }
 
                 trim_back(self.ctx, tok_bytes(self.ctx, eq).0)
             } else {
                 let Some(comma) = l.values[keep].span().start.checked_sub(1) else {
-                    return;
+                    return Flow::Next;
                 };
 
                 if self.ctx.tok_text(comma) != "," {
-                    return;
+                    return Flow::Next;
                 }
 
                 tok_bytes(self.ctx, comma).0
             };
 
             self.ctx.delete_bytes_keep_lines(from, last_end, self.edits);
+
+            Flow::Next
         }
     }
 
@@ -277,7 +291,7 @@ pub fn group_local_assignment(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn block(&mut self, b: &Block) {
+        fn block(&mut self, b: &Block) -> Flow {
             let mut i = 0;
 
             while i < b.stmts.len() {
@@ -290,6 +304,8 @@ pub fn group_local_assignment(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
                     i += 1;
                 }
             }
+
+            Flow::Next
         }
     }
 
@@ -373,12 +389,14 @@ fn reads_any(ctx: &RuleCtx, e: &Expr, names: &[&str]) -> bool {
     }
 
     impl Visit for V<'_, '_> {
-        fn expr(&mut self, e: &Expr) {
+        fn expr(&mut self, e: &Expr) -> Flow {
             if let Expr::Name(s) = e
                 && self.names.contains(&self.ctx.text(*s))
             {
                 self.found = true;
             }
+
+            Flow::Next
         }
     }
 

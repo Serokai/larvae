@@ -7,7 +7,7 @@ fires on the two shapes where nothing can write to the table later, anything
 resembling a metatable, a rebind or a field write turns the rule off
 */
 
-use crate::rules::engine::{self, Edit, RuleCtx, Visit};
+use crate::rules::engine::{self, Edit, Flow, RuleCtx, Visit};
 use crate::rules::native::{dotted_path, name_text};
 use crate::syntax::ast::{CallArgs, Expr, IndexKey, Stmt};
 
@@ -117,12 +117,14 @@ impl Watch<'_, '_> {
         }
 
         impl Visit for Mentions<'_, '_, '_> {
-            fn expr(&mut self, expr: &Expr) {
+            fn expr(&mut self, expr: &Expr) -> Flow {
                 if let Expr::Name(span) = expr
                     && name_text(self.watch.ctx, *span) == self.watch.name
                 {
                     self.found = true;
                 }
+
+                Flow::Next
             }
         }
 
@@ -138,7 +140,7 @@ impl Watch<'_, '_> {
 }
 
 impl Visit for Watch<'_, '_> {
-    fn stmt(&mut self, stmt: &Stmt) {
+    fn stmt(&mut self, stmt: &Stmt) -> Flow {
         match stmt {
             // `M = x`, `M.field = x` and `M[k] = x` all break under a freeze
             Stmt::Assign(assign) => {
@@ -157,9 +159,11 @@ impl Visit for Watch<'_, '_> {
 
             _ => {}
         }
+
+        Flow::Next
     }
 
-    fn expr(&mut self, expr: &Expr) {
+    fn expr(&mut self, expr: &Expr) -> Flow {
         match expr {
             // metatable patterns, freezing either side changes what they do
             Expr::Call { func, args, .. } => {
@@ -184,6 +188,8 @@ impl Visit for Watch<'_, '_> {
 
             _ => {}
         }
+
+        Flow::Next
     }
 }
 

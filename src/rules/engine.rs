@@ -3,17 +3,16 @@ Shared machinery for ast rules
 
 A rule walks the parsed tree and pushes byte edits, the same shape the token
 rules and the require rewriter already use, so everything lands in one sorted
-splice at the end. Edits apply to the original source in a single pass, a
-rule never sees another rule's output, and when two edits overlap the first
-one by start position wins at splice time
+splice at the end. Edits apply to the original source in a single pass and a
+rule never sees another rule's output. Two rules reaching for the same bytes
+is handled in `edits.rs`, the first one stands and the second is reported
 */
 
 use crate::syntax::ast::*;
 use crate::syntax::lexer::Tok;
 use crate::syntax::scan::RequireSite;
 
-/// Byte range replacement, start, end, replacement text
-pub type Edit = (u32, u32, String);
+pub use super::edits::Edit;
 
 /// Everything a rule gets to look at
 pub struct RuleCtx<'a> {
@@ -88,15 +87,38 @@ impl<'a> RuleCtx<'a> {
 }
 
 /*
+What the walk does after a callback returns
+
+Skip is how a rule says it already dealt with everything under this node,
+ex: a rule that rewrites a whole function head does not want its own hooks
+firing again on the pieces it just claimed. It is also the cheap way for a
+statement level rule to stay out of expressions it will never care about
+*/
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Flow {
+    /// Carry on into this node's children
+    Next,
+    /// Leave this node's children alone
+    Skip,
+}
+
+/*
 Depth first walk with one callback per node family, default bodies do
 nothing so a rule only overrides what it cares about, blocks are visited
 before their statements and statements before their expressions
 */
 pub trait Visit {
-    fn block(&mut self, _b: &Block) {}
-    fn stmt(&mut self, _s: &Stmt) {}
+    fn block(&mut self, _b: &Block) -> Flow {
+        Flow::Next
+    }
 
-    fn expr(&mut self, _e: &Expr) {}
+    fn stmt(&mut self, _s: &Stmt) -> Flow {
+        Flow::Next
+    }
+
+    fn expr(&mut self, _e: &Expr) -> Flow {
+        Flow::Next
+    }
 }
 
 pub fn walk_chunk(chunk: &Chunk, v: &mut impl Visit) {
@@ -104,7 +126,9 @@ pub fn walk_chunk(chunk: &Chunk, v: &mut impl Visit) {
 }
 
 pub fn walk_block(b: &Block, v: &mut impl Visit) {
-    v.block(b);
+    if v.block(b) == Flow::Skip {
+        return;
+    }
 
     for s in &b.stmts {
         walk_stmt(s, v);
@@ -112,7 +136,9 @@ pub fn walk_block(b: &Block, v: &mut impl Visit) {
 }
 
 pub fn walk_stmt(s: &Stmt, v: &mut impl Visit) {
-    v.stmt(s);
+    if v.stmt(s) == Flow::Skip {
+        return;
+    }
 
     match s {
         Stmt::Empty(_) | Stmt::Break(_) | Stmt::Continue(_) | Stmt::TypeAlias(_) => {}
@@ -189,7 +215,9 @@ pub fn walk_stmt(s: &Stmt, v: &mut impl Visit) {
 }
 
 pub fn walk_expr(e: &Expr, v: &mut impl Visit) {
-    v.expr(e);
+    if v.expr(e) == Flow::Skip {
+        return;
+    }
 
     match e {
         Expr::Nil(_)
@@ -297,16 +325,22 @@ return function(...) return ... end
         }
 
         impl Visit for Counter {
-            fn block(&mut self, _b: &Block) {
+            fn block(&mut self, _b: &Block) -> Flow {
                 self.blocks += 1;
+
+                Flow::Next
             }
 
-            fn stmt(&mut self, _s: &Stmt) {
+            fn stmt(&mut self, _s: &Stmt) -> Flow {
                 self.stmts += 1;
+
+                Flow::Next
             }
 
-            fn expr(&mut self, _e: &Expr) {
+            fn expr(&mut self, _e: &Expr) -> Flow {
                 self.exprs += 1;
+
+                Flow::Next
             }
         }
 

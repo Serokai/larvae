@@ -7,6 +7,7 @@ own in the other
 */
 
 pub mod darklua;
+pub mod edits;
 pub mod engine;
 pub mod native;
 
@@ -16,6 +17,8 @@ use crate::config::RulesConfig;
 use crate::diag::Diag;
 use crate::syntax::lexer::{Lexed, Tok, TokKind};
 use crate::syntax::scan::RequireSite;
+
+pub use edits::{Conflict, Edits, Family, Rule, splice};
 
 /// True when any enabled rule needs a parse
 pub fn wants_ast(cfg: &RulesConfig) -> bool {
@@ -35,7 +38,7 @@ pub fn apply_ast_rules(
     require_forms: &[(RequireSite, String)],
     dm_path: Option<&str>,
     quote: char,
-    edits: &mut Vec<(u32, u32, String)>,
+    edits: &mut Edits,
     diags: &mut Vec<Diag>,
     path: &Path,
 ) {

@@ -25,7 +25,8 @@ mod types;
 
 use crate::config::RulesConfig;
 use crate::diag::Diag;
-use crate::rules::engine::{Edit, RuleCtx};
+use crate::rules::edits::Edits;
+use crate::rules::engine::RuleCtx;
 use std::path::Path;
 
 /// True when any rule in this module is enabled, gates the parse
@@ -67,7 +68,7 @@ pub fn wants(cfg: &RulesConfig) -> bool {
 pub fn apply(
     cfg: &RulesConfig,
     ctx: &RuleCtx,
-    edits: &mut Vec<Edit>,
+    edits: &mut Edits,
     _diags: &mut Vec<Diag>,
     _path: &Path,
 ) {
@@ -77,111 +78,151 @@ pub fn apply(
     add a second one would emit `self, self`, so the broader rule wins
     */
     if cfg.remove_method_definition && !cfg.convert_function_to_assignment {
-        methods::remove_method_definition(ctx, edits);
+        edits.run("remove_method_definition", |e| {
+            methods::remove_method_definition(ctx, e)
+        });
     }
 
     if cfg.convert_function_to_assignment {
-        methods::convert_function_to_assignment(ctx, edits);
+        edits.run("convert_function_to_assignment", |e| {
+            methods::convert_function_to_assignment(ctx, e)
+        });
     }
 
     if cfg.convert_local_function_to_assign {
-        methods::convert_local_function_to_assign(ctx, edits);
+        edits.run("convert_local_function_to_assign", |e| {
+            methods::convert_local_function_to_assign(ctx, e)
+        });
     }
 
     if cfg.remove_method_call {
-        methods::remove_method_call(ctx, edits);
+        edits.run("remove_method_call", |e| {
+            methods::remove_method_call(ctx, e)
+        });
     }
 
     if cfg.remove_compound_assignment {
-        assign::remove_compound_assignment(ctx, edits, cfg.remove_floor_division);
+        edits.run("remove_compound_assignment", |e| {
+            assign::remove_compound_assignment(ctx, e, cfg.remove_floor_division)
+        });
     }
 
     if cfg.remove_floor_division {
-        assign::remove_floor_division(ctx, edits);
+        edits.run("remove_floor_division", |e| {
+            assign::remove_floor_division(ctx, e)
+        });
     }
 
     if cfg.make_assignment_local {
-        assign::make_assignment_local(ctx, edits);
+        edits.run("make_assignment_local", |e| {
+            assign::make_assignment_local(ctx, e)
+        });
     }
 
     if cfg.remove_nil_declaration {
-        assign::remove_nil_declaration(ctx, edits);
+        edits.run("remove_nil_declaration", |e| {
+            assign::remove_nil_declaration(ctx, e)
+        });
     }
 
     if cfg.group_local_assignment {
-        assign::group_local_assignment(ctx, edits);
+        edits.run("group_local_assignment", |e| {
+            assign::group_local_assignment(ctx, e)
+        });
     }
 
     if cfg.remove_if_expression {
-        exprs::remove_if_expression(ctx, edits);
+        edits.run("remove_if_expression", |e| {
+            exprs::remove_if_expression(ctx, e)
+        });
     }
 
     if cfg.convert_index_to_field {
-        exprs::convert_index_to_field(ctx, edits);
+        edits.run("convert_index_to_field", |e| {
+            exprs::convert_index_to_field(ctx, e)
+        });
     }
 
     if cfg.convert_luau_number {
-        exprs::convert_luau_number(ctx, edits);
+        edits.run("convert_luau_number", |e| {
+            exprs::convert_luau_number(ctx, e)
+        });
     }
 
     if cfg.remove_function_call_parens {
-        exprs::remove_function_call_parens(ctx, edits);
+        edits.run("remove_function_call_parens", |e| {
+            exprs::remove_function_call_parens(ctx, e)
+        });
     }
 
     if cfg.convert_square_root_call {
-        exprs::convert_square_root_call(ctx, edits);
+        edits.run("convert_square_root_call", |e| {
+            exprs::convert_square_root_call(ctx, e)
+        });
     }
 
     if cfg.remove_types {
-        types::remove_types(ctx, edits);
+        edits.run("remove_types", |e| types::remove_types(ctx, e));
     }
 
     if let Some(r) = &cfg.remove_attribute
         && r.enabled()
     {
-        types::remove_attribute(ctx, edits, r.patterns());
+        edits.run("remove_attribute", |e| {
+            types::remove_attribute(ctx, e, r.patterns())
+        });
     }
 
     if let Some(r) = &cfg.remove_interpolated_string
         && r.enabled()
     {
-        interp::remove_interpolated_string(ctx, edits, r.strategy());
+        edits.run("remove_interpolated_string", |e| {
+            interp::remove_interpolated_string(ctx, e, r.strategy())
+        });
     }
 
     if cfg.filter_after_early_return {
-        flow::filter_after_early_return(ctx, edits);
+        edits.run("filter_after_early_return", |e| {
+            flow::filter_after_early_return(ctx, e)
+        });
     }
 
     if cfg.remove_continue {
-        flow::remove_continue(ctx, edits);
+        edits.run("remove_continue", |e| flow::remove_continue(ctx, e));
     }
 
     if cfg.remove_unused_while {
-        flow::remove_unused_while(ctx, edits);
+        edits.run("remove_unused_while", |e| flow::remove_unused_while(ctx, e));
     }
 
     if cfg.remove_unused_if_branch {
-        flow::remove_unused_if_branch(ctx, edits);
+        edits.run("remove_unused_if_branch", |e| {
+            flow::remove_unused_if_branch(ctx, e)
+        });
     }
 
     if cfg.remove_empty_do {
-        flow::remove_empty_do(ctx, edits);
+        edits.run("remove_empty_do", |e| flow::remove_empty_do(ctx, e));
     }
 
     if let Some(r) = &cfg.remove_assertions
         && r.enabled()
     {
-        calls::remove_assertions(ctx, edits, r.preserve());
+        edits.run("remove_assertions", |e| {
+            calls::remove_assertions(ctx, e, r.preserve())
+        });
     }
 
     if let Some(r) = &cfg.remove_debug_profiling
         && r.enabled()
     {
-        calls::remove_debug_profiling(ctx, edits, r.preserve());
+        edits.run("remove_debug_profiling", |e| {
+            calls::remove_debug_profiling(ctx, e, r.preserve())
+        });
     }
 
     if cfg.compute_expression {
-        fold::compute_expression(ctx, edits);
+        edits.run("compute_expression", |e| fold::compute_expression(ctx, e));
     }
 }
 
@@ -191,7 +232,8 @@ pub(crate) mod testing {
     Rule tests all want the same thing, parse a snippet, run one rule, splice
     the edits the way the pipeline does, compare the text
     */
-    use crate::rules::engine::{Edit, RuleCtx};
+    use crate::rules::edits::{Edit, Edits, splice};
+    use crate::rules::engine::RuleCtx;
     use crate::syntax::{lexer, parser};
 
     pub fn run(src: &str, rule: impl Fn(&RuleCtx, &mut Vec<Edit>)) -> String {
@@ -208,32 +250,10 @@ pub(crate) mod testing {
             quote: '"',
         };
 
-        let mut edits: Vec<Edit> = Vec::new();
-        rule(&ctx, &mut edits);
+        let mut edits = Edits::new();
+        edits.run("rule under test", |e| rule(&ctx, e));
 
-        splice(src, &mut edits)
-    }
-
-    /// Same ordering and overlap policy as the pipeline splice
-    pub fn splice(src: &str, edits: &mut [Edit]) -> String {
-        edits.sort_by_key(|e| (e.0, e.1));
-
-        let mut out = String::new();
-        let mut cursor = 0usize;
-
-        for (start, end, new) in edits.iter() {
-            if (*start as usize) < cursor {
-                continue;
-            }
-
-            out.push_str(&src[cursor..*start as usize]);
-            out.push_str(new);
-            cursor = *end as usize;
-        }
-
-        out.push_str(&src[cursor..]);
-
-        out
+        splice(src, &edits, &mut Vec::new())
     }
 
     /// Every rule must keep the line count stable for retain-lines output

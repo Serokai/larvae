@@ -4,7 +4,7 @@ Rules that prune or reshape control flow
 
 use super::eval;
 use super::support::{self, insert, tok_bytes};
-use crate::rules::engine::{Edit, RuleCtx, Visit, walk_chunk};
+use crate::rules::engine::{Edit, Flow, RuleCtx, Visit, walk_chunk};
 use crate::syntax::ast::*;
 
 /// Last statement that actually does something, the trailing `;` does not count
@@ -26,7 +26,7 @@ pub fn filter_after_early_return(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn block(&mut self, b: &Block) {
+        fn block(&mut self, b: &Block) -> Flow {
             for (i, s) in b.stmts.iter().enumerate() {
                 let Stmt::Do(d) = s else { continue };
 
@@ -37,7 +37,7 @@ pub fn filter_after_early_return(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
                 let rest = &b.stmts[i + 1..];
 
                 if rest.is_empty() || rest.iter().any(|s| matches!(s, Stmt::TypeAlias(_))) {
-                    return;
+                    return Flow::Next;
                 }
 
                 let from = self.ctx.bytes(rest[0].span()).0;
@@ -45,8 +45,10 @@ pub fn filter_after_early_return(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
 
                 self.ctx.delete_bytes_keep_lines(from, to, self.edits);
 
-                return;
+                return Flow::Next;
             }
+
+            Flow::Next
         }
     }
 
@@ -61,17 +63,19 @@ pub fn remove_unused_while(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn stmt(&mut self, s: &Stmt) {
-            let Stmt::While(w) = s else { return };
+        fn stmt(&mut self, s: &Stmt) -> Flow {
+            let Stmt::While(w) = s else { return Flow::Next };
             let Some(v) = eval::eval(self.ctx, &w.cond) else {
-                return;
+                return Flow::Next;
             };
 
             if v.truthy() {
-                return;
+                return Flow::Next;
             }
 
             self.ctx.delete_keep_lines(w.span, self.edits);
+
+            Flow::Next
         }
     }
 
@@ -95,7 +99,7 @@ pub fn remove_continue(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn stmt(&mut self, s: &Stmt) {
+        fn stmt(&mut self, s: &Stmt) -> Flow {
             let (block, span) = match s {
                 Stmt::While(n) => (&n.block, n.span),
 
@@ -103,10 +107,12 @@ pub fn remove_continue(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
 
                 Stmt::GenericFor(n) => (&n.block, n.span),
 
-                _ => return,
+                _ => return Flow::Next,
             };
 
             rewrite(self.ctx, block, span, self.edits);
+
+            Flow::Next
         }
     }
 
@@ -183,10 +189,12 @@ pub fn remove_unused_if_branch(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn stmt(&mut self, s: &Stmt) {
+        fn stmt(&mut self, s: &Stmt) -> Flow {
             if let Stmt::If(n) = s {
                 prune(self.ctx, n, self.edits);
             }
+
+            Flow::Next
         }
     }
 
@@ -356,12 +364,14 @@ pub fn remove_empty_do(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn stmt(&mut self, s: &Stmt) {
-            let Stmt::Do(d) = s else { return };
+        fn stmt(&mut self, s: &Stmt) -> Flow {
+            let Stmt::Do(d) = s else { return Flow::Next };
 
             if d.block.stmts.is_empty() {
                 self.ctx.delete_keep_lines(d.span, self.edits);
             }
+
+            Flow::Next
         }
     }
 

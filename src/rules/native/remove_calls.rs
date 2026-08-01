@@ -5,7 +5,7 @@ removing it would corrupt the expression around it
 */
 
 use crate::config::RemoveCalls;
-use crate::rules::engine::{self, Edit, RuleCtx, Visit};
+use crate::rules::engine::{self, Edit, Flow, RuleCtx, Visit};
 use crate::rules::native::{blank_line_start, contains_call, dotted_path};
 use crate::syntax::ast::{CallArgs, Expr, Stmt};
 
@@ -28,9 +28,9 @@ struct Remover<'a, 'src> {
 }
 
 impl Visit for Remover<'_, '_> {
-    fn stmt(&mut self, stmt: &Stmt) {
+    fn stmt(&mut self, stmt: &Stmt) -> Flow {
         let Stmt::Call(call, span) = stmt else {
-            return;
+            return Flow::Next;
         };
 
         let Expr::Call {
@@ -41,26 +41,28 @@ impl Visit for Remover<'_, '_> {
         } = call
         else {
             // a method call has a receiver, matching it by name would be a guess
-            return;
+            return Flow::Next;
         };
 
         // plain Name or Name.Name chains only, a computed index is not a name
         let Some(path) = dotted_path(self.ctx, func) else {
-            return;
+            return Flow::Next;
         };
 
         if !self.names.contains(&path) {
-            return;
+            return Flow::Next;
         }
 
         if self.preserve && args_may_do_work(args) {
-            return;
+            return Flow::Next;
         }
 
         let (start, end) = self.ctx.bytes(*span);
         // eat the indent too so the line does not keep trailing blanks
         let from = blank_line_start(self.ctx, start);
         self.ctx.delete_bytes_keep_lines(from, end, self.edits);
+
+        Flow::Next
     }
 }
 

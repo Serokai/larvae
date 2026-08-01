@@ -8,7 +8,7 @@ front of it has to be picked up by hand
 */
 
 use super::support::tok_bytes;
-use crate::rules::engine::{Edit, RuleCtx, Visit, walk_chunk};
+use crate::rules::engine::{Edit, Flow, RuleCtx, Visit, walk_chunk};
 use crate::syntax::ast::*;
 
 /*
@@ -67,7 +67,7 @@ pub fn remove_types(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn stmt(&mut self, s: &Stmt) {
+        fn stmt(&mut self, s: &Stmt) -> Flow {
             match s {
                 Stmt::Local(l) => {
                     for n in &l.names {
@@ -90,15 +90,19 @@ pub fn remove_types(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
                 Stmt::TypeAlias(t) => self.ctx.delete_keep_lines(t.span, self.edits),
                 _ => {}
             }
+
+            Flow::Next
         }
 
-        fn expr(&mut self, e: &Expr) {
+        fn expr(&mut self, e: &Expr) -> Flow {
             match e {
                 Expr::Function { body, .. } => drop_body_types(self.ctx, body, self.edits),
 
                 Expr::TypeAssert { ty, .. } => drop_type_with_lead(self.ctx, *ty, "::", self.edits),
                 _ => {}
             }
+
+            Flow::Next
         }
     }
 
@@ -149,19 +153,23 @@ pub fn remove_attribute(ctx: &RuleCtx, edits: &mut Vec<Edit>, patterns: &[String
     }
 
     impl Visit for V<'_, '_> {
-        fn stmt(&mut self, s: &Stmt) {
+        fn stmt(&mut self, s: &Stmt) -> Flow {
             match s {
                 Stmt::Function(f) => self.strip(&f.attributes),
 
                 Stmt::LocalFunction(f) => self.strip(&f.attributes),
                 _ => {}
             }
+
+            Flow::Next
         }
 
-        fn expr(&mut self, e: &Expr) {
+        fn expr(&mut self, e: &Expr) -> Flow {
             if let Expr::Function { attributes, .. } = e {
                 self.strip(attributes);
             }
+
+            Flow::Next
         }
     }
 

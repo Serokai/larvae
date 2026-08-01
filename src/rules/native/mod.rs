@@ -15,7 +15,8 @@ use std::path::Path;
 
 use crate::config::RulesConfig;
 use crate::diag::Diag;
-use crate::rules::engine::{self, Edit, RuleCtx, Visit};
+use crate::rules::edits::Edits;
+use crate::rules::engine::{self, Flow, RuleCtx, Visit};
 use crate::syntax::ast::{Expr, IndexKey, TokSpan};
 
 mod dedupe_requires;
@@ -37,28 +38,30 @@ pub fn wants(cfg: &RulesConfig) -> bool {
 pub fn apply(
     cfg: &RulesConfig,
     ctx: &RuleCtx,
-    edits: &mut Vec<Edit>,
+    edits: &mut Edits,
     diags: &mut Vec<Diag>,
     path: &Path,
 ) {
     if let Some(calls) = &cfg.remove_calls {
-        remove_calls::apply(calls, ctx, edits);
+        edits.run("remove_calls", |e| remove_calls::apply(calls, ctx, e));
     }
 
     if cfg.use_get_service {
-        use_get_service::apply(ctx, edits);
+        edits.run("use_get_service", |e| use_get_service::apply(ctx, e));
     }
 
     if cfg.dedupe_requires {
-        dedupe_requires::apply(ctx, edits);
+        edits.run("dedupe_requires", |e| dedupe_requires::apply(ctx, e));
     }
 
     if let Some(name) = &cfg.inject_module_path {
-        inject_module_path::apply(name, ctx, edits, diags, path);
+        edits.run("inject_module_path", |e| {
+            inject_module_path::apply(name, ctx, e, diags, path)
+        });
     }
 
     if cfg.freeze_module {
-        freeze_module::apply(ctx, edits);
+        edits.run("freeze_module", |e| freeze_module::apply(ctx, e));
     }
 }
 
@@ -90,10 +93,19 @@ fn dotted_path(ctx: &RuleCtx, expr: &Expr) -> Option<String> {
 fn contains_call(expr: &Expr) -> bool {
     struct Finder(bool);
     impl Visit for Finder {
-        fn expr(&mut self, e: &Expr) {
+        fn expr(&mut self, e: &Expr) -> Flow {
+            if self.0 {
+                // one is enough, nothing below can change the answer
+                return Flow::Skip;
+            }
+
             if matches!(e, Expr::Call { .. }) {
                 self.0 = true;
+
+                return Flow::Skip;
             }
+
+            Flow::Next
         }
     }
 
@@ -177,31 +189,9 @@ pub(crate) mod test_support {
             quote: '"',
         };
 
-        let mut edits = Vec::new();
+        let mut edits = Edits::new();
         apply(&cfg, &ctx, &mut edits, diags, Path::new("test.luau"));
 
-        splice(src, edits)
-    }
-
-    /// The splice the pipeline runs, the first of two overlapping edits wins
-    pub fn splice(src: &str, mut edits: Vec<Edit>) -> String {
-        edits.sort_by_key(|e| (e.0, e.1));
-
-        let mut out = String::new();
-        let mut cursor = 0usize;
-
-        for (start, end, new) in edits {
-            if (start as usize) < cursor {
-                continue;
-            }
-
-            out.push_str(&src[cursor..start as usize]);
-            out.push_str(&new);
-            cursor = end as usize;
-        }
-
-        out.push_str(&src[cursor..]);
-
-        out
+        crate::rules::edits::splice(src, &edits, &mut Vec::new())
     }
 }

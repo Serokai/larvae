@@ -9,7 +9,7 @@ and skipping the file beats rewriting somebody else's table
 */
 
 use crate::requires::resolve::lua_quote;
-use crate::rules::engine::{self, Edit, RuleCtx, Visit};
+use crate::rules::engine::{self, Edit, Flow, RuleCtx, Visit};
 use crate::rules::native::name_text;
 use crate::syntax::ast::{Expr, IndexKey, Stmt};
 
@@ -93,7 +93,7 @@ fn binds_game(ctx: &RuleCtx) -> bool {
     }
 
     impl Visit for Shadow<'_, '_> {
-        fn stmt(&mut self, stmt: &Stmt) {
+        fn stmt(&mut self, stmt: &Stmt) -> Flow {
             match stmt {
                 Stmt::Local(n) => {
                     for binding in &n.names {
@@ -125,14 +125,18 @@ fn binds_game(ctx: &RuleCtx) -> bool {
 
                 _ => {}
             }
+
+            Flow::Next
         }
 
-        fn expr(&mut self, expr: &Expr) {
+        fn expr(&mut self, expr: &Expr) -> Flow {
             if let Expr::Function { body, .. } = expr {
                 for param in &body.params {
                     self.mark(param.name);
                 }
             }
+
+            Flow::Next
         }
     }
 
@@ -150,7 +154,7 @@ struct Rewriter<'a, 'src> {
 }
 
 impl Visit for Rewriter<'_, '_> {
-    fn stmt(&mut self, stmt: &Stmt) {
+    fn stmt(&mut self, stmt: &Stmt) -> Flow {
         if let Stmt::Assign(assign) = stmt {
             for target in &assign.targets {
                 if service_of(self.ctx, target).is_some() {
@@ -158,21 +162,25 @@ impl Visit for Rewriter<'_, '_> {
                 }
             }
         }
+
+        Flow::Next
     }
 
-    fn expr(&mut self, expr: &Expr) {
+    fn expr(&mut self, expr: &Expr) -> Flow {
         let Some(service) = service_of(self.ctx, expr) else {
-            return;
+            return Flow::Next;
         };
 
         let (start, _) = self.ctx.bytes(expr.span());
 
         if self.targets.contains(&start) {
-            return;
+            return Flow::Next;
         }
 
         let call = format!("game:GetService({})", lua_quote(service, self.ctx.quote));
         self.ctx.replace(expr.span(), call, self.edits);
+
+        Flow::Next
     }
 }
 

@@ -11,7 +11,7 @@ use std::path::Path;
 
 use crate::diag::Diag;
 use crate::requires::resolve::lua_quote;
-use crate::rules::engine::{self, Edit, RuleCtx, Visit};
+use crate::rules::engine::{self, Edit, Flow, RuleCtx, Visit};
 use crate::rules::native::name_text;
 use crate::syntax::ast::{Expr, Stmt, TokSpan};
 
@@ -89,7 +89,7 @@ impl Usage<'_, '_> {
 }
 
 impl Visit for Usage<'_, '_> {
-    fn stmt(&mut self, stmt: &Stmt) {
+    fn stmt(&mut self, stmt: &Stmt) -> Flow {
         match stmt {
             Stmt::Local(local) => {
                 for binding in &local.names {
@@ -125,9 +125,11 @@ impl Visit for Usage<'_, '_> {
 
             _ => {}
         }
+
+        Flow::Next
     }
 
-    fn expr(&mut self, expr: &Expr) {
+    fn expr(&mut self, expr: &Expr) -> Flow {
         match expr {
             Expr::Name(span) => {
                 if name_text(self.ctx, *span) == self.name {
@@ -143,6 +145,8 @@ impl Visit for Usage<'_, '_> {
 
             _ => {}
         }
+
+        Flow::Next
     }
 }
 

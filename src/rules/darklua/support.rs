@@ -6,7 +6,7 @@ more than one place. Everything here is deliberately conservative, a
 predicate says yes only when the answer is provable from the tree alone
 */
 
-use crate::rules::engine::{Edit, RuleCtx, Visit, walk_expr};
+use crate::rules::engine::{Edit, Flow, RuleCtx, Visit, walk_expr};
 use crate::syntax::ast::*;
 use crate::syntax::lexer::TokKind;
 
@@ -65,10 +65,12 @@ pub fn has_call(e: &Expr) -> bool {
     }
 
     impl Visit for Probe {
-        fn expr(&mut self, e: &Expr) {
+        fn expr(&mut self, e: &Expr) -> Flow {
             if matches!(e, Expr::Call { .. }) {
                 self.found = true;
             }
+
+            Flow::Next
         }
     }
 

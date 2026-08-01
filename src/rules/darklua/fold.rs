@@ -9,7 +9,7 @@ that already folded
 
 use super::eval;
 use super::support;
-use crate::rules::engine::{Edit, RuleCtx, Visit, walk_chunk};
+use crate::rules::engine::{Edit, Flow, RuleCtx, Visit, walk_chunk};
 use crate::syntax::ast::*;
 
 pub fn compute_expression(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
@@ -22,31 +22,31 @@ pub fn compute_expression(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn expr(&mut self, e: &Expr) {
+        fn expr(&mut self, e: &Expr) -> Flow {
             // only composites are worth folding, a literal is already itself
             if !matches!(
                 e,
                 Expr::Binary { .. } | Expr::Unary { .. } | Expr::Paren { .. }
             ) {
-                return;
+                return Flow::Next;
             }
 
             let (a, b) = self.ctx.bytes(e.span());
 
             if self.done.iter().any(|&(fa, fb)| a >= fa && b <= fb) {
-                return;
+                return Flow::Next;
             }
 
             let Some(value) = eval::eval(self.ctx, e) else {
-                return;
+                return Flow::Next;
             };
 
             let Some(mut text) = eval::print(&value, self.ctx.quote) else {
-                return;
+                return Flow::Next;
             };
 
             if text == self.ctx.src[a as usize..b as usize] {
-                return;
+                return Flow::Next;
             }
 
             /*
@@ -60,6 +60,8 @@ pub fn compute_expression(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
             if support::replace_keep_lines(self.ctx, a, b, &text, self.edits) {
                 self.done.push((a, b));
             }
+
+            Flow::Next
         }
     }
 

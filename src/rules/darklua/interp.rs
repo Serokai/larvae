@@ -12,7 +12,7 @@ line numbers, and a nested backtick string, which this single pass would
 never get back to
 */
 
-use crate::rules::engine::{Edit, RuleCtx, Visit, walk_chunk};
+use crate::rules::engine::{Edit, Flow, RuleCtx, Visit, walk_chunk};
 use crate::syntax::ast::*;
 
 /// One piece of a split backtick string
@@ -31,18 +31,22 @@ pub fn remove_interpolated_string(ctx: &RuleCtx, edits: &mut Vec<Edit>, strategy
     }
 
     impl Visit for V<'_, '_> {
-        fn expr(&mut self, e: &Expr) {
-            let Expr::InterpString(span) = e else { return };
+        fn expr(&mut self, e: &Expr) -> Flow {
+            let Expr::InterpString(span) = e else {
+                return Flow::Next;
+            };
             let raw = self.ctx.text(*span);
 
             let Some(pieces) = split(raw, self.ctx.quote) else {
-                return;
+                return Flow::Next;
             };
 
             let text = render(&pieces, self.ctx.quote, self.tostring_strategy);
             let (a, b) = self.ctx.bytes(*span);
 
             self.edits.push((a, b, text));
+
+            Flow::Next
         }
     }
 

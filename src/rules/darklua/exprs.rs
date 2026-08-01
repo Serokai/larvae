@@ -3,7 +3,7 @@ Rules that rewrite a single expression in place
 */
 
 use super::support::{self, tok_bytes};
-use crate::rules::engine::{Edit, RuleCtx, Visit, walk_chunk};
+use crate::rules::engine::{Edit, Flow, RuleCtx, Visit, walk_chunk};
 use crate::syntax::ast::*;
 
 /*
@@ -21,22 +21,24 @@ pub fn remove_if_expression(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn expr(&mut self, e: &Expr) {
+        fn expr(&mut self, e: &Expr) -> Flow {
             let Expr::IfElse {
                 branches,
                 else_value,
                 span,
             } = e
             else {
-                return;
+                return Flow::Next;
             };
 
             let Some(text) = build_and_or(self.ctx, branches, else_value, 0) else {
-                return;
+                return Flow::Next;
             };
 
             let (a, b) = self.ctx.bytes(*span);
             support::replace_keep_lines(self.ctx, a, b, &text, self.edits);
+
+            Flow::Next
         }
     }
 
@@ -87,7 +89,7 @@ pub fn convert_index_to_field(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn expr(&mut self, e: &Expr) {
+        fn expr(&mut self, e: &Expr) -> Flow {
             match e {
                 Expr::Index {
                     key: IndexKey::Computed(k),
@@ -110,6 +112,8 @@ pub fn convert_index_to_field(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
 
                 _ => {}
             }
+
+            Flow::Next
         }
     }
 
@@ -146,14 +150,18 @@ pub fn convert_luau_number(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn expr(&mut self, e: &Expr) {
-            let Expr::Number(span) = e else { return };
+        fn expr(&mut self, e: &Expr) -> Flow {
+            let Expr::Number(span) = e else {
+                return Flow::Next;
+            };
             let text = self.ctx.text(*span);
 
             if let Some(new) = rewrite_number(text) {
                 let (a, b) = self.ctx.bytes(*span);
                 self.edits.push((a, b, new));
             }
+
+            Flow::Next
         }
     }
 
@@ -188,31 +196,33 @@ pub fn remove_function_call_parens(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn expr(&mut self, e: &Expr) {
+        fn expr(&mut self, e: &Expr) -> Flow {
             let Expr::Call { args, span, .. } = e else {
-                return;
+                return Flow::Next;
             };
 
-            let CallArgs::Paren(list) = args else { return };
+            let CallArgs::Paren(list) = args else {
+                return Flow::Next;
+            };
 
             if list.len() != 1 {
-                return;
+                return Flow::Next;
             }
 
             let arg = &list[0];
 
             if !matches!(arg, Expr::String(_) | Expr::Table { .. }) {
-                return;
+                return Flow::Next;
             }
 
             let Some(open) = arg.span().start.checked_sub(1) else {
-                return;
+                return Flow::Next;
             };
 
             let close = span.end - 1;
 
             if self.ctx.tok_text(open) != "(" || self.ctx.tok_text(close) != ")" {
-                return;
+                return Flow::Next;
             }
 
             let (oa, ob) = tok_bytes(self.ctx, open);
@@ -220,6 +230,8 @@ pub fn remove_function_call_parens(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
 
             self.edits.push((oa, ob, String::new()));
             self.edits.push((ca, cb, String::new()));
+
+            Flow::Next
         }
     }
 
@@ -242,13 +254,15 @@ pub fn convert_square_root_call(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
     }
 
     impl Visit for V<'_, '_> {
-        fn stmt(&mut self, s: &Stmt) {
+        fn stmt(&mut self, s: &Stmt) -> Flow {
             if let Stmt::Call(e, _) = s {
                 self.statement_calls.push(e.span());
             }
+
+            Flow::Next
         }
 
-        fn expr(&mut self, e: &Expr) {
+        fn expr(&mut self, e: &Expr) -> Flow {
             let Expr::Call {
                 func,
                 method,
@@ -256,23 +270,27 @@ pub fn convert_square_root_call(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
                 span,
             } = e
             else {
-                return;
+                return Flow::Next;
             };
 
             if method.is_some() || !is_math_sqrt(self.ctx, func) {
-                return;
+                return Flow::Next;
             }
 
-            let CallArgs::Paren(list) = args else { return };
+            let CallArgs::Paren(list) = args else {
+                return Flow::Next;
+            };
 
             if list.len() != 1 || self.statement_calls.contains(span) {
-                return;
+                return Flow::Next;
             }
 
             let base = support::operand_text(self.ctx, &list[0]);
             let (a, b) = self.ctx.bytes(*span);
 
             support::replace_keep_lines(self.ctx, a, b, &format!("({base} ^ 0.5)"), self.edits);
+
+            Flow::Next
         }
     }
 
