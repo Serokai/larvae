@@ -28,7 +28,7 @@ jobs:
     name: Test (${{ matrix.os }})
     # Windows is in the matrix on purpose: path handling (emitted requires,
     # mount mapping, re-relativized $paths) is a known cross-platform bug
-    # class for this tool category - plan.md §4.7.
+    # class for this tool category.
     strategy:
       fail-fast: false
       matrix:

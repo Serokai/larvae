@@ -23,7 +23,7 @@ pub fn run(root: &Path) -> Result<ExitCode> {
 
     let template = format!(
         "{schema}\n\
-         # coldluau configuration - see coldluau.example.toml for every option.\n\
+         # coldluau configuration, run `coldluau schema` for editor completion.\n\
          {project_note}\n\
          [process]\n\
          input = \"src\"\n\

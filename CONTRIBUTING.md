@@ -113,17 +113,16 @@ directory with a `mod.rs` instead of letting it keep going. The parser, the
 resolver, the config and the pipeline were all split that way and they read
 better for it.
 
-`plan.md` is the design document and the roadmap. Read the section that covers
-your change before you start. Most of the surprising decisions are explained
-there, especially the require semantics and the DataModel rules.
+The require semantics and the DataModel rules are where the surprising
+decisions are. Read the code around your change before you start, the
+comments explain the reasoning where it is not obvious.
 
 ## Adding a rule
 
 Rules live in `src/rules/`. darklua parity rules go in `darklua/` and ours go
 in `native/`. A new one needs four things, the implementation, an entry in
-`RulesConfig`, an entry in `coldluau.schema.json` so editors know about it,
-and a line in `coldluau.example.toml`. Add a test in `tests/e2e_rules.rs`
-showing the before and after.
+`RulesConfig`, and an entry in `coldluau.schema.json` so editors know about
+it. Add a test in `tests/e2e_rules.rs` showing the before and after.
 
 Register it in that module's `wants` and `apply`. `wants` decides whether a
 file gets parsed at all, so a rule that is missing from it will pass its unit

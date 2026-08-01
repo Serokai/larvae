@@ -14,7 +14,6 @@ include = [
     "README.md",
     "LICENSE.md",
     "CHANGELOG.md",
-    "coldluau.example.toml",
     "coldluau.schema.json",
 ]
 

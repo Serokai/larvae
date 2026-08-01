@@ -13,6 +13,9 @@ lpm.toml
 # local config used while testing on this repo
 coldluau.toml
 
+# working notes, kept out of the repo
+coldluau.example.toml
+
 *.md
 !LICENSE.md
 !CONTRIBUTING.md

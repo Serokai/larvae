@@ -116,9 +116,8 @@ on purpose.
 
 ## Configuration
 
-Every key is optional. See [coldluau.example.toml](coldluau.example.toml) for
-the annotated version, and run `coldluau schema` for completion and hover docs
-in any editor with Even Better TOML or Taplo.
+Every key is optional. Run `coldluau schema` for completion and hover docs in
+any editor with Even Better TOML or Taplo.
 
 ```toml
 [aliases]
@@ -148,7 +147,7 @@ today. Next up, reading Instance requires as input so existing codebases can
 convert, compile time constants, build profiles, and the rest of the rules now
 that the parser exists. After that, bundling with documented module init
 order, cross module dead code elimination, and transforms you write yourself
-in Luau. [plan.md](plan.md) has the full roadmap.
+in Luau.
 
 ## License
 
