@@ -130,26 +130,54 @@ impl<'a> Resolver<'a> {
                 Ok(Some(_)) => return,
 
                 _ => {
-                    let d = Diag::warning(
-                        ctx.path,
+                    self.report(
+                        ctx, src, offset, diags,
                         format!("require(\"{spec}\"): expansion targets @game/{} but no module exists at {}", segments.join("/"), crate::ui::rel(&fs)),
-                    )
-                    .at(src, offset);
-                    diags.push(if self.strict {
-                        Diag {
-                            severity: crate::diag::Severity::Error,
-                            ..d
-                        }
-                    } else {
-                        d
-                    });
+                    );
 
                     return;
                 }
             }
         }
 
-        // No mount covers the alias target, nothing to validate against
+        /*
+        Nothing in the project puts anything at that path, so the rewrite
+        compiles and then fails in a live game. Usually a package directory
+        someone forgot to mount, which is the failure this whole tool exists
+        to stop, so it is worth saying even though a second project file or
+        a plugin could in theory put it there
+        */
+        self.report(
+            ctx,
+            src,
+            offset,
+            diags,
+            format!(
+                "require(\"{spec}\"): expansion targets @game/{} but nothing in the project maps there, add the directory to your project file or to [requires.mounts]",
+                segments.join("/")
+            ),
+        );
+    }
+
+    /// Warn, or fail outright when the config asked for strict
+    fn report(
+        &self,
+        ctx: &FileCtx,
+        src: &str,
+        offset: usize,
+        diags: &mut Vec<Diag>,
+        message: String,
+    ) {
+        let d = Diag::warning(ctx.path, message).at(src, offset);
+
+        diags.push(if self.strict {
+            Diag {
+                severity: crate::diag::Severity::Error,
+                ..d
+            }
+        } else {
+            d
+        });
     }
 
     pub(super) fn check_container_rules(

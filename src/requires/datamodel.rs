@@ -76,6 +76,28 @@ impl MountTable {
         &self.mounts
     }
 
+    /*
+    The other direction, where on disk a DataModel path lives. Instance
+    requires arrive as a datamodel path and have to come back to a file
+    before they can be re-emitted, and the most specific mount wins because
+    a deeper one is the more precise answer
+    */
+    pub fn fs_of(&self, segments: &[String]) -> Option<PathBuf> {
+        let mount = self
+            .mounts
+            .iter()
+            .filter(|m| segments.len() >= m.dm.len() && segments[..m.dm.len()] == m.dm[..])
+            .max_by_key(|m| m.dm.len())?;
+
+        let mut fs = mount.fs.clone();
+
+        for seg in &segments[mount.dm.len()..] {
+            fs.push(seg);
+        }
+
+        Some(fs)
+    }
+
     /**
     Map a resolved module path to its DataModel node, extensions and
     .server/.client markers stripped, init files collapse into their dir

@@ -27,6 +27,8 @@ pub struct FileOpts {
     /// Comment text and whether it goes at the start
     append_comment: Option<(String, bool)>,
     directive: Option<String>,
+    /// Read require(script.Parent.Foo) chains as input
+    instance_input: bool,
 }
 
 impl FileOpts {
@@ -78,6 +80,7 @@ impl FileOpts {
             remove_comments,
             append_comment,
             directive: config.rules.add_luau_directive.clone(),
+            instance_input: config.requires.instance_input,
         })
     }
 }
@@ -183,6 +186,19 @@ pub(super) fn process_file(
                 };
 
                 edits.push(REQUIRES, (site.tok_start, site.tok_end, expr));
+            }
+        }
+    }
+
+    /*
+    Instance chains, the legacy form. Resolved through the project map and
+    re-emitted like any other require, and left exactly as written whenever
+    the chain cannot be followed all the way
+    */
+    if opts.instance_input {
+        for site in &scanned.instances {
+            if let Some(expr) = resolver.resolve_instance(&ctx, site, &src, diags) {
+                edits.push(REQUIRES, (site.start, site.end, expr));
             }
         }
     }

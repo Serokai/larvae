@@ -173,6 +173,11 @@
           "default": false,
           "description": "Upgrade warn-level classes (missing target file, case mismatch) to errors. Unknown aliases and inexpressible/realm-violating requires are ALWAYS errors."
         },
+        "instance_input": {
+          "type": "boolean",
+          "default": true,
+          "description": "Read require(script.Parent.Foo) style requires as input and rewrite them to the configured target. Turn it off to leave instance requires exactly as written."
+        },
         "overrides": {
           "type": "object",
           "description": "Per-path target overrides (glob -> target), e.g. instance requires for early-replication client code. (M2)",

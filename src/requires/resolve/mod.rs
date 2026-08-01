@@ -17,6 +17,7 @@ use crate::requires::datamodel::{
 
 mod alias;
 pub(crate) mod emit;
+mod instance;
 mod spec;
 mod validate;
 

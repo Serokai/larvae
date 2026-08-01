@@ -5,7 +5,9 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
-#[derive(Debug, Default, Deserialize)]
+use super::process::default_true;
+
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RequiresConfig {
     #[serde(default)]
@@ -19,6 +21,15 @@ pub struct RequiresConfig {
 
     #[serde(default)]
     pub strict: bool,
+
+    /*
+    Read require(script.Parent.Foo) style requires and rewrite them to the
+    configured target. On by default because it is the whole point of moving
+    an existing codebase over, off is the escape hatch for anyone who wants
+    their instance requires left exactly as written
+    */
+    #[serde(default = "default_true")]
+    pub instance_input: bool,
 
     #[serde(default)]
     pub overrides: Option<toml::Value>,
@@ -62,4 +73,18 @@ pub struct RojoConfig {
 
     #[serde(default)]
     pub build_project: Option<PathBuf>,
+}
+
+impl Default for RequiresConfig {
+    fn default() -> Self {
+        Self {
+            target: Target::default(),
+            sourcemap: None,
+            mounts: HashMap::new(),
+            strict: false,
+            instance_input: true,
+            overrides: None,
+            indexing_style: None,
+        }
+    }
 }
