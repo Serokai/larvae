@@ -16,9 +16,7 @@ coldluau.toml
 # working notes, kept out of the repo
 coldluau.example.toml
 
-*.md
+*.[mM][dD]
 !LICENSE.md
 !CONTRIBUTING.md
 !README.md
-# working notes, not for the repo
-DOCTODO.md
