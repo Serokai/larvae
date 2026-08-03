@@ -2,13 +2,13 @@
 
 <img src="assets/coldluautransparent.png" alt="coldluau" width="140">
 
-# coldluau
+# larvae
 
 **A fast Luau preprocessor. Aliases in, Roblox native string requires out.**
 
-[![CI](https://github.com/coldluau/cli/actions/workflows/ci.yml/badge.svg)](https://github.com/coldluau/cli/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/coldluau/cli?color=87FDFF&label=release)](https://github.com/coldluau/cli/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/coldluau/cli/total?color=87FDFF&label=downloads)](https://github.com/coldluau/cli/releases)
+[![CI](https://github.com/larvae-luau/larvae/actions/workflows/ci.yml/badge.svg)](https://github.com/larvae-luau/larvae/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/larvae-luau/larvae?color=87FDFF&label=release)](https://github.com/larvae-luau/larvae/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/larvae-luau/larvae/total?color=87FDFF&label=downloads)](https://github.com/larvae-luau/larvae/releases)
 [![License](https://img.shields.io/badge/license-MIT-87FDFF)](LICENSE.md)
 
 </div>
