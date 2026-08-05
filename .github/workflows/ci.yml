@@ -44,7 +44,7 @@ jobs:
         run: cargo test
       - name: Parser conformance
         # corpus round trip, coverage, mutation and truncation sweeps
-        run: cargo test --test parser
+        run: cargo test -p larvae --test parser
 
   smoke:
     name: CLI smoke test

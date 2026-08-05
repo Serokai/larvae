@@ -1,6 +1,8 @@
 # Test fixture, not a workspace member. Rebuild with:
-#   cargo build -p echo-worm --target wasm32-unknown-unknown --release
-#   cp target/wasm32-unknown-unknown/release/echo_worm.wasm ../../tests/fixtures/
+#   cargo build --manifest-path crates/larvae/tests/fixtures/echo-worm/Cargo.toml \
+#     --target wasm32-unknown-unknown --release
+#   cp crates/larvae/tests/fixtures/echo-worm/target/wasm32-unknown-unknown/release/echo_worm.wasm \
+#     crates/larvae/tests/fixtures/
 [package]
 name = "echo-worm"
 version = "0.0.0"
@@ -11,7 +13,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-larvae-worm = { path = "../larvae-worm" }
+larvae-worm = { path = "../../../../larvae-worm" }
 
 [profile.release]
 opt-level = "z"

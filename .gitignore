@@ -1,5 +1,5 @@
 /target
-crates/*/target/
+**/target/
 
 # build output and cache
 dist/
@@ -19,5 +19,6 @@ larvae.example.toml
 
 *.[mM][dD]
 !LICENSE.md
+!CHANGELOG.md
 !CONTRIBUTING.md
 !README.md

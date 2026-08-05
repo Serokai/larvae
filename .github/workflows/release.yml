@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${{ inputs.tag || github.ref_name }}"
-          VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="larvae") | .version')
 
           if [ "$TAG" != "v$VERSION" ]; then
             echo "tag $TAG does not match Cargo.toml version $VERSION" >&2
@@ -137,6 +137,6 @@ jobs:
           ref: ${{ needs.verify.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo publish --locked --token "$CARGO_REGISTRY_TOKEN"
+      - run: cargo publish -p larvae --locked --token "$CARGO_REGISTRY_TOKEN"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_SECRET }}
