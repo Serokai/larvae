@@ -1,0 +1,23 @@
+# Test fixture, not a workspace member. Rebuild with:
+#   cargo build -p echo-worm --target wasm32-unknown-unknown --release
+#   cp target/wasm32-unknown-unknown/release/echo_worm.wasm ../../tests/fixtures/
+[package]
+name = "echo-worm"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+larvae-worm = { path = "../larvae-worm" }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+panic = "abort"
+strip = "symbols"
+
+# Not part of the larvae workspace, it only builds for wasm32
+[workspace]

@@ -1,4 +1,5 @@
 /target
+crates/*/target/
 
 # build output and cache
 dist/

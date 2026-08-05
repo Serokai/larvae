@@ -12,3 +12,4 @@ pub mod rules;
 pub mod syntax;
 pub mod sys;
 pub mod ui;
+pub mod worm;

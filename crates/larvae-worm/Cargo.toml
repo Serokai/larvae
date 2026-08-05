@@ -1,0 +1,12 @@
+[package]
+name = "larvae-worm"
+version = "0.1.0"
+edition = "2024"
+description = "Guest side of the larvae worm ABI, for writing larvae extensions in Rust"
+license = "MIT"
+repository = "https://github.com/larvae-luau/larvae"
+homepage = "https://github.com/larvae-luau/larvae"
+keywords = ["luau", "larvae", "wasm", "plugin", "extension"]
+categories = ["development-tools::build-utils", "wasm"]
+
+[dependencies]
