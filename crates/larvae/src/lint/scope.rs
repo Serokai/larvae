@@ -111,6 +111,35 @@ pub fn resolve<'a>(src: &'a str, toks: &'a [Tok], chunk: &'a Chunk) -> Names<'a>
     binder.block(&chunk.block);
     binder.pop_scope();
 
+    /*
+    A name the file assigns as a global is defined for the whole file.
+
+    The walk cannot know this as it goes, because `function onTouch()` at the
+    top and `Connect(onTouch)` at the bottom are resolved in that order and the
+    binding is never entered into a scope. Reading a global before the line
+    that sets it is nil at runtime, but it is also how every Roblox script is
+    written, so the lenient answer is the right one: collect what the file
+    defines, then stop calling those undefined.
+    */
+    let defined: std::collections::HashSet<&str> = binder
+        .out
+        .global_writes
+        .iter()
+        .map(|&t| toks[t as usize].text(src))
+        .collect();
+
+    if !defined.is_empty() {
+        binder
+            .out
+            .undefined
+            .retain(|&t| !defined.contains(toks[t as usize].text(src)));
+
+        binder
+            .out
+            .undefined_set
+            .retain(|&t| !defined.contains(toks[t as usize].text(src)));
+    }
+
     binder.out
 }
 
@@ -229,7 +258,10 @@ impl<'a> Binder<'a> {
 
     fn stmt_inner(&mut self, stmt: &'a Stmt) {
         match stmt {
-            Stmt::Empty(_) | Stmt::Break(_) | Stmt::Continue(_) | Stmt::TypeAlias(_) => {}
+            Stmt::Empty(_) | Stmt::Break(_) | Stmt::Continue(_) => {}
+
+            // `type Foo = Types.Foo` is a use of the local `Types`
+            Stmt::TypeAlias(n) => self.type_reads(n.span),
 
             // the values are evaluated before the names exist, so `local x = x`
             // reads whatever `x` already meant
@@ -239,6 +271,10 @@ impl<'a> Binder<'a> {
                 }
 
                 for binding in &n.names {
+                    if let Some(ty) = binding.ty {
+                        self.type_reads(ty);
+                    }
+
                     self.declare(binding.name, Origin::Local);
                 }
             }
@@ -377,7 +413,19 @@ impl<'a> Binder<'a> {
                 .push(("self", index));
         }
 
+        if let Some(generics) = body.generics {
+            self.type_reads(generics);
+        }
+
+        if let Some(ret) = body.ret_type {
+            self.type_reads(ret);
+        }
+
         for param in &body.params {
+            if let Some(ty) = param.ty {
+                self.type_reads(ty);
+            }
+
             if !param.is_vararg {
                 self.declare(TokSpan::new(param.name.start as usize, param.name.end as usize), Origin::Param);
             }
@@ -442,8 +490,17 @@ impl<'a> Binder<'a> {
                 }
             }
 
-            Expr::Call { func, args, .. } => {
+            Expr::Call {
+                func,
+                args,
+                type_args,
+                ..
+            } => {
                 self.expr(func);
+
+                if let Some(ty) = type_args {
+                    self.type_reads(*ty);
+                }
 
                 match args {
                     CallArgs::Paren(list) => {
@@ -471,7 +528,41 @@ impl<'a> Binder<'a> {
                 self.expr(else_value);
             }
 
-            Expr::TypeAssert { expr, .. } => self.expr(expr),
+            Expr::TypeAssert { expr, ty, .. } => {
+                self.expr(expr);
+                self.type_reads(*ty);
+            }
+        }
+    }
+
+    /*
+    Names referenced from inside a type.
+
+    The tree keeps types as token spans and never interprets them, so a local
+    used only from a type, `local T = require(...)` then `type Foo = T.Foo`,
+    would otherwise look unused. Walking the tokens recovers it.
+
+    Approximate in the same direction as the interpolated string scan: a name
+    matching a local counts as a read even when it was really a type of the
+    same name. Over counting keeps a lint quiet where it might have spoken,
+    which is far better than reporting a live variable as unused.
+    */
+    fn type_reads(&mut self, span: TokSpan) {
+        for i in span.start..span.end {
+            if !matches!(self.toks[i as usize].kind, crate::syntax::lexer::TokKind::Ident) {
+                continue;
+            }
+
+            // a name after a dot or a colon is a field, not a reference
+            if i > span.start && matches!(self.tok(i - 1), "." | ":") {
+                continue;
+            }
+
+            let name = self.tok(i);
+
+            if let Some(b) = self.lookup(name) {
+                self.out.bindings[b].reads.push(self.toks[i as usize].start);
+            }
         }
     }
 

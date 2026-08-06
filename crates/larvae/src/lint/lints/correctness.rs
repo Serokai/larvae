@@ -369,6 +369,21 @@ impl SuspiciousReverseLoop {
                 return;
             }
 
+            /*
+            The step decides whether this is the bug or the correct spelling of
+            a countdown, so a step that cannot be evaluated has to suppress the
+            report rather than permit it: `for i = 10, 1, step do` with a
+            negative `step` is right, and nothing here can see its value.
+            */
+            if let Some(step) = &n.step {
+                match number(ctx, step) {
+                    Some(value) if value >= 0.0 => {}
+
+                    // negative, or not a literal, and either way not this bug
+                    _ => return,
+                }
+            }
+
             // an explicit negative step is the correct spelling, not the bug
             if let Some(step) = &n.step
                 && number(ctx, step).is_some_and(|v| v < 0.0)

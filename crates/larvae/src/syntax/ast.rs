@@ -177,6 +177,8 @@ pub struct Function {
 #[derive(Debug)]
 pub struct LocalFunction {
     pub attributes: Vec<TokSpan>,
+    /// `const function f()` rather than `local function f()`
+    pub is_const: bool,
     pub name: TokSpan,
     pub body: FunctionBody,
     pub span: TokSpan,

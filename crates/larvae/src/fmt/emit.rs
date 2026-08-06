@@ -90,9 +90,18 @@ impl<'a> Emitter<'a> {
             return Cow::Borrowed("");
         }
 
-        // borrow when the author already wrote it the way it comes out
-        let flat =
-            &self.src[self.tok_start(span.start) as usize..self.tok_end(span.end - 1) as usize];
+        let (lo, hi) = self.byte_span(span);
+        let flat = &self.src[lo as usize..hi as usize];
+
+        /*
+        A comment inside a type cannot survive a token replay, because comments
+        are not tokens. There is nowhere sensible to put one back either, since
+        the replay has no structure to hang it on, so the region is emitted
+        exactly as the author wrote it.
+        */
+        if !self.trivia.between(lo, hi).is_empty() {
+            return Cow::Borrowed(flat);
+        }
 
         let mut out = String::with_capacity(flat.len());
 
@@ -116,6 +125,71 @@ impl<'a> Emitter<'a> {
         let (lo, hi) = (self.tok_end(a) as usize, self.tok_start(b) as usize);
 
         lo < hi && self.src[lo..hi].contains('\n')
+    }
+
+    /// Whether this expression prints starting with a `-`, which `-` cannot abut
+    fn starts_with_minus(&self, e: &Expr) -> bool {
+        self.tok(e.span().start) == "-"
+    }
+
+    /// The `)` closing the `(` at this token index, counting depth on the way
+    fn matching_paren(&self, open: u32) -> Option<u32> {
+        if self.toks.get(open as usize).is_none() || self.tok(open) != "(" {
+            return None;
+        }
+
+        let mut depth = 0usize;
+
+        for i in open..self.toks.len() as u32 {
+            match self.tok(i) {
+                "(" => depth += 1,
+
+                ")" => {
+                    depth -= 1;
+
+                    if depth == 0 {
+                        return Some(i);
+                    }
+                }
+
+                _ => {}
+            }
+        }
+
+        None
+    }
+
+    /// Token span of one table field, which the tree does not store directly
+    fn field_span(&self, field: &TableField) -> TokSpan {
+        match field {
+            TableField::Positional(e) => e.span(),
+
+            // the key token comes first, and the value's span ends the field
+            TableField::Named { name, value } => {
+                TokSpan::new(name.start as usize, value.span().end as usize)
+            }
+
+            TableField::Computed { key, value } => TokSpan::new(
+                // the `[` sits one token before the key
+                key.span().start.saturating_sub(1) as usize,
+                value.span().end as usize,
+            ),
+        }
+    }
+
+    /// Byte range covered by a token span
+    fn byte_span(&self, span: TokSpan) -> (u32, u32) {
+        (self.tok_start(span.start), self.tok_end(span.end - 1))
+    }
+
+    /// Whether a statement opens with `(`, which would continue the line above
+    fn starts_with_paren(&self, stmt: &Stmt) -> bool {
+        self.tok(stmt.span().start) == "("
+    }
+
+    /// Whether this expression prints starting with a `[`, which `[` cannot abut
+    fn starts_with_bracket(&self, e: &Expr) -> bool {
+        self.tok(e.span().start).starts_with('[')
     }
 
     /// Whether the token before this closing bracket is a comma
@@ -186,13 +260,18 @@ impl<'a> Emitter<'a> {
     line, and one blank line wherever they left one or more.
     */
     fn block_body(&self, block: &Block) -> Doc<'a> {
-        let (mut pieces, tail) = self.pieces(block);
+        let (prologue, mut pieces, tail) = self.pieces(block);
 
         if self.cfg.sort_requires.enabled {
             sort_requires(&mut pieces, self.cfg.sort_requires.grouping);
         }
 
         let mut parts: Vec<Doc<'a>> = Vec::with_capacity(pieces.len() * 3 + 2);
+
+        for c in &prologue {
+            parts.push(self.comment_doc(*c));
+            parts.push(Doc::Hard);
+        }
 
         for (i, piece) in pieces.iter().enumerate() {
             if i > 0 {
@@ -209,6 +288,16 @@ impl<'a> Emitter<'a> {
             for c in &piece.leading {
                 parts.push(self.comment_doc(*c));
                 parts.push(Doc::Hard);
+            }
+
+            /*
+            A statement opening with `(` continues the line above as a call,
+            which is Lua's oldest ambiguity. The author's `;` is dropped like
+            any other, so one is put back wherever it is load bearing: without
+            it `local a = b` followed by `(c)()` reads as `local a = b(c)()`.
+            */
+            if i > 0 && self.starts_with_paren(piece.stmt) {
+                parts.push(Doc::text(";"));
             }
 
             parts.push(self.stmt(piece.stmt));
@@ -250,8 +339,9 @@ impl<'a> Emitter<'a> {
     would attach to whatever landed in its place. Binding the trivia to the
     statement first means reordering carries it along.
     */
-    fn pieces<'s>(&self, block: &'s Block) -> (Vec<Piece<'s, 'a>>, Tail) {
+    fn pieces<'s>(&self, block: &'s Block) -> (Vec<Comment>, Vec<Piece<'s, 'a>>, Tail) {
         let mut pieces: Vec<Piece<'_, 'a>> = Vec::with_capacity(block.stmts.len());
+        let mut prologue: Vec<Comment> = Vec::new();
         let mut cursor = self.block_lo(block);
 
         for stmt in &block.stmts {
@@ -281,10 +371,29 @@ impl<'a> Emitter<'a> {
                 att.blank_before_leading
             };
 
+            /*
+            A `--!` directive belongs to the file rather than to the statement
+            it happens to sit above, and only takes effect before any code. So
+            it is lifted out of the first statement's leading comments into a
+            prologue, which keeps it at the top whatever `sort_requires` then
+            does with the statements. Left attached, sorting could move it down
+            the file and quietly downgrade a module out of strict mode.
+            */
+            let mut leading = att.leading.to_vec();
+
+            if pieces.is_empty() {
+                let (directives, rest) = leading
+                    .iter()
+                    .partition(|c| c.text(self.src).starts_with("--!"));
+
+                prologue = directives;
+                leading = rest;
+            }
+
             pieces.push(Piece {
                 stmt,
                 blank_before,
-                leading: att.leading.to_vec(),
+                leading,
                 trailing: None,
                 key: self.require_path(stmt),
             });
@@ -303,7 +412,7 @@ impl<'a> Emitter<'a> {
             blank_before: att.blank_before_leading,
         };
 
-        (pieces, tail)
+        (prologue, pieces, tail)
     }
 
     fn trailing_doc(&self, comment: Option<Comment>) -> Doc<'a> {
@@ -496,8 +605,27 @@ impl<'a> Emitter<'a> {
 
             Stmt::Continue(_) => Doc::text("continue"),
 
-            // the tree keeps only the name, so the alias prints as written
-            Stmt::TypeAlias(n) => Doc::text(self.verbatim(n.span)),
+            /*
+            The tree keeps only the alias's name, so the rest prints from its
+            tokens. That is fine for a type, which is punctuation the pairwise
+            spacing rules were written for, and wrong for `type function f()`,
+            whose body is arbitrary Luau: replaying it drops the newlines and
+            runs `1` into `return`, which is a malformed number.
+
+            So an alias covering more than one line is emitted exactly as the
+            author wrote it. That keeps its comments too, which a token replay
+            can never do.
+            */
+            Stmt::TypeAlias(n) => {
+                let (lo, hi) = self.byte_span(n.span);
+                let raw = &self.src[lo as usize..hi as usize];
+
+                match raw.contains('\n') {
+                    true => Doc::text(raw),
+
+                    false => Doc::text(self.verbatim(n.span)),
+                }
+            }
         }
     }
 
@@ -660,7 +788,7 @@ impl<'a> Emitter<'a> {
     fn local_function(&self, n: &LocalFunction) -> Doc<'a> {
         Doc::concat([
             self.attributes(&n.attributes),
-            Doc::text("local function "),
+            Doc::text(if n.is_const { "const function " } else { "local function " }),
             Doc::text(self.one(n.name)),
             self.function_body(&n.body),
         ])
@@ -678,7 +806,13 @@ impl<'a> Emitter<'a> {
             parts.push(Doc::text(" "));
         }
 
-        parts.push(self.params(&body.params));
+        let open = match body.generics {
+            Some(generics) => generics.end,
+
+            None => body.span.start,
+        };
+
+        parts.push(self.params(&body.params, open));
 
         if let Some(ret) = body.ret_type {
             parts.push(Doc::text(": "));
@@ -691,7 +825,20 @@ impl<'a> Emitter<'a> {
         Doc::group(Doc::concat(parts))
     }
 
-    fn params(&self, params: &[Param]) -> Doc<'a> {
+    fn params(&self, params: &[Param], open: u32) -> Doc<'a> {
+        /*
+        Same reasoning as a type: the tree has no place to hang a comment
+        written between two parameters, so a list holding one is emitted as
+        written rather than losing it.
+        */
+        if let Some(close) = self.matching_paren(open) {
+            let (lo, hi) = (self.tok_start(open), self.tok_end(close));
+
+            if !self.trivia.between(lo, hi).is_empty() {
+                return Doc::text(&self.src[lo as usize..hi as usize]);
+            }
+        }
+
         if params.is_empty() {
             return Doc::text("()");
         }
@@ -764,10 +911,17 @@ impl<'a> Emitter<'a> {
             Expr::Unary { op, operand, .. } => {
                 let op = self.one(*op);
 
+                /*
+                `not x` needs its space and `#x` must not have one, which is the
+                easy half. The hard half is `- -x`: two minus signs run together
+                spell a line comment, so the rest of the line disappears and the
+                file stops parsing. A space between them is not cosmetic.
+                */
+                let space = op == "not" || (op == "-" && self.starts_with_minus(operand));
+
                 Doc::concat([
                     Doc::text(op),
-                    // `not x` needs its space, `-x` and `#x` must not have one
-                    Doc::text(if op == "not" { " " } else { "" }),
+                    Doc::text(if space { " " } else { "" }),
                     self.expr(operand),
                 ])
             }
@@ -785,7 +939,13 @@ impl<'a> Emitter<'a> {
 
                 IndexKey::Computed(k) => Doc::concat([
                     self.expr(object),
-                    self.bracketed("[", "]", self.expr(k), self.cfg.space_inside_brackets),
+                    self.bracketed(
+                        "[",
+                        "]",
+                        self.expr(k),
+                        // `[` against a `[[ ]]` string opens a long string instead
+                        self.cfg.space_inside_brackets || self.starts_with_bracket(k),
+                    ),
                 ]),
             },
 
@@ -1010,13 +1170,47 @@ impl<'a> Emitter<'a> {
     */
     fn table(&self, fields: &[TableField], span: TokSpan) -> Doc<'a> {
         if fields.is_empty() {
-            return Doc::text("{}");
+            // `{ -- nothing yet }` holds a comment and is not the same as `{}`
+            let inside = self
+                .trivia
+                .between(self.tok_end(span.start), self.tok_start(span.end - 1));
+
+            if inside.is_empty() {
+                return Doc::text("{}");
+            }
+
+            let mut parts = Vec::with_capacity(inside.len() * 2);
+
+            for c in inside {
+                parts.push(Doc::Hard);
+                parts.push(self.comment_doc(*c));
+            }
+
+            return Doc::concat([
+                Doc::text("{"),
+                Doc::indent(Doc::concat(parts)),
+                Doc::Hard,
+                Doc::text("}"),
+            ]);
         }
 
         let open = span.start;
         let close = span.end - 1;
 
-        let expanded = self.newline_between(open, open + 1)
+        /*
+        A comment anywhere in the table forces it to expand.
+
+        Not a style preference. A line comment flat inside braces would comment
+        out the closing brace and everything after it, so the choice is between
+        expanding and losing the comment, and the comment is the author's.
+        */
+        let commented = !self
+            .trivia
+            .between(self.tok_end(open), self.tok_start(close))
+            .is_empty();
+
+        let expanded = commented
+            || self.newline_between(open, open + 1)
             || (self.cfg.magic_trailing_comma && self.has_trailing_comma(close));
 
         let each: Vec<Doc<'a>> = fields
@@ -1031,7 +1225,12 @@ impl<'a> Emitter<'a> {
                 ]),
 
                 TableField::Computed { key, value } => Doc::concat([
-                    self.bracketed("[", "]", self.expr(key), self.cfg.space_inside_brackets),
+                    self.bracketed(
+                        "[",
+                        "]",
+                        self.expr(key),
+                        self.cfg.space_inside_brackets || self.starts_with_bracket(key),
+                    ),
                     Doc::text(" = "),
                     self.expr(value),
                 ]),
@@ -1039,16 +1238,39 @@ impl<'a> Emitter<'a> {
             .collect();
 
         if expanded {
-            let mut parts = Vec::with_capacity(each.len() * 3 + 2);
+            let mut parts = Vec::with_capacity(each.len() * 5 + 2);
+            let mut cursor = self.tok_end(open);
 
-            for field in each {
+            for (field, doc) in fields.iter().zip(each) {
+                let start = self.tok_start(self.field_span(field).start);
+                let att = self.trivia.split(cursor, start);
+
+                // this gap's trailing comment sits on the line above, not this one
+                parts.push(self.trailing_doc(att.trailing));
+
+                for c in att.leading {
+                    parts.push(Doc::Hard);
+                    parts.push(self.comment_doc(*c));
+                }
+
                 parts.push(Doc::Hard);
-                parts.push(field);
+                parts.push(doc);
                 parts.push(Doc::text(","));
+
+                cursor = self.tok_end(self.field_span(field).end - 1);
             }
 
             if !self.cfg.trailing_comma {
                 parts.pop();
+            }
+
+            // and whatever sits between the last field and the closing brace
+            let att = self.trivia.split(cursor, self.tok_start(close));
+            parts.push(self.trailing_doc(att.trailing));
+
+            for c in att.leading {
+                parts.push(Doc::Hard);
+                parts.push(self.comment_doc(*c));
             }
 
             return Doc::concat([
@@ -1291,11 +1513,11 @@ fn needs_space(prev: &str, next: &str) -> bool {
         return matches!(prev, "," | ":" | "->" | "|" | "&" | "{" | "=");
     }
 
-    if matches!(prev, "," | ":" | "->" | "|" | "&" | "{" | "=") {
+    if matches!(prev, "," | ":" | "->" | "|" | "&" | "{" | "=" | "..") {
         return true;
     }
 
-    if matches!(next, "->" | "|" | "&" | "}" | "=") {
+    if matches!(next, "->" | "|" | "&" | "}" | "=" | "..") {
         return true;
     }
 
@@ -1303,12 +1525,19 @@ fn needs_space(prev: &str, next: &str) -> bool {
         return prev == "{";
     }
 
-    // two words, `typeof x` or `keyof T`, which is the only pair left
-    is_word(prev) && is_word(next)
+    /*
+    Two atoms, where an atom is anything starting with a letter, a digit or an
+    underscore. Words are the obvious case, `typeof T`, but numbers matter for
+    a reason that is easy to miss: a type can hold an expression, through
+    `typeof(...)`, and `and 1` run together spells the identifier `and1` while
+    `2 or` spells the malformed number `2or`. Testing for words alone let both
+    through.
+    */
+    is_atom(prev) && is_atom(next)
 }
 
-fn is_word(tok: &str) -> bool {
-    tok.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+fn is_atom(tok: &str) -> bool {
+    tok.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /*

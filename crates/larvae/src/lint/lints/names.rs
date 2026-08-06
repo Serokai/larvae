@@ -92,6 +92,11 @@ impl UnusedVariable {
                 continue;
             }
 
+            // a method's implicit self has no name token and cannot be removed
+            if binding.name == "self" && binding.origin == Origin::Param {
+                continue;
+            }
+
             let ignored = match &ignore {
                 Some(pattern) => pattern.is_match(binding.name),
 

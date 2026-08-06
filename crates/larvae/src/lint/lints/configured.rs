@@ -13,7 +13,7 @@ use crate::lint::ctx::{Finding, LintCtx};
 use crate::lints;
 use crate::syntax::ast::*;
 
-use super::correctness::{each_expr, each_stmt};
+use super::correctness::{each_block, each_expr, each_stmt};
 
 lints! {
     BadStringEscape => "bad_string_escape", Warn,
@@ -274,13 +274,20 @@ const REPLACED: &[(&str, &str)] = &[
     ("wait", "task.wait"),
 ];
 
-/// Methods replaced on every Instance, matched by name alone
+/*
+Methods Roblox replaced, matched by name because the receiver's type is not
+something larvae knows.
+
+Which is why `remove` is not on the list. `Instance:remove()` is deprecated and
+`Queue:remove(1)` is somebody's own collection, the two are spelled identically,
+and reporting the second is worse than missing the first. What is left is the
+legacy camelCase that only Roblox ever had.
+*/
 const REPLACED_METHODS: &[(&str, &str)] = &[
     ("Remove", "Destroy"),
     ("children", "GetChildren"),
     ("findFirstChild", "FindFirstChild"),
     ("getChildren", "GetChildren"),
-    ("remove", "Destroy"),
 ];
 
 #[derive(Deserialize, Default)]
@@ -304,6 +311,11 @@ impl Deprecated {
 
             if let Some(m) = method {
                 let name = ctx.text(*m);
+
+                // these names mean nothing outside Roblox
+                if ctx.cfg.std != crate::lint::config::StdLib::Roblox {
+                    return;
+                }
 
                 if let Some((_, replacement)) =
                     REPLACED_METHODS.iter().find(|(old, _)| *old == name)
@@ -537,8 +549,38 @@ impl ManualTableClone {
     else in the loop means the copy is not the whole point.
     */
     fn check(ctx: &LintCtx<'_>, out: &mut Vec<Finding>) {
-        each_stmt(ctx, out, |ctx, s, out| {
-            let Stmt::GenericFor(n) = s else {
+        each_block(ctx, out, |ctx, block, out| {
+            for pair in block.stmts.windows(2) {
+                /*
+                The destination has to be a table this block just created.
+
+                Without that check a merge, `for k, v in pairs(source) do
+                target[k] = v end` inside a function taking `target`, is
+                reported, and the advice is worse than the code: `table.clone`
+                would discard everything already in `target`.
+                */
+                let Stmt::Local(local) = &pair[0] else {
+                    continue;
+                };
+
+                let ([fresh], [Expr::Table { fields, .. }]) =
+                    (local.names.as_slice(), local.values.as_slice())
+                else {
+                    continue;
+                };
+
+                if !fields.is_empty() {
+                    continue;
+                }
+
+                Self::one(ctx, &pair[1], ctx.text(fresh.name), out);
+            }
+        });
+    }
+
+    fn one(ctx: &LintCtx<'_>, stmt: &Stmt, fresh: &str, out: &mut Vec<Finding>) {
+        {
+            let Stmt::GenericFor(n) = stmt else {
                 return;
             };
 
@@ -574,6 +616,7 @@ impl ManualTableClone {
 
             // and the target has to be indexed by the loop's key variable
             let Expr::Index {
+                object,
                 key: IndexKey::Computed(index),
                 ..
             } = target
@@ -585,6 +628,11 @@ impl ManualTableClone {
                 return;
             }
 
+            // and it has to be the table declared empty just above
+            if !matches!(object.as_ref(), Expr::Name(n) if ctx.text(*n) == fresh) {
+                return;
+            }
+
             out.push(
                 Finding::new(
                     "manual_table_clone",
@@ -593,7 +641,7 @@ impl ManualTableClone {
                 )
                 .with_help(format!("table.clone({source}) does it in one call")),
             );
-        });
+        }
     }
 }
 
@@ -666,8 +714,22 @@ impl MismatchedArgCount {
                 return;
             }
 
-            let required = body.params.len();
-            arity.insert(index, (required, required));
+            /*
+            Passing fewer arguments than a function declares is legal and
+            idiomatic, and an optional parameter, `level: string?`, says so
+            outright. So too few is only reported when every parameter carries
+            a type and none of them is optional, which is the author stating
+            that all of them are required.
+            */
+            let all_required = !body.params.is_empty()
+                && body.params.iter().all(|p| {
+                    p.ty.is_some_and(|ty| !ctx.text(ty).trim_end().ends_with('?'))
+                });
+
+            let count = body.params.len();
+            let min = if all_required { count } else { 0 };
+
+            arity.insert(index, (min, count));
         });
 
         each_expr(ctx, out, |ctx, e, out| {

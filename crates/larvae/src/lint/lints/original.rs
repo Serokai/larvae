@@ -164,7 +164,9 @@ impl StringConcatInLoop {
                 _ => return,
             };
 
-            for accumulator in accumulating_concats(ctx, body) {
+            let outside = ctx.bytes(s.span()).0;
+
+            for accumulator in accumulating_concats(ctx, body, outside) {
                 out.push(
                     Finding::new(
                         "string_concat_in_loop",
@@ -182,16 +184,38 @@ impl StringConcatInLoop {
 }
 
 /*
-Statements in this block that append to a name they also read.
+Statements in this block that append to a name declared outside the loop.
 
-Only the block's own statements, not nested ones, because a concatenation in a
-nested loop is reported when that loop is visited and reporting it twice under
-two spans helps nobody.
+Two things have to hold, and both were learned from what happens without them.
+The target must be a bare name, because `child.Name = child.Name .. \"_old\"`
+writes a different field each iteration and is linear. And it must be declared
+before the loop, because a string built inside the body starts empty every time
+around and is linear too.
+
+Nested `if` and `do` blocks are searched, since guarding the append behind a
+condition is the shape this appears in most often. A nested *loop* is not,
+because it is reported when that loop is visited.
 */
-fn accumulating_concats(ctx: &LintCtx<'_>, block: &Block) -> Vec<TokSpan> {
+fn accumulating_concats(ctx: &LintCtx<'_>, block: &Block, loop_start: u32) -> Vec<TokSpan> {
     let mut out = Vec::new();
 
     for stmt in &block.stmts {
+        match stmt {
+            Stmt::If(n) => {
+                for (_, inner) in &n.branches {
+                    out.extend(accumulating_concats(ctx, inner, loop_start));
+                }
+
+                if let Some(inner) = &n.else_block {
+                    out.extend(accumulating_concats(ctx, inner, loop_start));
+                }
+            }
+
+            Stmt::Do(n) => out.extend(accumulating_concats(ctx, &n.block, loop_start)),
+
+            _ => {}
+        }
+
         let Stmt::Assign(n) = stmt else {
             continue;
         };
@@ -200,7 +224,30 @@ fn accumulating_concats(ctx: &LintCtx<'_>, block: &Block) -> Vec<TokSpan> {
             continue;
         }
 
-        let target = n.targets[0].span();
+        // a field write lands somewhere different each iteration, so it is linear
+        let Expr::Name(name) = &n.targets[0] else {
+            continue;
+        };
+
+        // a string declared inside the body starts empty every time around
+        let outlives = ctx
+            .names
+            .read_of
+            .get(&name.start)
+            .and_then(|&b| ctx.names.bindings.get(b))
+            .or_else(|| {
+                ctx.names
+                    .bindings
+                    .iter()
+                    .find(|b| b.writes.contains(&name.start))
+            })
+            .is_some_and(|b| ctx.bytes(TokSpan::new(b.declared_at as usize, b.declared_at as usize + 1)).0 < loop_start);
+
+        if !outlives {
+            continue;
+        }
+
+        let target = *name;
 
         // `s ..= x`, the compound form, is the same cost
         if ctx.text(n.op) == "..=" {

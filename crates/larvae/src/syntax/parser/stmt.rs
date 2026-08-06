@@ -129,9 +129,11 @@ impl<'a> Parser<'a> {
             "@" => {
                 let attributes = self.attributes()?;
 
-                if self.at("local") {
+                if self.at("local") || self.at("const") {
+                    let is_const = self.at("const");
                     self.bump();
-                    self.local_function(start, attributes)
+
+                    self.local_function(start, attributes, is_const)
                 } else {
                     self.function_stmt(start, attributes)
                 }
@@ -259,13 +261,13 @@ impl<'a> Parser<'a> {
         self.bump();
 
         if self.at("function") {
-            return self.local_function(start, Vec::new());
+            return self.local_function(start, Vec::new(), is_const);
         }
 
         if self.at("@") {
             let attributes = self.attributes()?;
 
-            return self.local_function(start, attributes);
+            return self.local_function(start, attributes, is_const);
         }
 
         let keyword = TokSpan::new(start, start + 1);
@@ -294,6 +296,7 @@ impl<'a> Parser<'a> {
         &mut self,
         start: usize,
         attributes: Vec<TokSpan>,
+        is_const: bool,
     ) -> Result<Stmt, ParseError> {
         self.expect("function")?;
 
@@ -302,6 +305,7 @@ impl<'a> Parser<'a> {
 
         Ok(Stmt::LocalFunction(LocalFunction {
             attributes,
+            is_const,
             name,
             body,
             span: TokSpan::new(start, self.pos),

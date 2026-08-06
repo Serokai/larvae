@@ -771,14 +771,37 @@ fn a_loop_that_does_more_than_copy_is_left_alone() {
 }
 
 #[test]
-fn mismatched_arg_count_catches_both_directions() {
-    assert!(fires(
-        "mismatched_arg_count",
-        "local function f(a, b)\n\treturn a\nend\nf(1)\n"
-    ));
+fn mismatched_arg_count_catches_too_many_arguments() {
     assert!(fires(
         "mismatched_arg_count",
         "local function f(a)\n\treturn a\nend\nf(1, 2, 3)\n"
+    ));
+}
+
+/*
+Passing fewer arguments than a function declares is legal and idiomatic Lua,
+so it is only reported when every parameter carries a type and none of them is
+optional, which is the author saying all of them are required.
+*/
+#[test]
+fn too_few_arguments_is_reported_only_when_every_parameter_is_required() {
+    assert!(fires(
+        "mismatched_arg_count",
+        "local function f(a: number, b: string)\n\treturn a\nend\nf(1)\n"
+    ));
+
+    assert!(!fires(
+        "mismatched_arg_count",
+        "local function f(a, b)\n\treturn a\nend\nf(1)\n"
+    ));
+}
+
+/// An optional parameter says outright that it may be left off
+#[test]
+fn an_optional_parameter_may_be_omitted() {
+    assert!(!fires(
+        "mismatched_arg_count",
+        "local function log(msg: string, level: string?)\n\treturn msg\nend\nlog(\"hi\")\n"
     ));
 }
 
@@ -881,4 +904,123 @@ fn the_roblox_lints_are_silent_under_plain_luau() {
             .iter()
             .any(|n| n.starts_with("roblox_"))
     );
+}
+
+
+// --- regressions found by review -------------------------------------------
+
+/// A global the file itself defines is defined, which is how Roblox scripts are written
+#[test]
+fn a_global_declared_in_this_file_is_not_undefined() {
+    assert!(!fires(
+        "undefined_variable",
+        "function onTouch(hit)\n\tprint(hit)\nend\n\nscript.Parent.Touched:Connect(onTouch)\n"
+    ));
+
+    assert!(!fires("undefined_variable", "counter = 0\nprint(counter)\n"));
+}
+
+/// Reading it before the line that sets it is still not this lint's complaint
+#[test]
+fn a_forward_reference_to_a_file_global_is_allowed() {
+    assert!(!fires("undefined_variable", "local function a()\n\treturn helper()\nend\nfunction helper() end\nreturn a\n"));
+}
+
+#[test]
+fn a_local_used_only_from_a_type_is_not_unused() {
+    assert!(!fires(
+        "unused_variable",
+        "local Types = require(\"./types\")\nexport type Foo = Types.Foo\n"
+    ));
+    assert!(!fires(
+        "unused_variable",
+        "local defaults = { a = 1 }\ntype Config = typeof(defaults)\n"
+    ));
+    assert!(!fires(
+        "unused_variable",
+        "local T = require(\"./t\")\nlocal function f(x: T.Thing)\n\treturn x\nend\nreturn f\n"
+    ));
+}
+
+/// It has no name token and cannot be removed
+#[test]
+fn the_implicit_self_of_a_method_is_never_reported_unused() {
+    let cfg = opts("unused_variable", "parameters = true");
+    let out = fired("function M:ping()\n\tprint(\"pong\")\nend\n", &cfg);
+
+    assert!(!out.iter().any(|n| n == "unused_variable"), "{out:?}");
+}
+
+/// A field write lands somewhere different each iteration, so it is linear
+#[test]
+fn a_per_iteration_field_write_is_not_an_accumulator() {
+    assert!(!fires(
+        "string_concat_in_loop",
+        "local t = {}\nfor _, child in ipairs(t) do\n\tchild.Name = child.Name .. \"_old\"\nend\n"
+    ));
+}
+
+/// A string declared inside the body starts empty every time around
+#[test]
+fn a_string_built_within_one_iteration_is_not_an_accumulator() {
+    assert!(!fires(
+        "string_concat_in_loop",
+        "for i = 1, 10 do\n\tlocal line = \"\"\n\tline = line .. i\n\tprint(line)\nend\n"
+    ));
+}
+
+/// Guarding the append behind a condition is the shape this appears in most
+#[test]
+fn an_accumulate_inside_a_branch_is_still_found() {
+    assert!(fires(
+        "string_concat_in_loop",
+        "local s = \"\"\nfor i = 1, 10 do\n\tif i % 2 == 0 then\n\t\ts = s .. i\n\tend\nend\nprint(s)\n"
+    ));
+}
+
+/// table.clone would discard whatever the destination already held
+#[test]
+fn a_merge_into_an_existing_table_is_not_a_clone() {
+    assert!(!fires(
+        "manual_table_clone",
+        "local function merge(target, source)\n\tfor k, v in pairs(source) do\n\t\ttarget[k] = v\n\tend\n\treturn target\nend\nreturn merge\n"
+    ));
+}
+
+#[test]
+fn a_copy_into_a_table_declared_empty_just_above_is_a_clone() {
+    assert!(fires(
+        "manual_table_clone",
+        "local new = {}\nfor k, v in pairs(old) do\n\tnew[k] = v\nend\nreturn new\n"
+    ));
+}
+
+/// A step it cannot evaluate has to suppress the report, not permit it
+#[test]
+fn a_countdown_with_a_step_it_cannot_read_is_not_reported() {
+    assert!(!fires(
+        "suspicious_reverse_loop",
+        "local step = -1\nfor i = 10, 1, step do\n\tprint(i)\nend\n"
+    ));
+}
+
+/// `Queue:remove(1)` is somebody's own collection, not a deprecated Instance
+#[test]
+fn a_lowercase_remove_on_an_unknown_receiver_is_not_deprecated() {
+    assert!(!fires("deprecated", "local q = Queue.new()\nq:remove(1)\n"));
+}
+
+#[test]
+fn the_legacy_roblox_casing_is_still_reported() {
+    assert!(fires("deprecated", "part:Remove()\n"));
+    assert!(fires("deprecated", "local c = part:children()\nprint(c)\n"));
+}
+
+/// These names mean nothing outside Roblox
+#[test]
+fn deprecated_methods_are_silent_under_plain_luau() {
+    let mut cfg = LintConfig::default();
+    cfg.std = larvae::lint::config::StdLib::Luau;
+
+    assert!(!fired("part:Remove()\n", &cfg).iter().any(|n| n == "deprecated"));
 }

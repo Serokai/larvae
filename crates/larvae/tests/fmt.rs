@@ -613,3 +613,134 @@ fn sorting_is_idempotent_and_keeps_every_comment() {
         assert!(once.contains(text), "lost {text}, got {once}");
     }
 }
+
+// --- regressions found by review -------------------------------------------
+
+/// Two minus signs run together spell a line comment
+#[test]
+fn nested_unary_minus_keeps_its_space() {
+    assert_eq!(fmt("local y = - -x"), "local y = - -x\n");
+    assert_eq!(fmt("local y = -  -  -a"), "local y = - - -a\n");
+    assert_eq!(fmt("local y = -x"), "local y = -x\n", "one minus still hugs");
+}
+
+/// A statement opening with `(` continues the line above as a call
+#[test]
+fn a_dropped_semicolon_is_put_back_where_it_is_load_bearing() {
+    assert_eq!(fmt("local a = b\n;(c)()\n"), "local a = b\n;(c)()\n");
+    assert_eq!(fmt("local x = a;\n(f)()\n"), "local x = a\n;(f)()\n");
+}
+
+/// `[` against a `[[ ]]` string opens a long string instead
+#[test]
+fn a_bracket_index_of_a_long_string_keeps_its_space() {
+    assert_eq!(fmt("local x = t[ [[k]] ]"), "local x = t[ [[k]] ]\n");
+    assert_eq!(fmt("local u = { [ [[key]] ] = 1 }"), "local u = { [ [[key]] ] = 1 }\n");
+    assert_eq!(fmt("local x = t[ [=[k]=] ]"), "local x = t[ [=[k]=] ]\n");
+}
+
+#[test]
+fn const_function_stays_const() {
+    assert_eq!(fmt("const function f() end"), "const function f()\nend\n");
+    assert_eq!(fmt("local function f() end"), "local function f()\nend\n");
+}
+
+/// A type can hold an expression through typeof, where `and 1` must not merge
+#[test]
+fn a_word_and_a_number_in_a_type_keep_their_space() {
+    assert_eq!(fmt("local v: typeof(x and 1) = nil"), "local v: typeof(x and 1) = nil\n");
+    assert_eq!(fmt("local w: typeof(2 or b) = nil"), "local w: typeof(2 or b) = nil\n");
+    assert_eq!(fmt("type T = typeof(1 .. 2)"), "type T = typeof(1 .. 2)\n");
+}
+
+/// Its body is arbitrary Luau, which a token replay mangles
+#[test]
+fn a_type_function_body_is_emitted_as_written() {
+    let src = "type function K(t)\n\tlocal a = 1\n\treturn t\nend\n";
+
+    assert_eq!(fmt(src), src);
+}
+
+/// A `--!` directive is file scoped and only works above every statement
+#[test]
+fn sorting_requires_leaves_the_strict_directive_at_the_top() {
+    let out = fmt_with(
+        "--!strict\nlocal zzz = require(\"./z\")\nlocal aaa = require(\"./a\")\nreturn nil\n",
+        sorting(RequireGrouping::Flat),
+    );
+
+    assert_eq!(
+        out,
+        "--!strict\nlocal aaa = require(\"./a\")\nlocal zzz = require(\"./z\")\nreturn nil\n",
+        "the directive stays put and the requires still sort"
+    );
+}
+
+// --- comments inside a statement -------------------------------------------
+
+#[test]
+fn a_comment_above_a_table_field_is_kept() {
+    let src = "local t = {\n\t-- describes a\n\ta = 1,\n}\n";
+
+    assert_eq!(fmt(src), src);
+}
+
+#[test]
+fn a_comment_after_a_table_field_is_kept() {
+    let src = "local t = {\n\ta = 1, -- one\n\tb = 2, -- two\n}\n";
+
+    assert_eq!(fmt(src), src);
+}
+
+/// A table holding only a comment is not the same as an empty one
+#[test]
+fn a_table_of_only_a_comment_keeps_it() {
+    let src = "local t = {\n\t-- nothing yet\n}\n";
+
+    assert_eq!(fmt(src), src);
+    assert_eq!(fmt("local t = {}"), "local t = {}\n");
+}
+
+/// A line comment flat inside braces would comment out the closing brace
+#[test]
+fn a_comment_forces_a_table_to_expand() {
+    assert_eq!(fmt("local t = { a = 1, -- one\n}"), "local t = {\n\ta = 1, -- one\n}\n");
+}
+
+#[test]
+fn table_comments_survive_a_second_pass() {
+    let src = "local t = {\n\t-- a\n\ta = 1, -- t\n\t-- b\n\tb = 2,\n}\n";
+
+    assert_eq!(fmt(&fmt(src)), fmt(src));
+    assert_eq!(fmt(src), src);
+}
+
+#[test]
+fn a_comment_inside_a_type_is_kept() {
+    let src = "local function f(\n\toriginalError: (Error & { extensions: any? }) -- new syntax\n): GError?\n\treturn nil\nend\n";
+
+    assert!(fmt(src).contains("-- new syntax"));
+}
+
+#[test]
+fn a_comment_inside_a_parameter_list_is_kept() {
+    let src = "local function x(...--[[comment here]])\nend\n";
+
+    assert!(fmt(src).contains("--[[comment here]]"));
+}
+
+/*
+The backstop. Every position the emitter cannot place a comment is caught here
+rather than silently dropping it, because `larvae fmt` writes to disk and
+deleting somebody's comment is worse than declining to format their file.
+*/
+#[test]
+fn output_that_would_lose_a_comment_is_refused() {
+    let lost = format(
+        "f(\n\t-- why\n\tx\n)\n",
+        &FmtConfig::default(),
+    );
+
+    assert!(lost.is_err(), "a comment in an argument list is not placed yet");
+    assert!(format!("{:#}", lost.unwrap_err()).contains("-- why"));
+}
