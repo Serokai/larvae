@@ -63,7 +63,17 @@ impl Default for UnusedOptions {
 impl UnusedVariable {
     fn check(ctx: &LintCtx<'_>, out: &mut Vec<Finding>) {
         let options: UnusedOptions = ctx.cfg.options_for("unused_variable");
-        let ignore = regex::Regex::new(&options.ignore_pattern).ok();
+
+        /*
+        The default pattern is a prefix, and compiling a regex to test one is
+        several times the cost of the whole rest of this lint. Only a project
+        that changed it pays for the engine.
+        */
+        let ignore = match options.ignore_pattern.as_str() {
+            "^_" => None,
+
+            pattern => regex::Regex::new(pattern).ok(),
+        };
 
         for binding in &ctx.names.bindings {
             if !binding.reads.is_empty() {
@@ -82,7 +92,13 @@ impl UnusedVariable {
                 continue;
             }
 
-            if ignore.as_ref().is_some_and(|r| r.is_match(binding.name)) {
+            let ignored = match &ignore {
+                Some(pattern) => pattern.is_match(binding.name),
+
+                None => binding.is_ignored(),
+            };
+
+            if ignored {
                 continue;
             }
 
@@ -267,7 +283,7 @@ impl GlobalUsage {
             }
 
             // a local named _G is somebody's own table, not the shared one
-            if !ctx.names.undefined.contains(&span.start) {
+            if !ctx.names.is_global(span.start) {
                 return;
             }
 

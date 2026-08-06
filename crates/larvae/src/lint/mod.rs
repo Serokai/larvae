@@ -110,14 +110,17 @@ pub fn lint(path: &Path, src: &str, cfg: &LintConfig) -> Result<Vec<Diag>, Diag>
     let findings = analyze(src, cfg)
         .map_err(|e| Diag::error(path, e.message).at(src, e.offset))?;
 
+    // one scan for the file, rather than one per finding
+    let index = crate::diag::LineIndex::new(src);
+
     Ok(findings
         .into_iter()
-        .map(|f| f.into_diag(path, src))
+        .map(|f| f.into_diag(path, src, &index))
         .collect())
 }
 
 impl Finding {
-    fn into_diag(self, path: &Path, src: &str) -> Diag {
+    fn into_diag(self, path: &Path, src: &str, index: &crate::diag::LineIndex) -> Diag {
         let severity = match self.level {
             Level::Deny => Severity::Error,
 
@@ -132,6 +135,6 @@ impl Finding {
             help: self.help,
         };
 
-        diag.at(src, self.span.0 as usize)
+        diag.at_indexed(index, src, self.span.0 as usize)
     }
 }

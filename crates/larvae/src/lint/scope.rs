@@ -63,6 +63,13 @@ pub struct Binding<'a> {
     pub declared_in: TokSpan,
 }
 
+impl Names<'_> {
+    /// Whether this name reference is a global, meaning nothing in the file bound it
+    pub fn is_global(&self, token: u32) -> bool {
+        self.undefined_set.contains(&token)
+    }
+}
+
 impl Binding<'_> {
     /// Whether a name starting with `_` is deliberately unused, by convention
     pub fn is_ignored(&self) -> bool {
@@ -76,6 +83,14 @@ pub struct Names<'a> {
     pub bindings: Vec<Binding<'a>>,
     /// Token indexes of reads that no binding in the file explains
     pub undefined: Vec<u32>,
+    /*
+    The same set, for lookup.
+
+    Several lints ask "is this name a global" once per expression, and a
+    linear scan of `undefined` makes that quadratic in a file with many
+    globals, which describes every Roblox script.
+    */
+    undefined_set: std::collections::HashSet<u32>,
     /// Token indexes of writes that create a global rather than set a local
     pub global_writes: Vec<u32>,
     /// Binding index for each declaration token, for a lint given a token
@@ -166,7 +181,10 @@ impl<'a> Binder<'a> {
                 self.out.read_of.insert(span.start, i);
             }
 
-            None => self.out.undefined.push(span.start),
+            None => {
+                self.out.undefined.push(span.start);
+                self.out.undefined_set.insert(span.start);
+            }
         }
     }
 

@@ -8,7 +8,6 @@ code has no reading under which it is what the author meant.
 
 use crate::lint::ctx::{Finding, LintCtx};
 use crate::lints;
-use crate::rules::engine::{Flow, Visit, walk_chunk};
 use crate::syntax::ast::*;
 
 lints! {
@@ -523,74 +522,40 @@ fn is_zero(ctx: &LintCtx<'_>, e: &Expr) -> bool {
 }
 
 /*
-The three walks every lint here is written against.
+The three passes every lint here is written against.
 
-Each takes a closure rather than each lint defining its own visitor type,
-because a visitor per lint is thirty types that all do the same thing and
-differ only in one match arm.
+Each iterates the nodes [`LintCtx`] collected once for the file rather than
+walking the tree, so adding a lint costs a pass over a vector rather than
+another traversal. They take a closure rather than each lint defining its own
+visitor type, because a visitor per lint is thirty types that all do the same
+thing and differ only in one match arm.
 */
 pub fn each_expr(
     ctx: &LintCtx<'_>,
     out: &mut Vec<Finding>,
-    f: impl FnMut(&LintCtx<'_>, &Expr, &mut Vec<Finding>),
+    mut f: impl FnMut(&LintCtx<'_>, &Expr, &mut Vec<Finding>),
 ) {
-    struct V<'c, 'a, F> {
-        ctx: &'c LintCtx<'a>,
-        out: &'c mut Vec<Finding>,
-        f: F,
+    for e in &ctx.exprs {
+        f(ctx, e, out);
     }
-
-    impl<F: FnMut(&LintCtx<'_>, &Expr, &mut Vec<Finding>)> Visit for V<'_, '_, F> {
-        fn expr(&mut self, e: &Expr) -> Flow {
-            (self.f)(self.ctx, e, self.out);
-
-            Flow::Next
-        }
-    }
-
-    walk_chunk(ctx.chunk, &mut V { ctx, out, f });
 }
 
 pub fn each_stmt(
     ctx: &LintCtx<'_>,
     out: &mut Vec<Finding>,
-    f: impl FnMut(&LintCtx<'_>, &Stmt, &mut Vec<Finding>),
+    mut f: impl FnMut(&LintCtx<'_>, &Stmt, &mut Vec<Finding>),
 ) {
-    struct V<'c, 'a, F> {
-        ctx: &'c LintCtx<'a>,
-        out: &'c mut Vec<Finding>,
-        f: F,
+    for s in &ctx.stmts {
+        f(ctx, s, out);
     }
-
-    impl<F: FnMut(&LintCtx<'_>, &Stmt, &mut Vec<Finding>)> Visit for V<'_, '_, F> {
-        fn stmt(&mut self, s: &Stmt) -> Flow {
-            (self.f)(self.ctx, s, self.out);
-
-            Flow::Next
-        }
-    }
-
-    walk_chunk(ctx.chunk, &mut V { ctx, out, f });
 }
 
 pub fn each_block(
     ctx: &LintCtx<'_>,
     out: &mut Vec<Finding>,
-    f: impl FnMut(&LintCtx<'_>, &Block, &mut Vec<Finding>),
+    mut f: impl FnMut(&LintCtx<'_>, &Block, &mut Vec<Finding>),
 ) {
-    struct V<'c, 'a, F> {
-        ctx: &'c LintCtx<'a>,
-        out: &'c mut Vec<Finding>,
-        f: F,
+    for b in &ctx.blocks {
+        f(ctx, b, out);
     }
-
-    impl<F: FnMut(&LintCtx<'_>, &Block, &mut Vec<Finding>)> Visit for V<'_, '_, F> {
-        fn block(&mut self, b: &Block) -> Flow {
-            (self.f)(self.ctx, b, self.out);
-
-            Flow::Next
-        }
-    }
-
-    walk_chunk(ctx.chunk, &mut V { ctx, out, f });
 }

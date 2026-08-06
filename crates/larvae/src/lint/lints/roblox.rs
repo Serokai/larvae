@@ -217,7 +217,7 @@ fn constructor<'e>(
         return None;
     };
 
-    if !ctx.names.undefined.contains(&base.start) {
+    if !ctx.names.is_global(base.start) {
         return None;
     }
 

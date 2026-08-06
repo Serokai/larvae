@@ -247,8 +247,7 @@ fn global_path(ctx: &LintCtx<'_>, e: &Expr) -> Option<String> {
         Expr::Name(span) => {
             // a name nothing bound is a global, which is what these tables are
             ctx.names
-                .undefined
-                .contains(&span.start)
+                .is_global(span.start)
                 .then(|| ctx.text(*span).to_string())
         }
 

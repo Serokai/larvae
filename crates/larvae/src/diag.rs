@@ -42,6 +42,13 @@ impl Diag {
         self
     }
 
+    /// The same, through an index built once for the file
+    pub fn at_indexed(mut self, index: &LineIndex, source: &str, byte_offset: usize) -> Self {
+        self.line_col = Some(index.at(source, byte_offset));
+
+        self
+    }
+
     pub fn with_help(mut self, help: impl Into<String>) -> Self {
         self.help = Some(help.into());
 
@@ -110,6 +117,48 @@ impl fmt::Display for Diag {
         }
 
         Ok(())
+    }
+}
+
+/*
+Line starts for one source, so many diagnostics over one file cost one scan.
+
+`line_col` alone counts newlines from the start of the file, which is fine for
+the handful of diagnostics a build produces and quadratic for a lint run: a
+large file with a hundred findings scans it a hundred times. Building this once
+per file and asking it per finding is the same answer in one pass.
+*/
+pub struct LineIndex {
+    starts: Vec<u32>,
+}
+
+impl LineIndex {
+    pub fn new(source: &str) -> Self {
+        let mut starts = vec![0u32];
+
+        for (i, b) in source.bytes().enumerate() {
+            if b == b'\n' {
+                starts.push(i as u32 + 1);
+            }
+        }
+
+        Self { starts }
+    }
+
+    /// One based line and column, matching [`line_col`]
+    pub fn at(&self, source: &str, byte_offset: usize) -> (u32, u32) {
+        let offset = byte_offset.min(source.len()) as u32;
+        let line = self.starts.partition_point(|&s| s <= offset) - 1;
+        let start = self.starts[line] as usize;
+
+        let col = source
+            .get(start..offset as usize)
+            .unwrap_or("")
+            .chars()
+            .count() as u32
+            + 1;
+
+        (line as u32 + 1, col)
     }
 }
 
