@@ -1,6 +1,6 @@
 //! larvae.toml loading and validation, unknown keys hard error, planned keys error with their milestone
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
@@ -11,6 +11,7 @@ mod process;
 mod profile;
 mod requires;
 mod rules;
+pub mod worms;
 
 pub use overrides::{Override, lookup as override_for, parse as parse_overrides};
 pub use process::{Input, ProcessConfig, QuoteStyle};
@@ -42,10 +43,15 @@ pub struct Config {
     #[serde(default)]
     pub defines: Option<toml::Value>,
 
-    // parsed but unimplemented, so the error can name the milestone
+    /// Extensions the project asked for, see [`worms`]
     #[serde(default)]
-    extensions: Option<toml::Value>,
+    pub worms: Option<toml::Value>,
 
+    /// Per worm settings, handed over untouched. We never read inside one.
+    #[serde(default)]
+    pub config: BTreeMap<String, toml::Value>,
+
+    // parsed but unimplemented, so the error can name the milestone
     #[serde(default)]
     bundle: Option<toml::Value>,
 
@@ -105,7 +111,6 @@ impl Config {
 
     fn validate(&self) -> Result<()> {
         let unimplemented: &[(&str, &Option<toml::Value>, &str)] = &[
-            ("[[extensions]]", &self.extensions, "M3"),
             ("[bundle]", &self.bundle, "M3"),
             ("[minify]", &self.minify, "M4"),
             ("[check]", &self.check, "M3"),
@@ -117,6 +122,10 @@ impl Config {
             }
         }
 
+        /*
+        [rules] is ours alone. A worm's rules sit under [worms.<name>] rules, so
+        one cannot shadow a builtin and this check needs nothing from them.
+        */
         for name in self.rules.rest.keys() {
             match rule_status(name) {
                 Some(RuleStatus::Planned(m)) => bail!(

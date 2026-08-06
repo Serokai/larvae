@@ -52,8 +52,11 @@ enum Command {
     /// Create a starter larvae.toml for this project
     Init,
 
-    /// Add the schema reference to larvae.toml for editor intellisense
-    Schema,
+    /// Develop a worm, before it is published or installed
+    Worm {
+        #[command(subcommand)]
+        command: commands::worm::WormCommand,
+    },
 
     /// Manage the larvae installation itself
     #[command(name = "self")]
@@ -133,10 +136,10 @@ fn run() -> Result<ExitCode> {
 
         Command::Init => commands::init::run(&root),
 
-        Command::Schema => commands::schema::run(&root),
+        Command::Worm { command } => commands::worm::run(command),
 
         Command::SelfManage { command } => match command {
-            Some(cmd) => commands::self_cmd::run(cmd),
+            Some(cmd) => commands::self_cmd::run(&root, cmd),
 
             None => {
                 // Bare `larvae self`, show the group's help

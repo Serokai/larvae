@@ -107,49 +107,139 @@ pub(super) struct FileOutcome {
     pub applied: Vec<Rule>,
 }
 
-/// None when the file was skipped, ex: it would not lex
+/*
+One file, through every stage in run order.
+
+Stages are real rather than a sorting of edits. Our own rules occupy the slot
+`[process] run_order` names, a worm sits either side of it, and between two
+slots the buffer is spliced and re-lexed so a later stage genuinely reads what
+an earlier one produced. With nobody asking for an order there is one stage and
+this costs nothing.
+*/
 #[allow(clippy::too_many_arguments)]
 pub(super) fn process_file(
     path: &Path,
-    // where this file lands, relative to the output directory
+    src: &str,
     dest_rel: &Path,
     output: &Path,
     resolver: &Resolver,
     opts: &FileOpts,
     rules_cfg: &crate::config::RulesConfig,
     write: bool,
+    worms: &crate::worm::pool::Pool,
+    // false when a front-end declared it resolves its own requires
+    own_requires: bool,
     diags: &mut Vec<Diag>,
 ) -> Option<FileOutcome> {
-    let src = match std::fs::read_to_string(path) {
-        Ok(s) => s,
+    let slots = worms.slots();
+    let mut current = std::borrow::Cow::Borrowed(src);
+    let mut outcome = None;
 
-        Err(e) => {
-            diags.push(Diag::error(
+    for (i, &slot) in slots.iter().enumerate() {
+        let last = i + 1 == slots.len();
+        let mut edits = Edits::new();
+
+        if slot == worms.native() {
+            outcome = native_pass(
                 path,
-                format!("cannot read file (UTF-8 required): {e}"),
-            ));
+                &current,
+                dest_rel,
+                resolver,
+                opts,
+                rules_cfg,
+                own_requires,
+                &mut edits,
+                diags,
+            );
 
-            return None;
+            // a file that will not lex is out of the build, later stages included
+            outcome.as_ref()?;
+        } else {
+            let Ok(lexed) = lexer::lex(&current) else {
+                continue;
+            };
+
+            run_worm_rules(worms, slot, &current, &lexed, path, &mut edits, diags);
         }
-    };
 
-    let lexed = match lexer::lex(&src) {
+        let mut clashes = Vec::new();
+
+        if last {
+            if write {
+                let dest = output.join(dest_rel);
+                let out = crate::rules::splice(&current, &edits, &mut clashes);
+
+                if let Err(e) = write_atomic(&dest, out.as_bytes()) {
+                    diags.push(Diag::error(path, format!("write failed: {e:#}")));
+                }
+            } else {
+                // check does not build the output, it still owes the same warnings
+                clashes = crate::rules::edits::conflicts(&edits);
+            }
+        } else {
+            current = std::borrow::Cow::Owned(crate::rules::splice(&current, &edits, &mut clashes));
+        }
+
+        for c in clashes {
+            diags.push(
+                Diag::warning(
+                    path,
+                    format!(
+                        "{} and {} both rewrote these bytes, only {} was applied",
+                        c.kept, c.dropped, c.kept
+                    ),
+                )
+                .at(src, c.at as usize),
+            );
+        }
+
+        if let Some(outcome) = outcome.as_mut() {
+            outcome.applied.extend(edits.applied());
+        }
+    }
+
+    outcome
+}
+
+/// Our own work: requires, token rules, and the ast rules that want a tree
+#[allow(clippy::too_many_arguments)]
+fn native_pass(
+    path: &Path,
+    src: &str,
+    dest_rel: &Path,
+    resolver: &Resolver,
+    opts: &FileOpts,
+    rules_cfg: &crate::config::RulesConfig,
+    own_requires: bool,
+    edits: &mut Edits,
+    diags: &mut Vec<Diag>,
+) -> Option<FileOutcome> {
+    let lexed = match lexer::lex(src) {
         Ok(t) => t,
 
         Err(e) => {
-            diags.push(Diag::error(path, format!("lex error: {}", e.message)).at(&src, e.offset));
+            diags.push(Diag::error(path, format!("lex error: {}", e.message)).at(src, e.offset));
 
             return None;
         }
     };
 
     if opts.validate_syntax
-        && let Err(e) = crate::syntax::parser::parse(&src, &lexed.toks)
+        && let Err(e) = crate::syntax::parser::parse(src, &lexed.toks)
     {
-        diags.push(Diag::error(path, format!("syntax error, {}", e.message)).at(&src, e.offset));
+        diags.push(Diag::error(path, format!("syntax error, {}", e.message)).at(src, e.offset));
     }
 
-    let scanned = scan::scan(&src, &lexed.toks);
+    /*
+    A worm that owns its own requires means we do not look at them, so there is
+    nothing to scan. Skipping here rather than later also means no realm
+    diagnostics for a file we were told not to reason about.
+    */
+    let scanned = if own_requires {
+        scan::scan(src, &lexed.toks)
+    } else {
+        Default::default()
+    };
 
     /*
     A mixed project can want a different output form per directory, ex:
@@ -166,7 +256,6 @@ pub(super) fn process_file(
 
     let quote = opts.quotes.char();
     let requote = opts.quotes != QuoteStyle::Preserve;
-    let mut edits = Edits::new();
 
     // every site with its final emitted form, rules use this to spot
     // requires that point at the same module
@@ -175,7 +264,7 @@ pub(super) fn process_file(
     for site in &scanned.sites {
         let spec = &src[site.inner_start as usize..site.inner_end as usize];
 
-        match resolver.resolve(&ctx, spec, &src, site.at as usize, diags) {
+        match resolver.resolve(&ctx, spec, src, site.at as usize, diags) {
             Rewrite::Keep => {
                 site_forms.push((*site, spec.to_string()));
                 // untouched requires still get the configured quote style
@@ -224,7 +313,7 @@ pub(super) fn process_file(
     */
     if opts.instance_input {
         for site in &scanned.instances {
-            if let Some(expr) = resolver.resolve_instance(&ctx, site, &src, diags) {
+            if let Some(expr) = resolver.resolve_instance(&ctx, site, src, diags) {
                 edits.push(REQUIRES, (site.start, site.end, expr));
             }
         }
@@ -236,24 +325,24 @@ pub(super) fn process_file(
     edits.family(Family::Native, |edits| {
         if opts.const_requires {
             edits.run("const_requires", |e| {
-                crate::rules::const_requires(&src, &lexed.toks, &scanned.sites, e)
+                crate::rules::const_requires(src, &lexed.toks, &scanned.sites, e)
             });
         }
 
         if let Some(except) = &opts.remove_comments {
             edits.run("remove_comments", |e| {
-                crate::rules::remove_comments(&src, &lexed.comments, except, e)
+                crate::rules::remove_comments(src, &lexed.comments, except, e)
             });
         }
 
         if let Some(directive) = &opts.directive
-            && let Some(rep) = crate::rules::add_luau_directive(&src, directive)
+            && let Some(rep) = crate::rules::add_luau_directive(src, directive)
         {
             edits.push("add_luau_directive", rep);
         }
 
         if let Some((text, at_start)) = &opts.append_comment
-            && let Some(rep) = crate::rules::append_text_comment(&src, text, *at_start)
+            && let Some(rep) = crate::rules::append_text_comment(src, text, *at_start)
         {
             edits.push("append_text_comment", rep);
         }
@@ -263,7 +352,7 @@ pub(super) fn process_file(
             crate::rules::apply_ast_rules(
                 rules_cfg,
                 &opts.defines,
-                &src,
+                src,
                 &lexed,
                 &site_forms,
                 dm.as_deref(),
@@ -275,36 +364,82 @@ pub(super) fn process_file(
         }
     });
 
-    let mut clashes = Vec::new();
-
-    if write {
-        let dest = output.join(dest_rel);
-        let out_src = crate::rules::splice(&src, &edits, &mut clashes);
-
-        if let Err(e) = write_atomic(&dest, out_src.as_bytes()) {
-            diags.push(Diag::error(path, format!("write failed: {e:#}")));
-        }
-    } else {
-        // check does not build the output, it still owes the same warnings
-        clashes = crate::rules::edits::conflicts(&edits);
-    }
-
-    for c in clashes {
-        diags.push(
-            Diag::warning(
-                path,
-                format!(
-                    "{} and {} both rewrote these bytes, only {} was applied",
-                    c.kept, c.dropped, c.kept
-                ),
-            )
-            .at(&src, c.at as usize),
-        );
-    }
-
     Some(FileOutcome {
         rewrites,
         dynamic: scanned.dynamic.len(),
-        applied: edits.applied(),
+        applied: Vec::new(),
     })
+}
+
+/*
+Flatten the file once, bucket its nodes by kind, and hand each worm the ones
+its rules asked for. Parsing happens here and only here, so a project whose
+worms declare narrow filters keeps the fast path on files that match nothing.
+*/
+fn run_worm_rules(
+    worms: &crate::worm::pool::Pool,
+    slot: i64,
+    src: &str,
+    lexed: &crate::syntax::lexer::Lexed,
+    path: &Path,
+    edits: &mut Edits,
+    diags: &mut Vec<Diag>,
+) {
+    use std::sync::Arc;
+
+    use crate::worm::ctx::FileCtx;
+    use crate::worm::nodes::NodeTable;
+    use crate::worm::pool::Matched;
+
+    let in_slot = worms.in_slot(slot);
+
+    if in_slot.is_empty() {
+        return;
+    }
+
+    let Ok(chunk) = crate::syntax::parser::parse(src, &lexed.toks) else {
+        // a syntax error is already reported by check, and a rule cannot help here
+        return;
+    };
+
+    let toks = &lexed.toks;
+    let bytes = |span: crate::syntax::ast::TokSpan| -> (u32, u32) {
+        if span.is_empty() {
+            let at = toks
+                .get(span.start as usize)
+                .map(|t| t.start)
+                .unwrap_or(src.len() as u32);
+
+            return (at, at);
+        }
+
+        (
+            toks[span.start as usize].start,
+            toks[span.end as usize - 1].end,
+        )
+    };
+
+    let table = NodeTable::build(&chunk, &bytes);
+    let matched = Matched::of(&table, &worms.filters());
+
+    if matched.is_empty() {
+        return;
+    }
+
+    let file = Arc::new(FileCtx::new(table, src.to_owned(), crate::ui::rel(path)));
+
+    for (index, spec) in in_slot {
+        match worms.run(index, Arc::clone(&file), &matched) {
+            Ok(worm_edits) => {
+                for edit in worm_edits {
+                    edits.push("worm", edit);
+                }
+            }
+
+            Err(e) => diags.push(Diag::error(
+                path,
+                format!("worm `{}`: {e:#}", spec.manifest.name),
+            )),
+        }
+    }
 }
