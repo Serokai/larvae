@@ -268,6 +268,7 @@ pub fn convert_square_root_call(ctx: &RuleCtx, edits: &mut Vec<Edit>) {
                 method,
                 args,
                 span,
+                ..
             } = e
             else {
                 return Flow::Next;

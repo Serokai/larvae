@@ -259,10 +259,19 @@ pub enum Expr {
         span: TokSpan,
     },
 
-    /// `f(args)`, `obj:method(args)`
+    /// `f(args)`, `obj:method(args)`, `f<<T>>(args)`
     Call {
         func: Box<Expr>,
         method: Option<TokSpan>,
+        /*
+        An explicit type instantiation, the `<<T>>` in `f<<T>>()`.
+
+        Held rather than discarded because anything rebuilding source from the
+        tree has to put it back. Dropping it turned `charm.atom<<number>>()`
+        into `charm.atom()`, which still parses and no longer means the same
+        thing, so the loss was invisible until something printed the tree.
+        */
+        type_args: Option<TokSpan>,
         args: CallArgs,
         span: TokSpan,
     },

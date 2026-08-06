@@ -1,0 +1,497 @@
+/*!
+The formatter.
+
+Three kinds of test here. Most are a source and its expected output, which is
+the readable kind. A few are properties asserted over every sample at once,
+which is the kind that catches what nobody thought to write a case for: output
+must parse, formatting it again must change nothing, no line may end in
+whitespace, and every comment must survive.
+*/
+
+use larvae::fmt::config::{
+    CallParens, CollapseSimpleStatement, IndentType, LineEndings, QuoteStyle,
+    SpaceAfterFunctionNames,
+};
+use larvae::fmt::{FmtConfig, format};
+
+fn fmt(src: &str) -> String {
+    format(src, &FmtConfig::default()).expect("formats")
+}
+
+fn fmt_with(src: &str, cfg: FmtConfig) -> String {
+    format(src, &cfg).expect("formats")
+}
+
+fn narrow(width: usize) -> FmtConfig {
+    FmtConfig {
+        column_width: width,
+        ..Default::default()
+    }
+}
+
+/// Every construct that has to survive a round trip, used by the property tests
+const SAMPLES: &[&str] = &[
+    "local a = 1\n",
+    "local a, b: number = 1, 2\n",
+    "local t = { a = 1, [2] = 'x', 3 }\n",
+    "local f = function(a, b) return a + b end\n",
+    "function M.thing:method(a: number): string\n\treturn tostring(a)\nend\n",
+    "if a then\n\tb()\nelseif c then\n\td()\nelse\n\te()\nend\n",
+    "for i = 1, 10, 2 do\n\tprint(i)\nend\n",
+    "for k, v in pairs(t) do\n\tprint(k, v)\nend\n",
+    "while true do\n\tbreak\nend\n",
+    "repeat\n\tx()\nuntil done\n",
+    "do\n\tlocal scoped = 1\nend\n",
+    "export type Thing = { a: number, b: string? }\n",
+    "local x = a and b or c\n",
+    "local x = -y + #z\n",
+    "local x = (a + b) * c\n",
+    "local s = `interp {value} here`\n",
+    "local s = [[\nlong\n]]\n",
+    "-- leading\nlocal a = 1 -- trailing\n\n-- after a gap\nlocal b = 2\n",
+    "--[[\n\ta long comment\n]]\nlocal a = 1\n",
+    "local x = obj:method(1):chain(2).field\n",
+    "return\n",
+    "local x = value :: SomeType\n",
+    "local x = if cond then a else b\n",
+    "continue\n",
+    "local f = require('@pkg/thing')\n",
+    "do -- a note on the keyword\n\tx()\nend\n",
+];
+
+// --- properties ------------------------------------------------------------
+
+#[test]
+fn formatting_is_idempotent() {
+    for src in SAMPLES {
+        let once = fmt(src);
+        let twice = fmt(&once);
+
+        assert_eq!(once, twice, "unstable for {src:?}");
+    }
+}
+
+/// The output has to be the same language as the input
+#[test]
+fn output_always_parses() {
+    for src in SAMPLES {
+        let out = fmt(src);
+        let lexed = larvae::syntax::lexer::lex(&out)
+            .unwrap_or_else(|e| panic!("{src:?} produced unlexable output, {}", e.message));
+
+        larvae::syntax::parser::parse(&out, &lexed.toks)
+            .unwrap_or_else(|e| panic!("{src:?} produced unparsable output, {}", e.message));
+    }
+}
+
+#[test]
+fn no_output_line_ends_in_whitespace() {
+    for src in SAMPLES {
+        for line in fmt(src).lines() {
+            assert_eq!(line, line.trim_end(), "trailing whitespace from {src:?}");
+        }
+    }
+}
+
+/*
+Losing a comment is the failure that makes people stop trusting a formatter,
+and it is invisible in a case by case test because the output still looks fine.
+*/
+#[test]
+fn every_comment_survives() {
+    for src in SAMPLES {
+        let out = fmt(src);
+        let before = larvae::syntax::lexer::lex(src).expect("lexes");
+
+        for (start, end) in &before.comments {
+            let text = src[*start as usize..*end as usize].trim_end();
+
+            assert!(out.contains(text), "{src:?} lost the comment {text:?}");
+        }
+    }
+}
+
+/// A file already in the target style must come out byte identical
+#[test]
+fn formatted_input_is_left_alone() {
+    let already = "local Players = game:GetService(\"Players\")\n\nlocal function greet(name: string): string\n\treturn \"hi \" .. name\nend\n\nreturn greet\n";
+
+    assert_eq!(fmt(already), already);
+}
+
+#[test]
+fn an_empty_file_stays_empty() {
+    assert_eq!(fmt(""), "\n");
+    assert_eq!(fmt("\n\n\n"), "\n");
+}
+
+#[test]
+fn a_file_that_does_not_parse_is_refused_rather_than_mangled() {
+    assert!(format("local = = =", &FmtConfig::default()).is_err());
+    assert!(format("local x = [[unterminated", &FmtConfig::default()).is_err());
+}
+
+// --- layout ----------------------------------------------------------------
+
+#[test]
+fn indentation_follows_nesting() {
+    let out = fmt("if a then if b then c() end end");
+
+    assert_eq!(out, "if a then\n\tif b then\n\t\tc()\n\tend\nend\n");
+}
+
+#[test]
+fn a_call_that_does_not_fit_breaks_one_argument_per_line() {
+    assert_eq!(
+        fmt_with("f(alpha, beta, gamma)", narrow(16)),
+        "f(\n\talpha,\n\tbeta,\n\tgamma\n)\n"
+    );
+}
+
+/// The whole point of a group based layout, an outer break is not an inner one
+#[test]
+fn an_inner_call_stays_on_one_line_when_the_outer_one_breaks() {
+    let out = fmt_with("outer(inner(a), someVeryLongArgumentName)", narrow(30));
+
+    assert!(out.contains("inner(a)"), "inner should not break, got {out}");
+    assert!(out.contains("outer(\n"), "outer should break, got {out}");
+}
+
+#[test]
+fn a_long_binary_chain_breaks_with_the_operator_leading() {
+    let out = fmt_with("local ok = first and second and third", narrow(24));
+
+    assert_eq!(out, "local ok = first\n\tand second\n\tand third\n");
+}
+
+/// Different precedences should not fold at the same place
+#[test]
+fn a_chain_breaks_at_the_loosest_operator_first() {
+    let out = fmt_with("local x = aaaa and bbbb or cccc and dddd", narrow(24));
+
+    assert!(out.contains("\n\tor "), "should break at or, got {out}");
+    assert!(out.contains("aaaa and bbbb"), "and should stay flat, got {out}");
+}
+
+#[test]
+fn a_callback_hugs_the_parentheses_instead_of_indenting_twice() {
+    let out = fmt("thing:Connect(function(a)\n\tprint(a)\nend)");
+
+    assert_eq!(out, "thing:Connect(function(a)\n\tprint(a)\nend)\n");
+}
+
+#[test]
+fn a_table_assigned_to_a_name_hangs_off_the_equals() {
+    let out = fmt("local t = {\n\ta = 1,\n}");
+
+    assert_eq!(out, "local t = {\n\ta = 1,\n}\n");
+}
+
+// --- what the author wrote -------------------------------------------------
+
+#[test]
+fn one_blank_line_is_kept_and_several_collapse_to_one() {
+    assert_eq!(fmt("local a = 1\n\nlocal b = 2\n"), "local a = 1\n\nlocal b = 2\n");
+    assert_eq!(fmt("local a = 1\n\n\n\nlocal b = 2\n"), "local a = 1\n\nlocal b = 2\n");
+}
+
+#[test]
+fn a_newline_after_the_brace_keeps_a_table_expanded() {
+    let out = fmt("local t = {\n\ta = 1\n}");
+
+    assert_eq!(out, "local t = {\n\ta = 1,\n}\n");
+}
+
+#[test]
+fn a_table_written_on_one_line_stays_on_one_line() {
+    assert_eq!(fmt("local t = { a = 1 }"), "local t = { a = 1 }\n");
+}
+
+/*
+The magic trailing comma. An author's comma after the last argument is a
+request to stay expanded, which stops a call reflowing every time an argument
+is renamed.
+*/
+#[test]
+fn a_trailing_comma_keeps_a_one_line_table_expanded() {
+    assert_eq!(fmt("local t = { a, b, }"), "local t = {\n\ta,\n\tb,\n}\n");
+}
+
+#[test]
+fn without_the_trailing_comma_the_same_table_stays_flat() {
+    assert_eq!(fmt("local t = { a, b }"), "local t = { a, b }\n");
+}
+
+#[test]
+fn magic_trailing_comma_can_be_turned_off() {
+    let cfg = FmtConfig {
+        magic_trailing_comma: false,
+        ..Default::default()
+    };
+
+    assert_eq!(fmt_with("local t = { a, b, }", cfg), "local t = { a, b }\n");
+}
+
+/// Luau rejects a trailing comma in a call, so width is all a call has to go on
+#[test]
+fn a_call_is_laid_out_by_width_alone() {
+    assert_eq!(fmt("f(\n\ta,\n\tb\n)"), "f(a, b)\n");
+    assert!(format("f(a, b,)", &FmtConfig::default()).is_err());
+}
+
+#[test]
+fn a_stray_semicolon_is_dropped() {
+    assert_eq!(fmt("local a = 1;\n;\nlocal b = 2\n"), "local a = 1\nlocal b = 2\n");
+}
+
+// --- comments --------------------------------------------------------------
+
+#[test]
+fn a_trailing_comment_stays_on_its_line() {
+    assert_eq!(fmt("local a = 1   -- why\n"), "local a = 1 -- why\n");
+}
+
+#[test]
+fn a_leading_comment_keeps_its_own_line_and_its_gap() {
+    let out = fmt("local a = 1\n\n-- section\nlocal b = 2\n");
+
+    assert_eq!(out, "local a = 1\n\n-- section\nlocal b = 2\n");
+}
+
+#[test]
+fn a_comment_on_the_opening_keyword_is_not_lost() {
+    assert_eq!(fmt("do -- note\n\tx()\nend"), "do -- note\n\tx()\nend\n");
+}
+
+#[test]
+fn a_comment_at_the_end_of_a_block_is_kept() {
+    assert_eq!(fmt("do\n\tx()\n\t-- last\nend"), "do\n\tx()\n\t-- last\nend\n");
+}
+
+#[test]
+fn a_comment_at_the_end_of_the_file_is_kept() {
+    assert_eq!(fmt("local a = 1\n-- the end\n"), "local a = 1\n-- the end\n");
+}
+
+/// A long comment's own lines are its content and must not be re-indented
+#[test]
+fn a_long_comment_keeps_its_interior_exactly() {
+    let src = "do\n\t--[[\nnot indented\n\t]]\n\tx()\nend";
+
+    assert!(fmt(src).contains("\nnot indented\n"));
+}
+
+#[test]
+fn a_shebang_style_directive_survives() {
+    assert!(fmt("--!strict\nlocal a = 1\n").starts_with("--!strict\n"));
+}
+
+// --- strings ---------------------------------------------------------------
+
+#[test]
+fn quotes_normalise_to_double_by_default() {
+    assert_eq!(fmt("local s = 'hi'"), "local s = \"hi\"\n");
+}
+
+/// Switching quote is not a swap, the escaping has to change with it
+#[test]
+fn requoting_fixes_the_escapes() {
+    assert_eq!(fmt(r#"local s = 'it\'s'"#), "local s = \"it's\"\n");
+    assert_eq!(
+        fmt_with(r#"local s = "say \"hi\"""#, FmtConfig {
+            quote_style: QuoteStyle::ForceSingle,
+            ..Default::default()
+        }),
+        "local s = 'say \"hi\"'\n"
+    );
+}
+
+#[test]
+fn the_quote_needing_fewer_escapes_wins() {
+    // a double inside means single quotes cost nothing, so keep them
+    assert_eq!(fmt(r#"local s = 'say "hi"'"#), "local s = 'say \"hi\"'\n");
+}
+
+#[test]
+fn preserve_leaves_every_literal_alone() {
+    let cfg = FmtConfig {
+        quote_style: QuoteStyle::Preserve,
+        ..Default::default()
+    };
+
+    assert_eq!(fmt_with("local s = 'hi'", cfg), "local s = 'hi'\n");
+}
+
+#[test]
+fn a_long_string_is_never_requoted() {
+    assert_eq!(fmt("local s = [[it's \"both\"]]"), "local s = [[it's \"both\"]]\n");
+}
+
+#[test]
+fn escape_sequences_are_left_intact() {
+    assert_eq!(fmt(r#"local s = "a\tb\nc\\d""#), "local s = \"a\\tb\\nc\\\\d\"\n");
+}
+
+// --- options ---------------------------------------------------------------
+
+#[test]
+fn spaces_can_replace_tabs() {
+    let cfg = FmtConfig {
+        indent_type: IndentType::Spaces,
+        indent_width: 2,
+        ..Default::default()
+    };
+
+    assert_eq!(fmt_with("do\nx()\nend", cfg), "do\n  x()\nend\n");
+}
+
+#[test]
+fn windows_line_endings_apply_everywhere() {
+    let cfg = FmtConfig {
+        line_endings: LineEndings::Windows,
+        ..Default::default()
+    };
+
+    assert_eq!(fmt_with("do\nx()\nend", cfg), "do\r\n\tx()\r\nend\r\n");
+}
+
+/// The option the user asked for by name, a space before the parentheses
+#[test]
+fn space_after_function_names_targets_definitions_and_calls_separately() {
+    let defs = FmtConfig {
+        space_after_function_names: SpaceAfterFunctionNames::Definitions,
+        ..Default::default()
+    };
+
+    assert_eq!(
+        fmt_with("local function f(a) return a end", defs),
+        "local function f (a)\n\treturn a\nend\n"
+    );
+
+    let calls = FmtConfig {
+        space_after_function_names: SpaceAfterFunctionNames::Calls,
+        ..Default::default()
+    };
+
+    assert_eq!(fmt_with("print(1)", calls), "print (1)\n");
+}
+
+#[test]
+fn inner_spacing_is_configurable() {
+    let cfg = FmtConfig {
+        space_inside_parens: true,
+        space_inside_brackets: true,
+        space_inside_braces: false,
+        ..Default::default()
+    };
+
+    assert_eq!(fmt_with("f(a)", cfg.clone()), "f( a )\n");
+    assert_eq!(fmt_with("local x = t[k]", cfg.clone()), "local x = t[ k ]\n");
+    assert_eq!(fmt_with("local t = { a }", cfg), "local t = {a}\n");
+}
+
+#[test]
+fn call_parentheses_can_be_dropped_for_a_single_string_or_table() {
+    let no_string = FmtConfig {
+        call_parentheses: CallParens::NoSingleString,
+        ..Default::default()
+    };
+
+    assert_eq!(fmt_with(r#"require("x")"#, no_string), "require \"x\"\n");
+
+    let no_table = FmtConfig {
+        call_parentheses: CallParens::NoSingleTable,
+        ..Default::default()
+    };
+
+    assert_eq!(fmt_with("f({ a = 1 })", no_table), "f { a = 1 }\n");
+}
+
+#[test]
+fn call_parentheses_are_added_by_default() {
+    assert_eq!(fmt("require 'x'"), "require(\"x\")\n");
+    assert_eq!(fmt("f { a = 1 }"), "f({ a = 1 })\n");
+}
+
+#[test]
+fn collapse_simple_statement_folds_a_one_line_body() {
+    let cfg = FmtConfig {
+        collapse_simple_statement: CollapseSimpleStatement::Always,
+        ..Default::default()
+    };
+
+    assert_eq!(
+        fmt_with("local function f(a)\n\treturn a\nend", cfg.clone()),
+        "local function f(a) return a end\n"
+    );
+
+    assert_eq!(fmt_with("if a then\n\treturn\nend", cfg), "if a then return end\n");
+}
+
+#[test]
+fn collapsing_never_swallows_a_comment() {
+    let cfg = FmtConfig {
+        collapse_simple_statement: CollapseSimpleStatement::Always,
+        ..Default::default()
+    };
+
+    let out = fmt_with("local function f(a)\n\t-- why\n\treturn a\nend", cfg);
+
+    assert!(out.contains("-- why"), "comment lost, got {out}");
+    assert!(out.contains('\n'), "should not have collapsed, got {out}");
+}
+
+#[test]
+fn collapse_is_off_by_default() {
+    assert_eq!(
+        fmt("local function f(a) return a end"),
+        "local function f(a)\n\treturn a\nend\n"
+    );
+}
+
+// --- types -----------------------------------------------------------------
+
+#[test]
+fn a_type_annotation_is_normalised_but_not_restructured() {
+    assert_eq!(
+        fmt("local x:   Array < string >  = {}"),
+        "local x: Array<string> = {}\n"
+    );
+
+    assert_eq!(fmt("local f: (  number,string )->boolean"), "local f: (number, string) -> boolean\n");
+    assert_eq!(fmt("local t: {x:number,y:number}"), "local t: { x: number, y: number }\n");
+    assert_eq!(fmt("local u: A|B&C"), "local u: A | B & C\n");
+    assert_eq!(fmt("local o: string ?"), "local o: string?\n");
+    assert_eq!(fmt("local m: {[string] : number}"), "local m: { [string]: number }\n");
+}
+
+#[test]
+fn a_type_alias_keeps_its_shape() {
+    let src = "export type Handler<T> = (T) -> ()\n";
+
+    assert_eq!(fmt(src), src);
+}
+
+#[test]
+fn generics_and_return_types_come_through() {
+    let src = "local function map<T, U>(t: { T }, f: (T) -> U): { U }\n\treturn t\nend\n";
+
+    assert_eq!(fmt(src), src);
+}
+
+/// The turbofish, which took a parser fix to accept in the first place
+#[test]
+fn explicit_type_instantiation_survives() {
+    assert_eq!(fmt("local a = charm.atom<<number>>()"), "local a = charm.atom<<number>>()\n");
+    assert_eq!(
+        fmt("local a = charm.atom<<(number, string)>>()"),
+        "local a = charm.atom<<(number, string)>>()\n"
+    );
+}
+
+#[test]
+fn attributes_stay_above_their_function() {
+    let src = "@native\nlocal function hot()\n\treturn 1\nend\n";
+
+    assert_eq!(fmt(src), src);
+}

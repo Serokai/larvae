@@ -191,15 +191,18 @@ impl<'a> Parser<'a> {
                     let method = self.expect_name()?;
 
                     // a method call takes type arguments too, `obj:m<<T>>()`
-                    if self.at("<") && self.text_at(1) == "<" {
-                        self.angle_span()?;
-                    }
+                    let type_args = if self.at("<") && self.text_at(1) == "<" {
+                        Some(self.angle_span()?)
+                    } else {
+                        None
+                    };
 
                     let args = self.call_args()?;
 
                     e = Expr::Call {
                         func: Box::new(e),
                         method: Some(method),
+                        type_args,
                         args,
                         span: TokSpan::new(start, self.pos),
                     };
@@ -220,13 +223,14 @@ impl<'a> Parser<'a> {
                 required rather than optional, and reports it when missing.
                 */
                 "<" if self.text_at(1) == "<" => {
-                    self.angle_span()?;
+                    let type_args = Some(self.angle_span()?);
 
                     let args = self.call_args()?;
 
                     e = Expr::Call {
                         func: Box::new(e),
                         method: None,
+                        type_args,
                         args,
                         span: TokSpan::new(start, self.pos),
                     };
@@ -237,6 +241,7 @@ impl<'a> Parser<'a> {
                     e = Expr::Call {
                         func: Box::new(e),
                         method: None,
+                        type_args: None,
                         args,
                         span: TokSpan::new(start, self.pos),
                     };
@@ -248,6 +253,7 @@ impl<'a> Parser<'a> {
                         e = Expr::Call {
                             func: Box::new(e),
                             method: None,
+                            type_args: None,
                             args,
                             span: TokSpan::new(start, self.pos),
                         };

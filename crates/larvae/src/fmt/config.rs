@@ -147,11 +147,14 @@ pub struct FmtConfig {
 
     // --- past stylua ----------------------------------------------------
     /*
-    A trailing comma the author left means "keep this expanded".
+    A trailing comma the author left in a table means "keep this expanded".
 
-    Prettier's magic trailing comma, and the single most requested thing
-    stylua does not have. It turns line breaking into something an author can
-    decide per call site rather than something width alone decides.
+    Prettier's magic trailing comma. It turns line breaking into something an
+    author decides per table rather than something width alone decides, so a
+    short table meant as a list of things stops collapsing onto one line.
+
+    Tables only, and not by choice: Luau rejects `f(a, b,)`, so a call has no
+    trailing comma to read. A call is laid out by width alone.
     */
     #[serde(default = "default_true")]
     pub magic_trailing_comma: bool,
@@ -167,10 +170,6 @@ pub struct FmtConfig {
     /// `{ a }` rather than `{a}`, which is the Luau convention
     #[serde(default = "default_true")]
     pub space_inside_braces: bool,
-
-    /// `x = 1` rather than `x=1`, off only for golfed output
-    #[serde(default = "default_true")]
-    pub space_around_operators: bool,
 
     /// A table that broke keeps a trailing comma on its last field
     #[serde(default = "default_true")]
@@ -389,7 +388,6 @@ mod tests {
 
         assert!(c.magic_trailing_comma);
         assert!(c.space_inside_braces);
-        assert!(c.space_around_operators);
         assert!(!c.space_inside_parens);
         assert!(!c.space_inside_brackets);
     }

@@ -73,19 +73,23 @@ pub fn lex(src: &str) -> Result<Lexed, LexError> {
                 // Comment, long form `--[=*[` or line comment
                 let start = i;
 
-                if let Some(end) = try_long_bracket(b, i + 2) {
-                    i = end;
-                } else {
-                    while i < b.len() && b[i] != b'\n' {
-                        i += 1;
+                match try_long_bracket(b, i + 2) {
+                    LongBracket::Ends(end) => i = end,
+
+                    LongBracket::Unterminated => err!(start, "unterminated long comment"),
+
+                    LongBracket::No => {
+                        while i < b.len() && b[i] != b'\n' {
+                            i += 1;
+                        }
                     }
                 }
 
                 comments.push((start as u32, i as u32));
             }
 
-            b'[' => {
-                if let Some(end) = try_long_bracket(b, i) {
+            b'[' => match try_long_bracket(b, i) {
+                LongBracket::Ends(end) => {
                     // Long string, inner range excludes the brackets
                     let level = level_of(b, i);
                     toks.push(Tok {
@@ -99,11 +103,15 @@ pub fn lex(src: &str) -> Result<Lexed, LexError> {
                     });
 
                     i = end;
-                } else {
+                }
+
+                LongBracket::Unterminated => err!(i, "unterminated long string"),
+
+                LongBracket::No => {
                     toks.push(single(TokKind::Symbol, i));
                     i += 1;
                 }
-            }
+            },
 
             b'"' | b'\'' => {
                 let quote = c;
@@ -230,6 +238,22 @@ pub fn lex(src: &str) -> Result<Lexed, LexError> {
                 });
             }
 
+            /*
+            A byte with the high bit set is the start of a character that only
+            Luau string and comment content may hold, and both are consumed
+            whole above. Reaching here means it sits in code, where Luau does
+            not allow it either.
+
+            It is reported rather than tokenised because a token one byte long
+            would cut the character in half, and every later slice of that span
+            would panic on the boundary.
+            */
+            _ if c >= 0x80 => {
+                let ch = src[i..].chars().next().unwrap_or(char::REPLACEMENT_CHARACTER);
+
+                err!(i, "unexpected character {ch:?}")
+            }
+
             _ => {
                 let (len, kind) = symbol_at(b, i);
                 toks.push(Tok {
@@ -304,16 +328,26 @@ fn level_of(b: &[u8], open: usize) -> usize {
 }
 
 /// Offset just past the matching close bracket when pos starts a long bracket
-fn try_long_bracket(b: &[u8], pos: usize) -> Option<usize> {
+/// What sits at a position that might open a `[[` or `--[==[` bracket
+enum LongBracket {
+    /// Not a long bracket, so `[` is punctuation and `--` starts a line comment
+    No,
+    /// Closes just past this byte
+    Ends(usize),
+    /// Opened and never closed, which Luau rejects and so does larvae
+    Unterminated,
+}
+
+fn try_long_bracket(b: &[u8], pos: usize) -> LongBracket {
     if pos >= b.len() || b[pos] != b'[' {
-        return None;
+        return LongBracket::No;
     }
 
     let level = level_of(b, pos);
     let body = pos + 1 + level;
 
     if body >= b.len() || b[body] != b'[' {
-        return None;
+        return LongBracket::No;
     }
 
     let mut i = body + 1;
@@ -329,15 +363,21 @@ fn try_long_bracket(b: &[u8], pos: usize) -> Option<usize> {
             }
 
             if l == level && j < b.len() && b[j] == b']' {
-                return Some(j + 1);
+                return LongBracket::Ends(j + 1);
             }
         }
 
         i += 1;
     }
 
-    // Unterminated long bracket, consume to EOF (caller treats as one token)
-    Some(b.len())
+    /*
+    Running to the end of the file was once treated as one token reaching EOF.
+    That reported no error and produced a token whose inner range was two bytes
+    short of its own content, so the text came back truncated and formatting the
+    result grew a line every pass. An unterminated bracket is a syntax error and
+    is now reported as one.
+    */
+    LongBracket::Unterminated
 }
 
 fn scan_number(b: &[u8], mut i: usize) -> usize {

@@ -32,6 +32,15 @@ pub enum Doc<'a> {
     Hard,
     /// A blank line the author wrote, kept because it separates ideas
     Blank,
+    /*
+    One thing when the enclosing group is flat, another when it is broken.
+
+    The trailing comma on a table exists for this: it must be absent on one
+    line and present on many, and deciding which without knowing the group's
+    outcome is what makes a formatter emit output it will not reproduce when
+    given its own output back.
+    */
+    IfBreak(Box<Doc<'a>>, Box<Doc<'a>>),
     /// Flat if it fits, broken if it does not
     Group(Box<Doc<'a>>),
     /// One more level of indentation for anything inside
@@ -51,6 +60,11 @@ impl<'a> Doc<'a> {
 
     pub fn indent(inner: Doc<'a>) -> Self {
         Self::Indent(Box::new(inner))
+    }
+
+    /// `broken` only when the enclosing group breaks, `flat` otherwise
+    pub fn if_break(flat: Doc<'a>, broken: Doc<'a>) -> Self {
+        Self::IfBreak(Box::new(flat), Box::new(broken))
     }
 
     pub fn concat(parts: impl IntoIterator<Item = Doc<'a>>) -> Self {
@@ -95,7 +109,13 @@ impl<'a> Doc<'a> {
         match self {
             Self::Hard | Self::Blank => true,
 
+            // a long comment spanning lines cannot sit on a flat line
+            Self::Text(s) => s.contains('\n'),
+
             Self::Group(inner) | Self::Indent(inner) => inner.must_break(),
+
+            // only the flat side can rule flat out, the broken side never runs flat
+            Self::IfBreak(flat, _) => flat.must_break(),
 
             Self::Concat(parts) => parts.iter().any(Self::must_break),
 
@@ -172,7 +192,18 @@ pub fn render(doc: &Doc<'_>, style: Style) -> String {
 
             Doc::Text(s) => {
                 out.push_str(s);
-                column += width_of(s);
+
+                /*
+                A long comment carries its own newlines and is emitted exactly
+                as the author wrote it, since re-indenting its inner lines
+                would change what the comment says. The column continues from
+                its last line rather than from its total width.
+                */
+                column = match s.rsplit_once('\n') {
+                    Some((_, last)) => width_of(last),
+
+                    None => column + width_of(s),
+                };
             }
 
             Doc::Line if mode == Mode::Flat => {
@@ -186,10 +217,25 @@ pub fn render(doc: &Doc<'_>, style: Style) -> String {
                 newline(&mut out, style, depth, &mut column);
             }
 
+            /*
+            A blank line is one break more than a hard one, so it stands in
+            for the separator rather than being added to it. Emitting both
+            would give two blank lines where the author left one.
+            */
             Doc::Blank => {
+                trim_end(&mut out);
                 out.push_str(style.newline);
                 newline(&mut out, style, depth, &mut column);
             }
+
+            Doc::IfBreak(flat, broken) => stack.push((
+                depth,
+                mode,
+                match mode {
+                    Mode::Flat => flat,
+                    Mode::Broken => broken,
+                },
+            )),
 
             Doc::Indent(inner) => stack.push((depth + 1, mode, inner)),
 
@@ -219,12 +265,15 @@ pub fn render(doc: &Doc<'_>, style: Style) -> String {
     out
 }
 
-fn newline(out: &mut String, style: Style, depth: usize, column: &mut usize) {
-    // no trailing whitespace, ever, so trim before the break
+/// No trailing whitespace, ever, so every break trims what comes before it
+fn trim_end(out: &mut String) {
     while out.ends_with(' ') || out.ends_with('\t') {
         out.pop();
     }
+}
 
+fn newline(out: &mut String, style: Style, depth: usize, column: &mut usize) {
+    trim_end(out);
     out.push_str(style.newline);
 
     for _ in 0..depth {
@@ -250,6 +299,10 @@ fn fits(doc: &Doc<'_>, style: Style, column: usize) -> bool {
             Doc::Nil | Doc::Soft => {}
 
             Doc::Text(s) => {
+                if s.contains('\n') {
+                    return false;
+                }
+
                 let w = width_of(s);
 
                 if w > remaining {
@@ -269,6 +322,9 @@ fn fits(doc: &Doc<'_>, style: Style, column: usize) -> bool {
 
             // a forced break means the flat question is already answered
             Doc::Hard | Doc::Blank => return false,
+
+            // measuring flat, so only the flat side is ever reached
+            Doc::IfBreak(flat, _) => stack.push(flat),
 
             Doc::Group(inner) | Doc::Indent(inner) => stack.push(inner),
 
