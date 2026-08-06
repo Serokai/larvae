@@ -64,6 +64,21 @@ enum Command {
         config: Option<PathBuf>,
     },
 
+    /// Report suspicious code without changing it
+    Lint {
+        /// Files or directories, defaults to the project's input
+        paths: Vec<PathBuf>,
+        /// Read one file from stdin
+        #[arg(long, conflicts_with = "paths")]
+        stdin: bool,
+        /// Describe one lint and stop
+        #[arg(long, value_name = "LINT")]
+        explain: Option<String>,
+        /// Path to larvae.toml (defaults to ./larvae.toml when present)
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+
     /// Create a starter larvae.toml for this project
     Init,
 
@@ -155,6 +170,13 @@ fn run() -> Result<ExitCode> {
             stdin,
             config,
         } => commands::fmt::run(&root, paths, check, stdin, config),
+
+        Command::Lint {
+            paths,
+            stdin,
+            explain,
+            config,
+        } => commands::lint::run(&root, paths, stdin, explain, config),
 
         Command::Init => commands::init::run(&root),
 

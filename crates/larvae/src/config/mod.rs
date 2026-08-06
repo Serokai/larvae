@@ -47,6 +47,10 @@ pub struct Config {
     #[serde(default)]
     pub fmt: Option<toml::Value>,
 
+    /// Linter settings, laid over any selene.toml the project still has
+    #[serde(default)]
+    pub lint: Option<toml::Value>,
+
     /// Extensions the project asked for, see [`worms`]
     #[serde(default)]
     pub worms: Option<toml::Value>,

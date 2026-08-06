@@ -132,7 +132,7 @@ Explicit paths win, and a named file is formatted whatever it is called, since
 someone naming a file means it. Without paths the project's input directory is
 walked when there is a config, and the working directory otherwise.
 */
-fn collect(root: &Path, paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+pub fn collect(root: &Path, paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
     if paths.is_empty() {
         return Ok(default_roots(root).iter().flat_map(|d| walk(d)).collect());
     }

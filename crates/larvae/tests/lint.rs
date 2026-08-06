@@ -107,7 +107,9 @@ fn deny_makes_it_an_error_and_warn_leaves_it_a_warning() {
     let at = |level| {
         lint(Path::new("t.luau"), src, &with("divide_by_zero", level))
             .unwrap()
-            .remove(0)
+            .into_iter()
+            .find(|d| d.message.contains("divide_by_zero"))
+            .expect("it fired")
             .severity
     };
 
@@ -358,4 +360,255 @@ fn a_one_line_guard_is_not_two_statements() {
             .any(|n| n == "multiple_statements"),
         "the return is in its own block"
     );
+}
+
+// --- names -----------------------------------------------------------------
+
+#[test]
+fn unused_variable_catches_a_local_nothing_reads() {
+    assert!(fires("unused_variable", "local x = 1\n"));
+    assert!(fires("unused_variable", "local function helper() end\n"));
+}
+
+#[test]
+fn a_local_that_is_read_is_fine() {
+    assert!(!fires("unused_variable", "local x = 1\nprint(x)\n"));
+}
+
+/// The convention for a name deliberately not used
+#[test]
+fn an_underscore_name_is_exempt() {
+    assert!(!fires("unused_variable", "local _ = f()\n"));
+    assert!(!fires("unused_variable", "local _unused = 1\n"));
+}
+
+/// A signature is the caller's shape, and `for k, v` where only k is wanted is normal
+#[test]
+fn parameters_and_loop_variables_are_not_reported_by_default() {
+    assert!(!fires("unused_variable", "local function f(a, b)\n\treturn a\nend\nprint(f)\n"));
+    assert!(!fires("unused_variable", "for k, v in pairs(t) do print(k) end\n"));
+}
+
+#[test]
+fn parameters_can_be_asked_for() {
+    let mut cfg = LintConfig::default();
+    cfg.options.insert(
+        "unused_variable".into(),
+        toml::from_str::<toml::Value>("parameters = true").unwrap(),
+    );
+
+    let src = "local function f(a, b)\n\treturn a\nend\nprint(f)\n";
+
+    assert!(fired(src, &cfg).iter().any(|n| n == "unused_variable"));
+}
+
+/// A value computed and thrown away reads as a bug, not as tidying
+#[test]
+fn a_variable_written_but_never_read_is_reported_differently() {
+    let out = lint(
+        Path::new("t.luau"),
+        "local x = 1\nx = 2\n",
+        &LintConfig::default(),
+    )
+    .unwrap();
+
+    assert!(
+        out.iter().any(|d| d.message.contains("assigned but never read")),
+        "{:?}",
+        out.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn undefined_variable_catches_a_name_nothing_declares() {
+    assert!(fires("undefined_variable", "print(notDeclaredAnywhere)\n"));
+}
+
+#[test]
+fn a_standard_global_is_defined() {
+    assert!(!fires("undefined_variable", "print(pairs)\n"));
+    assert!(!fires("undefined_variable", "local s = game:GetService('Players')\nprint(s)\n"));
+}
+
+#[test]
+fn a_project_can_add_its_own_globals() {
+    let mut cfg = LintConfig::default();
+    cfg.globals.push("MyFramework".to_string());
+
+    assert!(
+        !fired("print(MyFramework)\n", &cfg)
+            .iter()
+            .any(|n| n == "undefined_variable")
+    );
+}
+
+/// A Roblox global should not be defined when the project is plain Luau
+#[test]
+fn the_std_setting_decides_which_globals_exist() {
+    let mut cfg = LintConfig::default();
+    cfg.std = larvae::lint::config::StdLib::Luau;
+
+    assert!(
+        fired("print(game)\n", &cfg)
+            .iter()
+            .any(|n| n == "undefined_variable")
+    );
+}
+
+/// It is nil at runtime, which is not a matter of taste
+#[test]
+fn undefined_variable_is_an_error_rather_than_a_warning() {
+    let out = lint(
+        Path::new("t.luau"),
+        "print(notDeclaredAnywhere)\n",
+        &LintConfig::default(),
+    )
+    .unwrap();
+
+    assert_eq!(out[0].severity, Severity::Error);
+}
+
+#[test]
+fn unscoped_variables_catches_the_missing_local() {
+    assert!(fires("unscoped_variables", "counter = 1\n"));
+}
+
+#[test]
+fn a_local_assignment_is_fine() {
+    assert!(!fires("unscoped_variables", "local counter = 0\ncounter = 1\nprint(counter)\n"));
+}
+
+#[test]
+fn shadowing_catches_a_hidden_name() {
+    assert!(fires("shadowing", "local x = 1\nprint(x)\ndo\n\tlocal x = 2\n\tprint(x)\nend\n"));
+}
+
+/// Re-deriving what you hide is the deliberate form
+#[test]
+fn a_binding_that_reads_what_it_hides_is_not_reported() {
+    assert!(!fires("shadowing", "local x = 1\ndo\n\tlocal x = x + 1\n\tprint(x)\nend\n"));
+}
+
+#[test]
+fn a_sibling_scope_is_not_shadowing() {
+    assert!(!fires("shadowing", "do\n\tlocal x = 1\n\tprint(x)\nend\ndo\n\tlocal x = 2\n\tprint(x)\nend\n"));
+}
+
+#[test]
+fn global_usage_catches_reaching_into_the_shared_table() {
+    assert!(fires("global_usage", "_G.thing = 1\n"));
+    assert!(fires("global_usage", "print(_G.thing)\n"));
+}
+
+/// Somebody's own table named _G is theirs
+#[test]
+fn a_local_named_underscore_g_is_not_the_shared_one() {
+    assert!(!fires("global_usage", "local _G = {}\nprint(_G.thing)\n"));
+}
+
+// --- beyond selene ---------------------------------------------------------
+
+#[test]
+fn unreachable_code_catches_statements_after_an_exit() {
+    assert!(fires("unreachable_code", "while true do\n\tbreak\n\tprint('never')\nend\n"));
+    assert!(fires("unreachable_code", "for i = 1, 3 do\n\tcontinue\n\tprint('never')\nend\n"));
+}
+
+#[test]
+fn code_before_the_exit_is_fine() {
+    assert!(!fires("unreachable_code", "while true do\n\tprint('once')\n\tbreak\nend\n"));
+}
+
+/// An exit inside a branch leaves the enclosing block reachable
+#[test]
+fn a_conditional_exit_does_not_kill_what_follows() {
+    assert!(!fires(
+        "unreachable_code",
+        "while true do\n\tif done then\n\t\tbreak\n\tend\n\tprint('still runs')\nend\n"
+    ));
+}
+
+#[test]
+fn self_assignment_catches_a_line_that_does_nothing() {
+    assert!(fires("self_assignment", "local x = 1\nx = x\nprint(x)\n"));
+    assert!(fires("self_assignment", "t.k = t.k\n"));
+}
+
+#[test]
+fn assigning_something_different_is_fine() {
+    assert!(!fires("self_assignment", "local x = 1\nx = y\nprint(x)\n"));
+    assert!(!fires("self_assignment", "t.a = t.b\n"));
+}
+
+/// A compound operator does something, and a computed index may not be the same element
+#[test]
+fn compound_and_computed_forms_are_left_alone() {
+    assert!(!fires("self_assignment", "local x = 1\nx += x\nprint(x)\n"));
+    assert!(!fires("self_assignment", "t[i] = t[i]\n"));
+}
+
+#[test]
+fn string_concat_in_loop_catches_the_quadratic_build() {
+    assert!(fires(
+        "string_concat_in_loop",
+        "local s = ''\nfor i = 1, 10 do\n\ts = s .. i\nend\nprint(s)\n"
+    ));
+    assert!(fires(
+        "string_concat_in_loop",
+        "local s = ''\nwhile go do\n\ts = s .. 'x'\nend\nprint(s)\n"
+    ));
+}
+
+#[test]
+fn assigning_a_fresh_string_each_round_is_not_accumulating() {
+    assert!(!fires(
+        "string_concat_in_loop",
+        "local s = ''\nfor i = 1, 10 do\n\ts = 'a' .. i\nend\nprint(s)\n"
+    ));
+}
+
+#[test]
+fn table_concat_after_the_loop_is_the_recommended_shape_and_is_quiet() {
+    assert!(!fires(
+        "string_concat_in_loop",
+        "local parts = {}\nfor i = 1, 10 do\n\ttable.insert(parts, i)\nend\nprint(table.concat(parts))\n"
+    ));
+}
+
+#[test]
+fn loop_invariant_call_catches_a_service_lookup_per_iteration() {
+    assert!(fires(
+        "loop_invariant_call",
+        "for i = 1, 10 do\n\tlocal p = game:GetService('Players')\n\tprint(p)\nend\n"
+    ));
+    assert!(fires(
+        "loop_invariant_call",
+        "for i = 1, 10 do\n\tlocal m = require('@pkg/thing')\n\tprint(m)\nend\n"
+    ));
+}
+
+#[test]
+fn a_lookup_hoisted_above_the_loop_is_quiet() {
+    assert!(!fires(
+        "loop_invariant_call",
+        "local p = game:GetService('Players')\nfor i = 1, 10 do\n\tprint(p)\nend\n"
+    ));
+}
+
+/// A call whose argument varies is not invariant
+#[test]
+fn a_call_with_a_computed_argument_is_not_reported() {
+    assert!(!fires(
+        "loop_invariant_call",
+        "for i = 1, 10 do\n\tlocal m = require(names[i])\n\tprint(m)\nend\n"
+    ));
+}
+
+/// A function body does not run once per iteration
+#[test]
+fn a_call_inside_a_callback_is_not_this_loops_work() {
+    assert!(!fires(
+        "loop_invariant_call",
+        "for i = 1, 10 do\n\tdefer(function()\n\t\tprint(game:GetService('Players'))\n\tend)\nend\n"
+    ));
 }

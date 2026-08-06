@@ -52,6 +52,15 @@ pub struct Binding<'a> {
     pub origin: Origin,
     /// The binding in an enclosing scope this one hides, if any
     pub shadows: Option<usize>,
+    /*
+    The statement that declared it.
+
+    Kept so `shadowing` can tell `local x = x + 1` from `local x = 2`: the
+    first reads the outer binding inside its own declaration, which is the
+    deliberate form, and the difference is exactly whether the outer read
+    falls inside this span.
+    */
+    pub declared_in: TokSpan,
 }
 
 impl Binding<'_> {
@@ -78,6 +87,7 @@ pub fn resolve<'a>(src: &'a str, toks: &'a [Tok], chunk: &'a Chunk) -> Names<'a>
         src,
         toks,
         scopes: vec![Vec::new()],
+        current: chunk.block.span,
         out: Names::default(),
     };
 
@@ -92,6 +102,8 @@ struct Binder<'a> {
     toks: &'a [Tok],
     /// Each scope holds the names it introduced and which binding they are
     scopes: Vec<Vec<(&'a str, usize)>>,
+    /// The statement being walked, which is what any new binding belongs to
+    current: TokSpan,
     out: Names<'a>,
 }
 
@@ -133,6 +145,7 @@ impl<'a> Binder<'a> {
             writes: Vec::new(),
             origin,
             shadows,
+            declared_in: self.current,
         });
 
         self.out.by_token.insert(span.start, index);
@@ -185,6 +198,13 @@ impl<'a> Binder<'a> {
     }
 
     fn stmt(&mut self, stmt: &'a Stmt) {
+        let outer = std::mem::replace(&mut self.current, stmt.span());
+
+        self.stmt_inner(stmt);
+        self.current = outer;
+    }
+
+    fn stmt_inner(&mut self, stmt: &'a Stmt) {
         match stmt {
             Stmt::Empty(_) | Stmt::Break(_) | Stmt::Continue(_) | Stmt::TypeAlias(_) => {}
 
@@ -325,6 +345,7 @@ impl<'a> Binder<'a> {
                 writes: Vec::new(),
                 origin: Origin::Param,
                 shadows: self.lookup("self"),
+                declared_in: body.span,
             });
 
             self.scopes

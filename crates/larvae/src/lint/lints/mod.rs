@@ -7,6 +7,8 @@ these files changes nothing a project can see.
 */
 
 pub mod correctness;
+pub mod names;
+pub mod original;
 pub mod style;
 
 use super::Lint;
@@ -30,6 +32,17 @@ pub static ALL: &[&dyn Lint] = &[
     &correctness::SuspiciousReverseLoop,
     &correctness::TypeCheckInsideCall,
     &correctness::UnbalancedAssignments,
+    // names
+    &names::UndefinedVariable,
+    &names::UnscopedVariables,
+    &names::UnusedVariable,
+    &names::Shadowing,
+    &names::GlobalUsage,
+    // beyond selene
+    &original::UnreachableCode,
+    &original::SelfAssignment,
+    &original::StringConcatInLoop,
+    &original::ShadowedLoopWork,
     // style
     &style::EmptyIf,
     &style::EmptyLoop,

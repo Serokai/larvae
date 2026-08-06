@@ -14,6 +14,7 @@ refers to, is computed once per file in [`ctx`] rather than once per lint.
 pub mod config;
 pub mod ctx;
 pub mod lints;
+pub mod globals;
 pub mod scope;
 
 use std::path::Path;

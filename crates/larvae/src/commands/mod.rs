@@ -3,6 +3,7 @@ pub mod code;
 pub mod detect;
 pub mod fmt;
 pub mod init;
+pub mod lint;
 pub mod process;
 pub mod self_cmd;
 pub mod watch;

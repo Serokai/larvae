@@ -247,8 +247,8 @@ impl DuplicateKeys {
                             format!("the key {key} is set twice in this table"),
                         )
                         .with_help(format!(
-                            "the earlier one at column {} is discarded",
-                            ctx.bytes(*first).0
+                            "the one on line {} is discarded",
+                            ctx.line(ctx.bytes(*first).0) + 1
                         )),
                     );
                 } else {
