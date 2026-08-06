@@ -113,6 +113,27 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
     */
     let pool = crate::worm::pool::Pool::new(worms.specs(), config.process.run_order);
 
+    /*
+    Realm validation is the thing nothing else in the ecosystem has, so a worm
+    switching it off for its files is worth saying out loud once rather than
+    letting it disappear quietly.
+    */
+    for spec in pool.specs() {
+        if spec.requires == crate::worm::RequireOwner::Worm {
+            diags.push(Diag::warning(
+                Path::new("larvae.toml"),
+                format!(
+                    "worm `{}` resolves its own requires, so realm and clone validation is off for {}",
+                    spec.manifest.name,
+                    match spec.claims.is_empty() {
+                        true => "the files it produces".to_owned(),
+                        false => spec.claims.join(", "),
+                    }
+                ),
+            ));
+        }
+    }
+
     // the registry validated everything, the pool is what the loop uses
     drop(worms);
 
