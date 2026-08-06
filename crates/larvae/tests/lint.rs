@@ -447,8 +447,10 @@ fn a_project_can_add_its_own_globals() {
 /// A Roblox global should not be defined when the project is plain Luau
 #[test]
 fn the_std_setting_decides_which_globals_exist() {
-    let mut cfg = LintConfig::default();
-    cfg.std = larvae::lint::config::StdLib::Luau;
+    let cfg = LintConfig {
+        std: larvae::lint::config::StdLib::Luau,
+        ..Default::default()
+    };
 
     assert!(
         fired("print(game)\n", &cfg)
@@ -895,8 +897,11 @@ fn an_all_zero_udim2_is_not_reported() {
 /// These names mean nothing outside Roblox
 #[test]
 fn the_roblox_lints_are_silent_under_plain_luau() {
-    let mut cfg = LintConfig::default();
-    cfg.std = larvae::lint::config::StdLib::Luau;
+    let mut cfg = LintConfig {
+        std: larvae::lint::config::StdLib::Luau,
+        ..Default::default()
+    };
+
     cfg.globals.push("Color3".to_string());
 
     assert!(
@@ -1019,8 +1024,10 @@ fn the_legacy_roblox_casing_is_still_reported() {
 /// These names mean nothing outside Roblox
 #[test]
 fn deprecated_methods_are_silent_under_plain_luau() {
-    let mut cfg = LintConfig::default();
-    cfg.std = larvae::lint::config::StdLib::Luau;
+    let cfg = LintConfig {
+        std: larvae::lint::config::StdLib::Luau,
+        ..Default::default()
+    };
 
     assert!(!fired("part:Remove()\n", &cfg).iter().any(|n| n == "deprecated"));
 }

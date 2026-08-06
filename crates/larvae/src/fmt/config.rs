@@ -235,11 +235,7 @@ impl FmtConfig {
     where both say something, since it is the more specific file.
     */
     pub fn discover(root: &Path, larvae: Option<&toml::Value>) -> Result<Self> {
-        let mut config = match stylua_file(root)? {
-            Some(config) => config,
-
-            None => Self::default(),
-        };
+        let mut config = stylua_file(root)?.unwrap_or_default();
 
         if let Some(value) = larvae {
             config = config.merged(value)?;

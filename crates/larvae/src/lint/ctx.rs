@@ -184,7 +184,7 @@ the tree. Storing those would need the lifetime laundered, and a walk written
 honestly is cheaper than an `unsafe` that has to be argued about every time
 somebody reads it.
 */
-fn flatten<'a>(chunk: &'a Chunk) -> (Vec<&'a Expr>, Vec<&'a Stmt>, Vec<&'a Block>) {
+fn flatten(chunk: &Chunk) -> (Vec<&Expr>, Vec<&Stmt>, Vec<&Block>) {
     let mut out = Collected::default();
     out.block(&chunk.block);
 
