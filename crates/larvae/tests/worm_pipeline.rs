@@ -692,3 +692,94 @@ fn a_line_count_change_warns_but_keeps_the_output() {
     assert!(errors(&outcome).contains("changed the line count"));
     assert!(read(root, "dist/shared/g.luau").contains("extra"));
 }
+
+/*
+Editing a worm has to invalidate what it produced. Stale output is worse than
+slow output, and a worm is a resolution input like a .luaurc or the project file.
+*/
+#[test]
+fn editing_a_worm_invalidates_its_output() {
+    let tmp = fixture();
+    let root = tmp.path();
+
+    write(
+        root,
+        "worms/tag/worm.toml",
+        "name = \"tag\"\napi = 1\nform = \"luau\"\nentry = \"init.luau\"\n\n[frontend]\nclaims = [\".mk\"]\n",
+    );
+    write(
+        root,
+        "larvae.toml",
+        "[aliases]\npkg = \"@game/ReplicatedStorage/Packages\"\n\n[worms]\ntag = { path = \"worms/tag\" }\n",
+    );
+    write(root, "src/shared/t.mk", "return 1\n");
+
+    let worm = |body: &str| {
+        write(
+            root,
+            "worms/tag/init.luau",
+            &format!("return {{ frontend = {{ compile = function(s) return {body} end }} }}"),
+        );
+    };
+
+    worm("s .. \"-- ONE\"");
+    build(root);
+    assert!(read(root, "dist/shared/t.luau").contains("ONE"));
+
+    // same source file, different worm, so the output has to move with it
+    worm("s .. \"-- TWO\"");
+    build(root);
+
+    let out = read(root, "dist/shared/t.luau");
+
+    assert!(out.contains("TWO"), "stale output after a worm edit: {out}");
+}
+
+/// The same for settings, since a worm reads them and they change what it emits
+#[test]
+fn changing_a_worms_settings_invalidates_too() {
+    let tmp = fixture();
+    let root = tmp.path();
+
+    write(
+        root,
+        "worms/tag/worm.toml",
+        "name = \"tag\"\napi = 1\nform = \"luau\"\nentry = \"init.luau\"\n\n[frontend]\nclaims = [\".mk\"]\n",
+    );
+    write(
+        root,
+        "worms/tag/init.luau",
+        r#"
+local suffix = ""
+return {
+    init = function(config) suffix = config.suffix or "none" end,
+    frontend = { compile = function(s) return s .. "-- " .. suffix end },
+}
+"#,
+    );
+    write(root, "src/shared/t.mk", "return 1\n");
+
+    let config = |suffix: &str| {
+        write(
+            root,
+            "larvae.toml",
+            &format!(
+                "[aliases]\npkg = \"@game/ReplicatedStorage/Packages\"\n\n[worms]\ntag = {{ path = \"worms/tag\" }}\n\n[config.tag]\nsuffix = \"{suffix}\"\n"
+            ),
+        );
+    };
+
+    config("ALPHA");
+    build(root);
+    assert!(read(root, "dist/shared/t.luau").contains("ALPHA"));
+
+    config("BETA");
+    build(root);
+
+    let out = read(root, "dist/shared/t.luau");
+
+    assert!(
+        out.contains("BETA"),
+        "stale output after a settings change: {out}"
+    );
+}

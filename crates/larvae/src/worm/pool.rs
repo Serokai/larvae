@@ -111,6 +111,11 @@ impl Pool {
         }
     }
 
+    /// Everything a worm brings that could change output, for the cache epoch
+    pub fn specs(&self) -> &[Arc<Spec>] {
+        &self.specs
+    }
+
     /// The slot larvae's own rules run in
     pub fn native(&self) -> i64 {
         self.native

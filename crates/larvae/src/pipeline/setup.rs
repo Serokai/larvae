@@ -145,6 +145,13 @@ pub fn epoch(
     project: Option<&Project>,
     skip: &[PathBuf],
     files: &[&[PathBuf]],
+    /*
+    Worms produce output, so their artifacts and settings are resolution inputs
+    like any other. Without them, editing a worm leaves every file it touched
+    cached against the old version, which is stale output rather than slow
+    output and therefore the worse failure.
+    */
+    worms: &crate::worm::pool::Pool,
 ) -> u64 {
     let mut epoch = EpochInputs::new();
 
@@ -166,6 +173,13 @@ pub fn epoch(
         if entry.file_name() == ".luaurc" {
             epoch.add_file(entry.path());
         }
+    }
+
+    for spec in worms.specs() {
+        epoch.add(spec.manifest.name.as_bytes());
+        epoch.add(&spec.artifact);
+        epoch.add(crate::worm::toml_text(&spec.config).as_bytes());
+        epoch.add(crate::worm::toml_text_map(&spec.rules).as_bytes());
     }
 
     let mut all: Vec<PathBuf> = files.iter().flat_map(|set| set.iter().cloned()).collect();

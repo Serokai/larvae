@@ -107,6 +107,16 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
 
     let claimed = worms.claimed_extensions();
 
+    /*
+    Instances for the parallel loop. mlua::Lua is !Send, so a worm cannot be
+    moved into a worker at all, let alone shared. The pool holds artifacts and
+    settings, which are Sync, and each worker builds its own on first use.
+    */
+    let pool = crate::worm::pool::Pool::new(worms.specs(), config.process.run_order);
+
+    // the registry validated everything, the pool is what the loop uses
+    drop(worms);
+
     let skip = setup::skip_dirs(&root, config);
     let mounts = setup::mount_table(&root, config, project.as_ref(), &mut diags);
     let luaurc = setup::luaurc_index(&root, &skip, &mut diags);
@@ -118,6 +128,7 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
         project.as_ref(),
         &skip,
         &[&to_process, &to_copy],
+        &pool,
     );
 
     // caching only applies when writing, check must re-report every diagnostic
@@ -139,16 +150,6 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
     };
 
     let opts = FileOpts::from_config(&root, config, write)?;
-
-    /*
-    Instances for the parallel loop. mlua::Lua is !Send, so a worm cannot be
-    moved into a worker at all, let alone shared. The pool holds artifacts and
-    settings, which are Sync, and each worker builds its own on first use.
-    */
-    let pool = crate::worm::pool::Pool::new(worms.specs(), config.process.run_order);
-
-    // the registry validated everything, the pool is what the loop uses
-    drop(worms);
 
     // --- Parallel per file processing ---------------------------------------
     let shared_diags = Mutex::new(diags);
