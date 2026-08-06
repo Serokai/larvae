@@ -6,9 +6,11 @@ configures and it is the same wherever the lint lives, so moving one between
 these files changes nothing a project can see.
 */
 
+pub mod configured;
 pub mod correctness;
 pub mod names;
 pub mod original;
+pub mod roblox;
 pub mod style;
 
 use super::Lint;
@@ -32,12 +34,24 @@ pub static ALL: &[&dyn Lint] = &[
     &correctness::SuspiciousReverseLoop,
     &correctness::TypeCheckInsideCall,
     &correctness::UnbalancedAssignments,
+    &configured::BadStringEscape,
+    &configured::MismatchedArgCount,
+    &configured::MustUse,
     // names
     &names::UndefinedVariable,
     &names::UnscopedVariables,
     &names::UnusedVariable,
     &names::Shadowing,
     &names::GlobalUsage,
+    // what a project tunes
+    &configured::Deprecated,
+    &configured::RestrictedModulePaths,
+    &configured::HighCyclomaticComplexity,
+    &configured::ManualTableClone,
+    // roblox data types
+    &roblox::RobloxIncorrectColor3NewBounds,
+    &roblox::RobloxSuspiciousUdim2New,
+    &roblox::RobloxManualFromScaleOrOffset,
     // beyond selene
     &original::UnreachableCode,
     &original::SelfAssignment,

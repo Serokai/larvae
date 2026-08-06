@@ -52,7 +52,9 @@ fn every_lint_has_a_distinct_name_and_an_explanation() {
         assert!(!lint.name().is_empty());
         assert!(!lint.about().is_empty(), "{} has no about", lint.name());
         assert!(
-            lint.name().chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+            lint.name()
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
             "{} should be snake_case",
             lint.name()
         );
@@ -61,7 +63,7 @@ fn every_lint_has_a_distinct_name_and_an_explanation() {
         seen.push(lint.name());
     }
 
-    assert!(seen.len() >= 15, "expected the full set, found {}", seen.len());
+    assert!(seen.len() >= 29, "expected the full set, found {}", seen.len());
 }
 
 #[test]
@@ -611,4 +613,272 @@ fn a_call_inside_a_callback_is_not_this_loops_work() {
         "loop_invariant_call",
         "for i = 1, 10 do\n\tdefer(function()\n\t\tprint(game:GetService('Players'))\n\tend)\nend\n"
     ));
+}
+
+// --- tables and configuration ----------------------------------------------
+
+fn opts(name: &str, body: &str) -> LintConfig {
+    let mut cfg = LintConfig::default();
+    cfg.options
+        .insert(name.to_string(), toml::from_str::<toml::Value>(body).unwrap());
+
+    cfg
+}
+
+#[test]
+fn bad_string_escape_catches_an_undefined_escape() {
+    assert!(fires("bad_string_escape", r#"local s = "C:\path\to""#));
+    assert!(fires("bad_string_escape", r#"local s = "\q""#));
+}
+
+#[test]
+fn every_escape_the_language_defines_is_accepted() {
+    let src = r#"local s = "\a\b\f\n\r\t\v\\\"\'\65\x41\u{1F600}\z  ""#;
+
+    assert!(!fires("bad_string_escape", src), "{:?}", names(src));
+}
+
+#[test]
+fn a_malformed_hex_or_unicode_escape_is_caught() {
+    assert!(fires("bad_string_escape", r#"local s = "\xZZ""#));
+    assert!(fires("bad_string_escape", r#"local s = "\u41""#));
+}
+
+/// A long string's content is literal, there is nothing to escape
+#[test]
+fn a_long_string_is_not_scanned_for_escapes() {
+    assert!(!fires("bad_string_escape", "local s = [[C:\\path\\to]]"));
+}
+
+#[test]
+fn must_use_catches_a_pure_call_thrown_away() {
+    assert!(fires("must_use", "string.format('%d', 1)\n"));
+    assert!(fires("must_use", "table.concat(t, ',')\n"));
+    assert!(fires("must_use", "tostring(x)\n"));
+}
+
+#[test]
+fn using_the_result_is_the_whole_point_and_is_quiet() {
+    assert!(!fires("must_use", "local s = string.format('%d', 1)\nprint(s)\n"));
+}
+
+/// A call with side effects is not on the list and must not be guessed at
+#[test]
+fn a_call_that_might_do_something_is_left_alone() {
+    assert!(!fires("must_use", "table.insert(t, 1)\n"));
+    assert!(!fires("must_use", "print('hi')\n"));
+}
+
+/// A local named string is somebody's own table
+#[test]
+fn a_shadowed_standard_table_is_not_assumed_to_be_the_real_one() {
+    assert!(!fires(
+        "must_use",
+        "local string = myOwnThing\nstring.format('%d', 1)\n"
+    ));
+}
+
+#[test]
+fn deprecated_catches_the_replaced_roblox_globals() {
+    assert!(fires("deprecated", "wait(1)\n"));
+    assert!(fires("deprecated", "spawn(f)\n"));
+    assert!(fires("deprecated", "local n = table.getn(t)\nprint(n)\n"));
+}
+
+#[test]
+fn the_replacement_is_not_itself_deprecated() {
+    assert!(!fires("deprecated", "task.wait(1)\n"));
+}
+
+#[test]
+fn deprecated_catches_the_replaced_methods() {
+    assert!(fires("deprecated", "part:Remove()\n"));
+    assert!(fires("deprecated", "local c = part:children()\nprint(c)\n"));
+}
+
+#[test]
+fn a_project_can_deprecate_its_own_functions() {
+    let cfg = opts("deprecated", "additional = { oldHelper = \"newHelper\" }");
+
+    assert!(fired("oldHelper()\n", &cfg).iter().any(|n| n == "deprecated"));
+}
+
+#[test]
+fn restricted_module_paths_is_quiet_until_a_project_fills_it_in() {
+    assert!(!fires("restricted_module_paths", "local m = require('@server/secret')\nprint(m)\n"));
+
+    let cfg = opts(
+        "restricted_module_paths",
+        "paths = { \"@server/secret\" = \"shared code cannot reach the server\" }",
+    );
+
+    let out = fired("local m = require('@server/secret')\nprint(m)\n", &cfg);
+
+    assert!(out.iter().any(|n| n == "restricted_module_paths"), "{out:?}");
+}
+
+#[test]
+fn high_cyclomatic_complexity_is_off_until_a_project_sets_a_limit() {
+    let src = "local function f(a, b)\n\tif a and b then\n\t\treturn 1\n\telseif a or b then\n\t\treturn 2\n\tend\n\treturn 3\nend\nreturn f\n";
+
+    assert!(!fires("high_cyclomatic_complexity", src));
+
+    let mut cfg = opts("high_cyclomatic_complexity", "maximum_complexity = 2");
+    cfg.rules
+        .insert("high_cyclomatic_complexity".into(), Level::Warn);
+
+    assert!(
+        fired(src, &cfg)
+            .iter()
+            .any(|n| n == "high_cyclomatic_complexity")
+    );
+}
+
+#[test]
+fn a_simple_function_stays_under_any_sensible_limit() {
+    let mut cfg = opts("high_cyclomatic_complexity", "maximum_complexity = 5");
+    cfg.rules
+        .insert("high_cyclomatic_complexity".into(), Level::Warn);
+
+    let src = "local function f(a)\n\treturn a + 1\nend\nreturn f\n";
+
+    assert!(
+        !fired(src, &cfg)
+            .iter()
+            .any(|n| n == "high_cyclomatic_complexity")
+    );
+}
+
+#[test]
+fn manual_table_clone_catches_the_copy_loop() {
+    assert!(fires(
+        "manual_table_clone",
+        "local new = {}\nfor k, v in pairs(old) do\n\tnew[k] = v\nend\nreturn new\n"
+    ));
+}
+
+/// A loop that transforms while it copies is not a clone
+#[test]
+fn a_loop_that_does_more_than_copy_is_left_alone() {
+    assert!(!fires(
+        "manual_table_clone",
+        "local new = {}\nfor k, v in pairs(old) do\n\tnew[k] = v * 2\nend\nreturn new\n"
+    ));
+    assert!(!fires(
+        "manual_table_clone",
+        "local new = {}\nfor k, v in pairs(old) do\n\tnew[k] = v\n\tcount += 1\nend\nreturn new\n"
+    ));
+}
+
+#[test]
+fn mismatched_arg_count_catches_both_directions() {
+    assert!(fires(
+        "mismatched_arg_count",
+        "local function f(a, b)\n\treturn a\nend\nf(1)\n"
+    ));
+    assert!(fires(
+        "mismatched_arg_count",
+        "local function f(a)\n\treturn a\nend\nf(1, 2, 3)\n"
+    ));
+}
+
+#[test]
+fn a_call_with_the_right_count_is_fine() {
+    assert!(!fires(
+        "mismatched_arg_count",
+        "local function f(a, b)\n\treturn a + b\nend\nf(1, 2)\n"
+    ));
+}
+
+/// A vararg takes anything past the named parameters
+#[test]
+fn a_vararg_function_is_not_checked() {
+    assert!(!fires(
+        "mismatched_arg_count",
+        "local function f(a, ...)\n\treturn a\nend\nf(1, 2, 3)\n"
+    ));
+}
+
+/// A spread in last position can supply any number of values
+#[test]
+fn a_call_forwarding_a_call_is_not_counted() {
+    assert!(!fires(
+        "mismatched_arg_count",
+        "local function f(a, b)\n\treturn a\nend\nf(g())\n"
+    ));
+}
+
+/// A binding reassigned later may hold a different function by the call site
+#[test]
+fn a_reassigned_function_is_not_checked() {
+    assert!(!fires(
+        "mismatched_arg_count",
+        "local function f(a, b)\n\treturn a\nend\nf = other\nf(1)\n"
+    ));
+}
+
+// --- roblox ----------------------------------------------------------------
+
+#[test]
+fn color3_new_over_one_is_caught() {
+    assert!(fires("roblox_incorrect_color3_new_bounds", "local c = Color3.new(255, 0, 0)\nprint(c)\n"));
+}
+
+#[test]
+fn color3_new_on_the_right_scale_is_fine() {
+    assert!(!fires("roblox_incorrect_color3_new_bounds", "local c = Color3.new(1, 0, 0)\nprint(c)\n"));
+    assert!(!fires("roblox_incorrect_color3_new_bounds", "local c = Color3.fromRGB(255, 0, 0)\nprint(c)\n"));
+}
+
+#[test]
+fn udim2_new_with_two_arguments_is_caught() {
+    assert!(fires("roblox_suspicious_udim2_new", "local u = UDim2.new(0.5, 0.5)\nprint(u)\n"));
+}
+
+#[test]
+fn udim2_new_with_four_arguments_is_the_real_signature() {
+    assert!(!fires("roblox_suspicious_udim2_new", "local u = UDim2.new(0.5, 10, 0.5, 10)\nprint(u)\n"));
+}
+
+#[test]
+fn a_udim2_that_is_really_fromscale_or_fromoffset_is_named() {
+    assert!(fires(
+        "roblox_manual_fromscale_or_fromoffset",
+        "local u = UDim2.new(0.5, 0, 0.5, 0)\nprint(u)\n"
+    ));
+    assert!(fires(
+        "roblox_manual_fromscale_or_fromoffset",
+        "local u = UDim2.new(0, 10, 0, 20)\nprint(u)\n"
+    ));
+}
+
+#[test]
+fn a_udim2_using_both_halves_is_left_alone() {
+    assert!(!fires(
+        "roblox_manual_fromscale_or_fromoffset",
+        "local u = UDim2.new(0.5, 10, 0.5, 20)\nprint(u)\n"
+    ));
+}
+
+/// All zeros is UDim2.new(), which needs no advice
+#[test]
+fn an_all_zero_udim2_is_not_reported() {
+    assert!(!fires(
+        "roblox_manual_fromscale_or_fromoffset",
+        "local u = UDim2.new(0, 0, 0, 0)\nprint(u)\n"
+    ));
+}
+
+/// These names mean nothing outside Roblox
+#[test]
+fn the_roblox_lints_are_silent_under_plain_luau() {
+    let mut cfg = LintConfig::default();
+    cfg.std = larvae::lint::config::StdLib::Luau;
+    cfg.globals.push("Color3".to_string());
+
+    assert!(
+        !fired("local c = Color3.new(255, 0, 0)\nprint(c)\n", &cfg)
+            .iter()
+            .any(|n| n.starts_with("roblox_"))
+    );
 }

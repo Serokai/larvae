@@ -108,8 +108,14 @@ fn explain_lint(name: &str) -> Result<ExitCode> {
     ui::print_error(&format!("no lint called {name}"));
     println!("\navailable lints:");
 
-    for lint in registry() {
-        println!("  {:<28} {}", lint.name(), lint.about());
+    // sorted for looking one up, and sized so the second column stays a column
+    let mut all: Vec<_> = registry().iter().collect();
+    all.sort_by_key(|l| l.name());
+
+    let width = all.iter().map(|l| l.name().len()).max().unwrap_or(0);
+
+    for lint in all {
+        println!("  {:<width$}  {}", lint.name(), lint.about());
     }
 
     Ok(ExitCode::FAILURE)

@@ -80,6 +80,8 @@ pub struct Names<'a> {
     pub global_writes: Vec<u32>,
     /// Binding index for each declaration token, for a lint given a token
     pub by_token: HashMap<u32, usize>,
+    /// Binding index for each read token, so a call site can find its callee
+    pub read_of: HashMap<u32, usize>,
 }
 
 pub fn resolve<'a>(src: &'a str, toks: &'a [Tok], chunk: &'a Chunk) -> Names<'a> {
@@ -159,7 +161,10 @@ impl<'a> Binder<'a> {
         let name = self.name_of(span);
 
         match self.lookup(name) {
-            Some(i) => self.out.bindings[i].reads.push(span.start),
+            Some(i) => {
+                self.out.bindings[i].reads.push(span.start);
+                self.out.read_of.insert(span.start, i);
+            }
 
             None => self.out.undefined.push(span.start),
         }
