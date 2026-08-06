@@ -954,8 +954,8 @@ impl<'a> Emitter<'a> {
                 method,
                 type_args,
                 args,
-                ..
-            } => self.call(func, *method, *type_args, args),
+                span,
+            } => self.call(func, *method, *type_args, args, *span),
 
             Expr::IfElse {
                 branches,
@@ -1051,6 +1051,7 @@ impl<'a> Emitter<'a> {
         method: Option<TokSpan>,
         type_args: Option<TokSpan>,
         args: &CallArgs,
+        span: TokSpan,
     ) -> Doc<'a> {
         let mut parts = vec![self.expr(func)];
 
@@ -1067,12 +1068,12 @@ impl<'a> Emitter<'a> {
             parts.push(Doc::text(" "));
         }
 
-        parts.push(self.call_args(args));
+        parts.push(self.call_args(args, span));
 
         Doc::concat(parts)
     }
 
-    fn call_args(&self, args: &CallArgs) -> Doc<'a> {
+    fn call_args(&self, args: &CallArgs, span: TokSpan) -> Doc<'a> {
         /*
         The option applies to the argument, not to the syntax the author
         happened to reach for, so `f("x")` and `f "x"` are the same call and
@@ -1121,6 +1122,15 @@ impl<'a> Emitter<'a> {
             unreachable!("the bare forms both hold exactly one argument")
         };
 
+        /*
+        A comment among the arguments forces the call to expand, for the same
+        reason a table does: a line comment flat inside the parentheses would
+        comment out the closing one and everything after it.
+        */
+        if let Some(doc) = self.commented_args(list, span) {
+            return doc;
+        }
+
         if list.is_empty() {
             return Doc::text("()");
         }
@@ -1140,6 +1150,89 @@ impl<'a> Emitter<'a> {
         );
 
         self.bracketed("(", ")", inner, self.cfg.space_inside_parens)
+    }
+
+    /*
+    An argument list holding a comment, one argument per line with its comments
+    placed. `None` when there are none, which is almost always.
+
+    Luau rejects a trailing comma in a call, so the commas go between rather
+    than after, which is the one way this differs from the table case.
+    */
+    fn commented_args(&self, list: &[Expr], span: TokSpan) -> Option<Doc<'a>> {
+        let close = span.end - 1;
+        let open = self.matching_open_paren(close)?;
+        let (lo, hi) = (self.tok_end(open), self.tok_start(close));
+
+        if self.trivia.between(lo, hi).is_empty() {
+            return None;
+        }
+
+        let mut parts = Vec::with_capacity(list.len() * 5 + 2);
+        let mut cursor = lo;
+
+        for (i, arg) in list.iter().enumerate() {
+            let att = self.trivia.split(cursor, self.tok_start(arg.span().start));
+
+            parts.push(self.trailing_doc(att.trailing));
+
+            for c in att.leading {
+                parts.push(Doc::Hard);
+                parts.push(self.comment_doc(*c));
+            }
+
+            parts.push(Doc::Hard);
+            parts.push(self.expr(arg));
+
+            if i + 1 < list.len() {
+                parts.push(Doc::text(","));
+            }
+
+            cursor = self.tok_end(arg.span().end - 1);
+        }
+
+        // and whatever sits between the last argument and the closing paren
+        let att = self.trivia.split(cursor, hi);
+        parts.push(self.trailing_doc(att.trailing));
+
+        for c in att.leading {
+            parts.push(Doc::Hard);
+            parts.push(self.comment_doc(*c));
+        }
+
+        Some(Doc::concat([
+            Doc::text("("),
+            Doc::indent(Doc::concat(parts)),
+            Doc::Hard,
+            Doc::text(")"),
+        ]))
+    }
+
+    /// The `(` opening the `)` at this token index, counting depth backwards
+    fn matching_open_paren(&self, close: u32) -> Option<u32> {
+        if self.tok(close) != ")" {
+            return None;
+        }
+
+        let mut depth = 0usize;
+
+        for i in (0..=close).rev() {
+            match self.tok(i) {
+                ")" => depth += 1,
+
+                "(" => {
+                    depth -= 1;
+
+                    if depth == 0 {
+                        return Some(i);
+                    }
+                }
+
+                _ => {}
+            }
+        }
+
+        None
     }
 
     /*

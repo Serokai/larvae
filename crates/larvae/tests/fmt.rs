@@ -729,18 +729,74 @@ fn a_comment_inside_a_parameter_list_is_kept() {
     assert!(fmt(src).contains("--[[comment here]]"));
 }
 
+#[test]
+fn a_comment_among_call_arguments_is_kept() {
+    let src = "f(\n\t-- why\n\tx\n)\n";
+
+    assert_eq!(fmt(src), src);
+}
+
+#[test]
+fn a_comment_after_a_call_argument_is_kept() {
+    let src = "g(\n\ta, -- first\n\tb -- second\n)\n";
+
+    assert_eq!(fmt(src), src);
+}
+
+#[test]
+fn call_argument_comments_survive_a_second_pass() {
+    let src = "f(\n\t-- why\n\tx\n)\n";
+
+    assert_eq!(fmt(&fmt(src)), fmt(src));
+}
+
+/// A call with no comments is laid out by width, exactly as before
+#[test]
+fn placing_argument_comments_does_not_change_a_call_without_any() {
+    assert_eq!(fmt("f(\n\ta,\n\tb\n)\n"), "f(a, b)\n");
+}
+
 /*
-The backstop. Every position the emitter cannot place a comment is caught here
-rather than silently dropping it, because `larvae fmt` writes to disk and
-deleting somebody's comment is worse than declining to format their file.
+The backstop, which is what makes losing a comment impossible rather than
+merely unlikely. `larvae fmt` writes to disk, so a position the emitter cannot
+place is refused rather than silently dropped, and every position it catches is
+one the emitter should learn.
+
+Asserted here over every construct in SAMPLES with a comment threaded into it,
+so a future emitter change that stops placing one is caught as a test failure
+rather than by somebody losing a comment.
 */
 #[test]
-fn output_that_would_lose_a_comment_is_refused() {
-    let lost = format(
-        "f(\n\t-- why\n\tx\n)\n",
-        &FmtConfig::default(),
-    );
+fn a_comment_is_placed_or_the_file_is_refused_never_dropped() {
+    let with_comments = [
+        "local a = 1 -- trailing\n",
+        "-- leading\nlocal a = 1\n",
+        "do -- on the keyword\n\tx()\nend\n",
+        "do\n\tx()\n\t-- last\nend\n",
+        "local t = {\n\t-- field\n\ta = 1,\n}\n",
+        "f(\n\t-- argument\n\tx\n)\n",
+        "local function g(a --[[ param ]])\nend\n",
+        "local x: number -- annotated\n",
+        "--[[\n\tlong\n]]\nlocal a = 1\n",
+    ];
 
-    assert!(lost.is_err(), "a comment in an argument list is not placed yet");
-    assert!(format!("{:#}", lost.unwrap_err()).contains("-- why"));
+    for src in with_comments {
+        let before = larvae::syntax::lexer::lex(src).expect("lexes");
+
+        match format(src, &FmtConfig::default()) {
+            Ok(out) => {
+                for (start, end) in &before.comments {
+                    let text = src[*start as usize..*end as usize].trim_end();
+
+                    assert!(out.contains(text), "{src:?} silently lost {text:?}");
+                }
+            }
+
+            // refusing is the acceptable outcome, dropping is not
+            Err(e) => assert!(
+                format!("{e:#}").contains("would drop the comment"),
+                "{src:?} failed for an unrelated reason, {e:#}"
+            ),
+        }
+    }
 }
