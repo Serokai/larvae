@@ -19,7 +19,9 @@ use std::borrow::Cow;
 use crate::syntax::ast::*;
 use crate::syntax::lexer::{Tok, TokKind};
 
-use super::config::{CallParens, CollapseSimpleStatement, FmtConfig, QuoteStyle};
+use super::config::{
+    CallParens, CollapseSimpleStatement, FmtConfig, QuoteStyle, RequireGrouping,
+};
 use super::doc::Doc;
 use super::trivia::{Attached, Comment, Trivia};
 
@@ -147,27 +149,6 @@ impl<'a> Emitter<'a> {
         Doc::text(c.text(self.src))
     }
 
-    /*
-    Leading comments, each on its own line.
-
-    The blank line before them, if the author left one, comes from whatever
-    separates this statement from the previous one, so it is not repeated here.
-    */
-    fn leading(&self, att: &Attached<'_>) -> Doc<'a> {
-        if att.leading.is_empty() {
-            return Doc::Nil;
-        }
-
-        let mut parts = Vec::with_capacity(att.leading.len() * 2);
-
-        for c in att.leading {
-            parts.push(self.comment_doc(*c));
-            parts.push(Doc::Hard);
-        }
-
-        Doc::concat(parts)
-    }
-
     fn trailing(&self, att: &Attached<'_>) -> Doc<'a> {
         match att.trailing {
             Some(c) => Doc::concat([Doc::text(" "), self.comment_doc(c)]),
@@ -205,9 +186,73 @@ impl<'a> Emitter<'a> {
     line, and one blank line wherever they left one or more.
     */
     fn block_body(&self, block: &Block) -> Doc<'a> {
-        let mut parts: Vec<Doc<'a>> = Vec::with_capacity(block.stmts.len() * 2);
+        let (mut pieces, tail) = self.pieces(block);
+
+        if self.cfg.sort_requires.enabled {
+            sort_requires(&mut pieces, self.cfg.sort_requires.grouping);
+        }
+
+        let mut parts: Vec<Doc<'a>> = Vec::with_capacity(pieces.len() * 3 + 2);
+
+        for (i, piece) in pieces.iter().enumerate() {
+            if i > 0 {
+                parts.push(self.trailing_doc(pieces[i - 1].trailing));
+
+                // a blank line is the separator, not something added to it
+                parts.push(if piece.blank_before {
+                    Doc::Blank
+                } else {
+                    Doc::Hard
+                });
+            }
+
+            for c in &piece.leading {
+                parts.push(self.comment_doc(*c));
+                parts.push(Doc::Hard);
+            }
+
+            parts.push(self.stmt(piece.stmt));
+        }
+
+        if let Some(last) = pieces.last() {
+            parts.push(self.trailing_doc(last.trailing));
+        }
+
+        // comments between the last statement and whatever closes the block
+        if !tail.leading.is_empty() {
+            if !pieces.is_empty() {
+                parts.push(if tail.blank_before {
+                    Doc::Blank
+                } else {
+                    Doc::Hard
+                });
+            }
+
+            for (i, c) in tail.leading.iter().enumerate() {
+                if i > 0 {
+                    parts.push(Doc::Hard);
+                }
+
+                parts.push(self.comment_doc(*c));
+            }
+        }
+
+        Doc::concat(parts)
+    }
+
+    /*
+    A block split into one piece per statement, each holding the trivia that
+    belongs to it.
+
+    Emitting straight from the statement list would be shorter, and was, until
+    `sort_requires` needed to move statements. A comment is found by its
+    position in the source, so once a statement moves, a comment left behind
+    would attach to whatever landed in its place. Binding the trivia to the
+    statement first means reordering carries it along.
+    */
+    fn pieces<'s>(&self, block: &'s Block) -> (Vec<Piece<'s, 'a>>, Tail) {
+        let mut pieces: Vec<Piece<'_, 'a>> = Vec::with_capacity(block.stmts.len());
         let mut cursor = self.block_lo(block);
-        let mut first = true;
 
         for stmt in &block.stmts {
             /*
@@ -225,53 +270,95 @@ impl<'a> Emitter<'a> {
             let start = self.tok_start(span.start);
             let att = self.trivia.split(cursor, start);
 
-            if !first {
-                parts.push(self.trailing(&att));
-
-                // a blank line is the separator, not something added to it
-                let gap = if att.leading.is_empty() {
-                    self.trivia.blank_before_code(cursor, start)
-                } else {
-                    att.blank_before_leading
-                };
-
-                parts.push(if gap { Doc::Blank } else { Doc::Hard });
+            // this gap's trailing comment sits on the line above, not this one
+            if let Some(prev) = pieces.last_mut() {
+                prev.trailing = att.trailing;
             }
 
-            parts.push(self.leading(&att));
-            parts.push(self.stmt(stmt));
+            let blank_before = if att.leading.is_empty() {
+                self.trivia.blank_before_code(cursor, start)
+            } else {
+                att.blank_before_leading
+            };
+
+            pieces.push(Piece {
+                stmt,
+                blank_before,
+                leading: att.leading.to_vec(),
+                trailing: None,
+                key: self.require_path(stmt),
+            });
 
             cursor = self.tok_end(span.end - 1);
-            first = false;
         }
 
-        // anything left between the last statement and the closing keyword
-        let hi = self.block_hi(block);
-        let att = self.trivia.split(cursor, hi);
+        let att = self.trivia.split(cursor, self.block_hi(block));
 
-        if !first {
-            parts.push(self.trailing(&att));
+        if let Some(prev) = pieces.last_mut() {
+            prev.trailing = att.trailing;
         }
 
-        if !att.leading.is_empty() {
-            if !first {
-                parts.push(if att.blank_before_leading {
-                    Doc::Blank
-                } else {
-                    Doc::Hard
-                });
-            }
+        let tail = Tail {
+            leading: att.leading.to_vec(),
+            blank_before: att.blank_before_leading,
+        };
 
-            for (i, c) in att.leading.iter().enumerate() {
-                if i > 0 {
-                    parts.push(Doc::Hard);
-                }
+        (pieces, tail)
+    }
 
-                parts.push(self.comment_doc(*c));
-            }
+    fn trailing_doc(&self, comment: Option<Comment>) -> Doc<'a> {
+        match comment {
+            Some(c) => Doc::concat([Doc::text(" "), self.comment_doc(c)]),
+
+            None => Doc::Nil,
+        }
+    }
+
+    /*
+    The path of a `local name = require("path")`, and nothing else.
+
+    Deliberately narrow. Anything computed, `require(base .. name)`, or bound
+    to more than one name, is not something whose order can be assumed not to
+    matter, so it is left where the author put it and breaks the run around it.
+    */
+    fn require_path(&self, stmt: &Stmt) -> Option<&'a str> {
+        let Stmt::Local(local) = stmt else {
+            return None;
+        };
+
+        if local.names.len() != 1 || local.values.len() != 1 {
+            return None;
         }
 
-        Doc::concat(parts)
+        let Expr::Call { func, method, args, .. } = &local.values[0] else {
+            return None;
+        };
+
+        if method.is_some() || !matches!(func.as_ref(), Expr::Name(n) if self.one(*n) == "require") {
+            return None;
+        }
+
+        let span = match args {
+            CallArgs::Str(s) => *s,
+
+            CallArgs::Paren(list) if list.len() == 1 => match &list[0] {
+                Expr::String(s) => *s,
+
+                _ => return None,
+            },
+
+            _ => return None,
+        };
+
+        let TokKind::Str {
+            inner_start,
+            inner_end,
+        } = self.toks[span.start as usize].kind
+        else {
+            return None;
+        };
+
+        Some(&self.src[inner_start as usize..inner_end as usize])
     }
 
     /*
@@ -1065,6 +1152,119 @@ fn is_simple(stmt: &Stmt) -> bool {
 enum Single {
     Str,
     Table,
+}
+
+/// One statement with the trivia bound to it, so reordering carries both
+struct Piece<'s, 'a> {
+    stmt: &'s Stmt,
+    /// A blank line before it, as the author left one
+    blank_before: bool,
+    /// Comments on their own lines above it
+    leading: Vec<Comment>,
+    /// A comment after it on the same line
+    trailing: Option<Comment>,
+    /// The require path, when this is a plain `local x = require("path")`
+    key: Option<&'a str>,
+}
+
+/// Comments after the last statement, which belong to no statement
+struct Tail {
+    leading: Vec<Comment>,
+    blank_before: bool,
+}
+
+/// Where a require path points, which is what `by-kind` groups on
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+enum PathKind {
+    /// `@pkg/thing`, a name the project configured
+    Alias,
+    /// `game/ReplicatedStorage/thing`, rooted somewhere known
+    Absolute,
+    /// `./sibling`, resolved against this file
+    Relative,
+}
+
+fn path_kind(path: &str) -> PathKind {
+    if path.starts_with('@') {
+        return PathKind::Alias;
+    }
+
+    if path.starts_with("./") || path.starts_with("../") {
+        return PathKind::Relative;
+    }
+
+    PathKind::Absolute
+}
+
+/*
+Sort each run of adjacent requires.
+
+A run ends at anything that is not a plain require, and at a blank line, which
+is the part worth saying: an author who separated two groups of requires with a
+blank line has already grouped them, and shuffling across that line would
+discard a decision rather than tidy one. So each run is sorted within itself
+and never merged with its neighbour.
+
+Nothing here moves a require past a statement that is not one, so a module
+whose requires must run in a particular order relative to other code keeps it.
+Order between two adjacent requires is what this assumes does not matter, which
+is why the whole thing is off unless asked for.
+*/
+fn sort_requires(pieces: &mut [Piece<'_, '_>], grouping: RequireGrouping) {
+    let mut start = 0;
+
+    while start < pieces.len() {
+        if pieces[start].key.is_none() {
+            start += 1;
+
+            continue;
+        }
+
+        let mut end = start + 1;
+
+        while end < pieces.len() && pieces[end].key.is_some() && !pieces[end].blank_before {
+            end += 1;
+        }
+
+        if end - start > 1 {
+            sort_run(&mut pieces[start..end], grouping);
+        }
+
+        start = end;
+    }
+}
+
+fn sort_run(run: &mut [Piece<'_, '_>], grouping: RequireGrouping) {
+    // the gap before the run belongs to the run's position, not to its first member
+    let opening_gap = run[0].blank_before;
+
+    run.sort_by(|a, b| {
+        let (a_key, b_key) = (a.key.unwrap_or(""), b.key.unwrap_or(""));
+
+        match grouping {
+            RequireGrouping::Flat => a_key.cmp(b_key),
+
+            RequireGrouping::ByKind => path_kind(a_key)
+                .cmp(&path_kind(b_key))
+                .then_with(|| a_key.cmp(b_key)),
+        }
+    });
+
+    for piece in run.iter_mut() {
+        piece.blank_before = false;
+    }
+
+    if grouping == RequireGrouping::ByKind {
+        for i in 1..run.len() {
+            let (prev, this) = (run[i - 1].key.unwrap_or(""), run[i].key.unwrap_or(""));
+
+            if path_kind(prev) != path_kind(this) {
+                run[i].blank_before = true;
+            }
+        }
+    }
+
+    run[0].blank_before = opening_gap;
 }
 
 /*

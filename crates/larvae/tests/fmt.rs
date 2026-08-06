@@ -495,3 +495,121 @@ fn attributes_stay_above_their_function() {
 
     assert_eq!(fmt(src), src);
 }
+
+// --- sort_requires ---------------------------------------------------------
+
+use larvae::fmt::config::{RequireGrouping, SortRequires};
+
+fn sorting(grouping: RequireGrouping) -> FmtConfig {
+    FmtConfig {
+        sort_requires: SortRequires {
+            enabled: true,
+            grouping,
+        },
+        ..Default::default()
+    }
+}
+
+#[test]
+fn requires_are_left_alone_unless_asked() {
+    let src = "local b = require(\"b\")\nlocal a = require(\"a\")\n";
+
+    assert_eq!(fmt(src), src);
+}
+
+#[test]
+fn a_run_of_requires_sorts() {
+    let out = fmt_with(
+        "local c = require(\"c\")\nlocal a = require(\"a\")\nlocal b = require(\"b\")\n",
+        sorting(RequireGrouping::Flat),
+    );
+
+    assert_eq!(
+        out,
+        "local a = require(\"a\")\nlocal b = require(\"b\")\nlocal c = require(\"c\")\n"
+    );
+}
+
+/// Sorting must never move a require past code that is not one
+#[test]
+fn a_statement_between_two_requires_breaks_the_run() {
+    let src = "local c = require(\"c\")\nsideEffect()\nlocal a = require(\"a\")\n";
+
+    assert_eq!(fmt_with(src, sorting(RequireGrouping::Flat)), src);
+}
+
+/// A blank line is the author grouping them, and grouping is a decision
+#[test]
+fn a_blank_line_separates_two_runs_that_sort_independently() {
+    let out = fmt_with(
+        "local d = require(\"d\")\nlocal c = require(\"c\")\n\nlocal b = require(\"b\")\nlocal a = require(\"a\")\n",
+        sorting(RequireGrouping::Flat),
+    );
+
+    assert_eq!(
+        out,
+        "local c = require(\"c\")\nlocal d = require(\"d\")\n\nlocal a = require(\"a\")\nlocal b = require(\"b\")\n"
+    );
+}
+
+/// The reason statements had to stop being emitted straight from the list
+#[test]
+fn a_comment_moves_with_the_require_it_describes() {
+    let out = fmt_with(
+        "-- about c\nlocal c = require(\"c\")\n-- about a\nlocal a = require(\"a\")\n",
+        sorting(RequireGrouping::Flat),
+    );
+
+    assert_eq!(
+        out,
+        "-- about a\nlocal a = require(\"a\")\n-- about c\nlocal c = require(\"c\")\n"
+    );
+}
+
+#[test]
+fn a_trailing_comment_moves_with_its_require_too() {
+    let out = fmt_with(
+        "local c = require(\"c\") -- see c\nlocal a = require(\"a\") -- see a\n",
+        sorting(RequireGrouping::Flat),
+    );
+
+    assert_eq!(
+        out,
+        "local a = require(\"a\") -- see a\nlocal c = require(\"c\") -- see c\n"
+    );
+}
+
+#[test]
+fn by_kind_groups_aliases_then_absolute_then_relative() {
+    let out = fmt_with(
+        "local r = require(\"./sibling\")\nlocal g = require(\"game/Thing\")\nlocal p = require(\"@pkg/signal\")\n",
+        sorting(RequireGrouping::ByKind),
+    );
+
+    assert_eq!(
+        out,
+        "local p = require(\"@pkg/signal\")\n\nlocal g = require(\"game/Thing\")\n\nlocal r = require(\"./sibling\")\n"
+    );
+}
+
+/// A computed require has no order that can be assumed safe to change
+#[test]
+fn a_computed_require_is_not_sorted_and_breaks_the_run() {
+    let src = "local c = require(\"c\")\nlocal x = require(base .. name)\nlocal a = require(\"a\")\n";
+
+    assert_eq!(fmt_with(src, sorting(RequireGrouping::Flat)), src);
+}
+
+#[test]
+fn sorting_is_idempotent_and_keeps_every_comment() {
+    let src = "-- c\nlocal c = require(\"c\") -- t\nlocal a = require(\"a\")\n\nlocal b = require(\"@x/b\")\n";
+    let cfg = sorting(RequireGrouping::ByKind);
+    let once = fmt_with(src, cfg.clone());
+    let twice = fmt_with(&once, cfg);
+
+    assert_eq!(once, twice, "unstable");
+
+    for text in ["-- c", "-- t"] {
+        assert!(once.contains(text), "lost {text}, got {once}");
+    }
+}
