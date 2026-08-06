@@ -49,6 +49,21 @@ enum Command {
         profile: Option<String>,
     },
 
+    /// Format Luau source in place
+    Fmt {
+        /// Files or directories, defaults to the project's input
+        paths: Vec<PathBuf>,
+        /// Write nothing, exit non zero if anything would change
+        #[arg(long)]
+        check: bool,
+        /// Read one file from stdin and write the result to stdout
+        #[arg(long, conflicts_with_all = ["paths", "check"])]
+        stdin: bool,
+        /// Path to larvae.toml (defaults to ./larvae.toml when present)
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+
     /// Create a starter larvae.toml for this project
     Init,
 
@@ -133,6 +148,13 @@ fn run() -> Result<ExitCode> {
         } => commands::process::run(&root, config, profile, watch),
 
         Command::Check { config, profile } => commands::check::run(&root, config, profile),
+
+        Command::Fmt {
+            paths,
+            check,
+            stdin,
+            config,
+        } => commands::fmt::run(&root, paths, check, stdin, config),
 
         Command::Init => commands::init::run(&root),
 

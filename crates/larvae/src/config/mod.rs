@@ -43,6 +43,10 @@ pub struct Config {
     #[serde(default)]
     pub defines: Option<toml::Value>,
 
+    /// Formatter settings, laid over any stylua.toml the project still has
+    #[serde(default)]
+    pub fmt: Option<toml::Value>,
+
     /// Extensions the project asked for, see [`worms`]
     #[serde(default)]
     pub worms: Option<toml::Value>,
