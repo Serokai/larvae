@@ -79,6 +79,9 @@ enum Command {
         config: Option<PathBuf>,
     },
 
+    /// Serve diagnostics and formatting to an editor over stdio
+    Lsp,
+
     /// Create a starter larvae.toml for this project
     Init,
 
@@ -177,6 +180,12 @@ fn run() -> Result<ExitCode> {
             explain,
             config,
         } => commands::lint::run(&root, paths, stdin, explain, config),
+
+        Command::Lsp => {
+            crate::lsp::run()?;
+
+            Ok(ExitCode::SUCCESS)
+        }
 
         Command::Init => commands::init::run(&root),
 

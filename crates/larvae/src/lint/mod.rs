@@ -51,19 +51,28 @@ pub fn find(name: &str) -> Option<&'static dyn Lint> {
     registry().iter().copied().find(|l| l.name() == name)
 }
 
+/// A file that did not parse, so nothing could be said about it
+#[derive(Debug)]
+pub struct ParseFailure {
+    pub offset: usize,
+    pub message: String,
+}
+
 /*
-Lint one file.
+Run every enabled lint over one file, keeping the byte spans.
 
-Parse failures come back as a diagnostic rather than an error, because a lint
-run over a tree is expected to report on every file it was given and one file
-that does not compile should not end the run.
+The spans are why this is separate from [`lint`]. A terminal wants a line and
+column, an editor wants a range to underline, and turning a span into either is
+easy while turning a line and column back into a span is not.
 */
-pub fn lint(path: &Path, src: &str, cfg: &LintConfig) -> Result<Vec<Diag>, Diag> {
-    let lexed = lexer::lex(src)
-        .map_err(|e| Diag::error(path, format!("syntax error, {}", e.message)).at(src, e.offset))?;
+pub fn analyze(src: &str, cfg: &LintConfig) -> Result<Vec<Finding>, ParseFailure> {
+    let fail = |offset, message: String| ParseFailure {
+        offset,
+        message: format!("syntax error, {message}"),
+    };
 
-    let chunk = parser::parse(src, &lexed.toks)
-        .map_err(|e| Diag::error(path, format!("syntax error, {}", e.message)).at(src, e.offset))?;
+    let lexed = lexer::lex(src).map_err(|e| fail(e.offset, e.message))?;
+    let chunk = parser::parse(src, &lexed.toks).map_err(|e| fail(e.offset, e.message))?;
 
     let ctx = LintCtx::new(src, &lexed.toks, &lexed.comments, &chunk, cfg);
     let mut findings = Vec::new();
@@ -86,6 +95,20 @@ pub fn lint(path: &Path, src: &str, cfg: &LintConfig) -> Result<Vec<Diag>, Diag>
 
     findings.retain(|f| !ctx.suppressed(f));
     findings.sort_by_key(|f| (f.span.0, f.lint));
+
+    Ok(findings)
+}
+
+/*
+Lint one file, as diagnostics for a terminal.
+
+Parse failures come back as a diagnostic rather than an error, because a lint
+run over a tree is expected to report on every file it was given and one file
+that does not compile should not end the run.
+*/
+pub fn lint(path: &Path, src: &str, cfg: &LintConfig) -> Result<Vec<Diag>, Diag> {
+    let findings = analyze(src, cfg)
+        .map_err(|e| Diag::error(path, e.message).at(src, e.offset))?;
 
     Ok(findings
         .into_iter()

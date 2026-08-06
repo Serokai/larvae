@@ -6,6 +6,7 @@ pub mod config;
 pub mod diag;
 pub mod fmt;
 pub mod lint;
+pub mod lsp;
 pub mod net;
 pub mod pipeline;
 pub mod project;
