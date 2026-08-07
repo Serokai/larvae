@@ -1,6 +1,6 @@
 //! larvae.toml loading and validation, unknown keys hard error, planned keys error with their milestone
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
@@ -53,13 +53,13 @@ pub struct Config {
     #[serde(default)]
     pub lint: Option<toml::Value>,
 
-    /// Extensions the project asked for, see [`worms`]
+    /// Extensions the project asked for, and their settings, see [`worms`]
     #[serde(default)]
     pub worms: Option<toml::Value>,
 
-    /// Per worm settings, handed over untouched. We never read inside one.
+    // parsed so the error can say where it went, rather than "unknown key"
     #[serde(default)]
-    pub config: BTreeMap<String, toml::Value>,
+    config: Option<toml::Value>,
 
     // parsed but unimplemented, so the error can name the milestone
     #[serde(default)]
@@ -120,6 +120,23 @@ impl Config {
     }
 
     fn validate(&self) -> Result<()> {
+        /*
+        A worm's settings used to sit in a top level [config.<name>], one table
+        away from the [worms.<name>] entry naming the same worm. Everything
+        about one worm lives under one key now, so this says where it went
+        rather than calling it an unknown key.
+        */
+        if let Some(table) = &self.config {
+            let name = table
+                .as_table()
+                .and_then(|t| t.keys().next().cloned())
+                .unwrap_or_else(|| "<name>".to_string());
+
+            bail!(
+                "[config.{name}] moved, a worm's settings live with the worm now: write [worms.{name}.config]"
+            );
+        }
+
         let unimplemented: &[(&str, &Option<toml::Value>, &str)] = &[
             ("[bundle]", &self.bundle, "M3"),
             ("[minify]", &self.minify, "M4"),
@@ -317,6 +334,15 @@ mod tests {
     fn unknown_key_is_hard_error() {
         assert!(toml::from_str::<Config>("[procces]\ninput = \"x\"").is_err());
         assert!(toml::from_str::<Config>("[process]\ninpt = \"x\"").is_err());
+    }
+
+    /// The old spelling says where it went, an unknown key would not
+    #[test]
+    fn a_top_level_config_table_points_at_the_worm() {
+        let c: Config = toml::from_str("[config.xml]\npretty = true").unwrap();
+        let err = c.validate().unwrap_err().to_string();
+
+        assert!(err.contains("[worms.xml.config]"), "{err}");
     }
 
     #[test]

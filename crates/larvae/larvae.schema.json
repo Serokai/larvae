@@ -33,9 +33,6 @@
     "worms": {
       "$ref": "#/$defs/worms"
     },
-    "config": {
-      "$ref": "#/$defs/worm_config"
-    },
     "bundle": {
       "$ref": "#/$defs/bundle"
     },
@@ -1033,27 +1030,34 @@
       }
     },
     "worm_config": {
-      "description": "Per-worm settings, keyed by the name under [worms] and handed to that worm untouched. larvae never reads inside one.",
-      "type": "object",
-      "additionalProperties": {
-        "type": "object"
-      }
+      "description": "This worm's own settings, handed to it untouched at init. larvae never reads inside one, so whatever the worm documents goes here. A table of its own, so a key the worm calls `repo` cannot collide with the one saying where to fetch it from.",
+      "type": "object"
     },
     "worms": {
-      "description": "Worms, extensions loaded from a GitHub release. A worm is Luau source or a wasm32 module in a zip carrying a worm.toml. The key names the worm and its settings live under [config.<key>]. (M3)",
+      "description": "Worms, extensions loaded from a GitHub release. A worm is Luau source or a wasm32 module in a zip carrying a worm.toml. The key names the worm and has to match `name` in its worm.toml, since it is also what namespaces the worm's rules and its settings. (M3)",
       "type": "object",
       "additionalProperties": {
         "oneOf": [
           {
             "type": "string",
-            "description": "owner/repo@version, ex: \"luau-xml/worm@0.1.0\"."
+            "description": "owner/repo@version, ex: \"luau-xml/worm@0.1.0\". The short form, and what almost every worm uses."
           },
           {
             "type": "object",
             "additionalProperties": false,
-            "required": [
-              "repo",
-              "version"
+            "description": "Where the worm comes from, plus anything the project wants to say about it. Name repo and version, or path, never both.",
+            "oneOf": [
+              {
+                "required": [
+                  "repo",
+                  "version"
+                ]
+              },
+              {
+                "required": [
+                  "path"
+                ]
+              }
             ],
             "properties": {
               "repo": {
@@ -1066,7 +1070,38 @@
               },
               "asset": {
                 "type": "string",
-                "description": "Release asset to fetch. Defaults to <key>-worm.zip, then worm.zip."
+                "description": "Release asset to fetch. Defaults to <key>-worm.zip, then worm.zip. Means nothing with path, which is not a release."
+              },
+              "path": {
+                "type": "string",
+                "description": "A directory on disk instead of a release. Not how a worm ships, but how its author runs it before publishing."
+              },
+              "run_order": {
+                "description": "Where this worm's rules sit relative to larvae's own. \"before\" means larvae's rules see this worm's output. An explicit slot number wins over both this and what the worm declared.",
+                "anyOf": [
+                  {
+                    "enum": [
+                      "before",
+                      "after"
+                    ]
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ]
+              },
+              "rules": {
+                "type": "object",
+                "description": "Which of this worm's rules are on, by name. They live under the worm rather than in [rules] so a worm declaring const_requires cannot shadow the builtin.",
+                "additionalProperties": {
+                  "type": [
+                    "boolean",
+                    "object"
+                  ]
+                }
+              },
+              "config": {
+                "$ref": "#/$defs/worm_config"
               }
             }
           }

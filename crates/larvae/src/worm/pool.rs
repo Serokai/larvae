@@ -38,7 +38,7 @@ pub struct Spec {
     pub manifest: Manifest,
     /// The Luau source or wasm module, kept so a worker never touches the disk
     pub artifact: Vec<u8>,
-    /// `[config.<name>]`, untouched
+    /// `[worms.<name>.config]`, untouched
     pub config: toml::Value,
     /// Rules that are on, by name, with the value each resolved to
     pub rules: BTreeMap<String, toml::Value>,

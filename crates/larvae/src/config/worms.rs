@@ -2,8 +2,13 @@
 `[worms]`, where a project names the extensions it wants.
 
 The key is the worm's name, which has to match `name` in its `worm.toml`,
-because it is also what namespaces the worm's rules and what `[config.<key>]`
-attaches to. One identity rather than three that can drift.
+because it is also what namespaces the worm's rules and its settings. One
+identity rather than three that can drift.
+
+Everything about one worm sits under its own key: where it comes from, when it
+runs, which of its rules are on, and the settings it reads. The settings stay a
+table of their own rather than loose keys, so a worm calling something `repo`
+cannot collide with the key that says where to fetch it from.
 */
 
 use std::collections::BTreeMap;
@@ -26,6 +31,8 @@ pub struct Entry {
     otherwise be eaten by our typed config and never see it.
     */
     pub rules: BTreeMap<String, toml::Value>,
+    /// The worm's own settings, handed over untouched. We never read inside one.
+    pub config: toml::Value,
 }
 
 /// Where one worm comes from
@@ -87,6 +94,8 @@ struct Table {
     run_order: Option<Stage>,
     #[serde(default)]
     rules: BTreeMap<String, toml::Value>,
+    #[serde(default)]
+    config: Option<toml::Value>,
 }
 
 /// Every worm a project asked for, by name
@@ -120,11 +129,19 @@ impl Worms {
 }
 
 fn source_of(name: &str, raw: Raw) -> Result<Entry> {
-    let (run_order, rules) = match &raw {
-        Raw::Table(t) => (t.run_order, t.rules.clone()),
+    let (run_order, rules, config) = match &raw {
+        Raw::Table(t) => (
+            t.run_order,
+            t.rules.clone(),
+            t.config.clone().unwrap_or_else(empty_table),
+        ),
 
-        Raw::Pin(_) => (None, BTreeMap::new()),
+        Raw::Pin(_) => (None, BTreeMap::new(), empty_table()),
     };
+
+    if !config.is_table() {
+        bail!("worm `{name}`: config has to be a table, ex: [worms.{name}.config]");
+    }
 
     let source = match raw {
         Raw::Pin(pin) => parse_pin(name, &pin)?,
@@ -156,7 +173,12 @@ fn source_of(name: &str, raw: Raw) -> Result<Entry> {
         source,
         run_order,
         rules,
+        config,
     })
+}
+
+fn empty_table() -> toml::Value {
+    toml::Value::Table(toml::map::Map::new())
 }
 
 /// `owner/repo@version`, which is the form almost every worm uses
@@ -355,6 +377,68 @@ rules = { tidy = true, const_requires = false }
             w.0["mine"].rules["const_requires"],
             toml::Value::Boolean(false)
         );
+    }
+
+    /// Everything about one worm under one key, settings included
+    #[test]
+    fn settings_live_with_the_worm_that_reads_them() {
+        let w = worms(
+            r#"
+[mine]
+path = "x"
+
+[mine.config]
+pretty = true
+indent = 2
+"#,
+        )
+        .unwrap();
+
+        let config = w.0["mine"].config.as_table().unwrap();
+
+        assert_eq!(config["pretty"], toml::Value::Boolean(true));
+        assert_eq!(config["indent"], toml::Value::Integer(2));
+    }
+
+    /// A table of its own, so a worm's own `repo` key cannot collide with ours
+    #[test]
+    fn settings_are_kept_apart_from_the_source() {
+        let w = worms(
+            r#"
+[mine]
+repo = "a/b"
+version = "1.0.0"
+config = { repo = "something the worm means by it", version = 3 }
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            w.0["mine"].source,
+            Source::Release {
+                repo: "a/b".into(),
+                version: "1.0.0".into(),
+                asset: None,
+            }
+        );
+        assert_eq!(
+            w.0["mine"].config.as_table().unwrap()["version"],
+            toml::Value::Integer(3)
+        );
+    }
+
+    #[test]
+    fn a_worm_with_no_settings_gets_an_empty_table() {
+        let w = worms(r#"luaux = "luau-xml/worm@0.1.0""#).unwrap();
+
+        assert_eq!(w.0["luaux"].config, toml::Value::Table(Default::default()));
+    }
+
+    #[test]
+    fn settings_that_are_not_a_table_say_what_to_write() {
+        let err = worms("[mine]\npath = \"x\"\nconfig = 3\n").err().unwrap();
+
+        assert!(err.to_string().contains("[worms.mine.config]"), "{err}");
     }
 
     #[test]

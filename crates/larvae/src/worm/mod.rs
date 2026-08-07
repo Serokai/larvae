@@ -142,7 +142,7 @@ impl Worm {
             .any(|claim| claim.strip_prefix('.').is_some_and(|c| c == ext))
     }
 
-    /// Run the worm's front-end over one file, with `[config.<name>]` as TOML
+    /// Run the worm's front-end over one file, with `[worms.<name>.config]` as TOML
     pub fn transform(&mut self, source: &str, config: &str) -> Result<Outcome> {
         match &mut self.backend {
             Backend::Luau(worm) => worm.transform(source, config),

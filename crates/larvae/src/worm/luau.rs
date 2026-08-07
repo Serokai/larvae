@@ -198,7 +198,7 @@ impl LuauWorm {
         }
     }
 
-    /// Run the worm over one file, with its `[config.<name>]` table as TOML
+    /// Run the worm over one file, with its `[worms.<name>.config]` table as TOML
     pub fn transform(&mut self, source: &str, config: &str) -> Result<Outcome> {
         let Some(compile) = self.compile.clone() else {
             bail!("worm has no frontend");

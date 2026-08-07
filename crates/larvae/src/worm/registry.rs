@@ -23,7 +23,7 @@ pub struct Loaded {
     pub worm: Worm,
     /// Kept so a worker can build its own instance without touching the disk
     pub artifact: Vec<u8>,
-    /// `[config.<name>]`, untouched, handed over at init
+    /// `[worms.<name>.config]`, untouched, handed over at init
     pub config: toml::Value,
     /// Rules that are on, by name, with the value each resolved to
     pub rules: BTreeMap<String, toml::Value>,
@@ -39,7 +39,7 @@ impl Loaded {
 
     /*
     Where this worm's rules sit in the sequence. Highest wins: the user's word
-    in [config.<name>], then what the worm declared, then after larvae.
+    in [worms.<name>], then what the worm declared, then after larvae.
     */
 }
 
@@ -51,12 +51,7 @@ pub struct Registry {
 
 impl Registry {
     /// Load every worm the config named, relative to the project root
-    pub fn load(
-        root: &Path,
-        cache: &Path,
-        config: &WormsConfig,
-        per_worm: &BTreeMap<String, toml::Value>,
-    ) -> Result<Self> {
+    pub fn load(root: &Path, cache: &Path, config: &WormsConfig) -> Result<Self> {
         let mut worms = Vec::new();
 
         for (name, entry) in config.iter() {
@@ -78,9 +73,9 @@ impl Registry {
                 .with_context(|| format!("loading worm `{name}`"))?;
 
             /*
-            One identity. The key namespaces the worm's rules and is what
-            [config.<key>] attaches to, so a manifest disagreeing with it would
-            leave a user configuring something that never reads their settings.
+            One identity. The key namespaces the worm's rules and its settings,
+            so a manifest disagreeing with it would leave a user configuring
+            something that never reads what they wrote.
             */
             if worm.name() != name {
                 bail!(
@@ -94,7 +89,7 @@ impl Registry {
             worms.push(Loaded {
                 worm,
                 artifact,
-                config: per_worm.get(name).cloned().unwrap_or_else(empty_table),
+                config: entry.config.clone(),
                 rules: enabled,
                 run_order: entry.run_order,
             });
@@ -238,10 +233,6 @@ fn resolve_rules(
     Ok(out)
 }
 
-fn empty_table() -> toml::Value {
-    toml::Value::Table(toml::map::Map::new())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,7 +264,6 @@ mod tests {
             root.path(),
             &root.path().join(".larvae"),
             &config("echo = { path = \"w\" }"),
-            &BTreeMap::new(),
         )
         .unwrap();
 
@@ -294,7 +284,6 @@ mod tests {
             root.path(),
             &root.path().join(".larvae"),
             &config("expected = { path = \"w\" }"),
-            &BTreeMap::new(),
         )
         .err()
         .unwrap();
@@ -321,7 +310,6 @@ mod tests {
             root.path(),
             &root.path().join(".larvae"),
             &config("one = { path = \"a\" }\ntwo = { path = \"b\" }"),
-            &BTreeMap::new(),
         )
         .err()
         .unwrap();
@@ -351,7 +339,6 @@ mod tests {
             root.path(),
             &cache,
             &config("echo = \"someone/echo@0.1.0\""),
-            &BTreeMap::new(),
         )
         .unwrap();
 
@@ -372,7 +359,6 @@ mod tests {
             root.path(),
             &root.path().join(".larvae"),
             &config("r = { path = \"w\" }"),
-            &BTreeMap::new(),
         )
         .unwrap();
 
@@ -393,7 +379,6 @@ mod tests {
             root.path(),
             &root.path().join(".larvae"),
             &config("r = { path = \"w\", rules = { loud = true } }"),
-            &BTreeMap::new(),
         )
         .unwrap();
 
@@ -418,7 +403,6 @@ mod tests {
             root.path(),
             &root.path().join(".larvae"),
             &config("r = { path = \"w\", run_order = 1 }"),
-            &BTreeMap::new(),
         )
         .unwrap();
 
@@ -439,7 +423,6 @@ mod tests {
             root.path(),
             &root.path().join(".larvae"),
             &config("r = { path = \"w\" }"),
-            &BTreeMap::new(),
         )
         .unwrap();
 
@@ -463,7 +446,6 @@ mod tests {
             root.path(),
             &root.path().join(".larvae"),
             &config("echo = { path = \"w\" }"),
-            &BTreeMap::new(),
         )
         .unwrap();
 

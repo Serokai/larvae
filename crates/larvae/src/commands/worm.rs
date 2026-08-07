@@ -29,7 +29,7 @@ pub enum WormCommand {
         worm: PathBuf,
         /// File to pass through the worm
         file: PathBuf,
-        /// TOML handed to the worm as its [config.<name>] table
+        /// TOML handed to the worm as its [worms.<name>.config] table
         #[arg(long)]
         config: Option<PathBuf>,
         /// Write the result here instead of to stdout

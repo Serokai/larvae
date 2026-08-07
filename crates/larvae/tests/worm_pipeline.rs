@@ -764,7 +764,7 @@ return {
             root,
             "larvae.toml",
             &format!(
-                "[aliases]\npkg = \"@game/ReplicatedStorage/Packages\"\n\n[worms]\ntag = {{ path = \"worms/tag\" }}\n\n[config.tag]\nsuffix = \"{suffix}\"\n"
+                "[aliases]\npkg = \"@game/ReplicatedStorage/Packages\"\n\n[worms.tag]\npath = \"worms/tag\"\nconfig = {{ suffix = \"{suffix}\" }}\n"
             ),
         );
     };

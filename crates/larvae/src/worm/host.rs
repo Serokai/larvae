@@ -134,7 +134,7 @@ impl WasmWorm {
         })
     }
 
-    /// Run the worm over one file, with its `[config.<name>]` table as TOML
+    /// Run the worm over one file, with its `[worms.<name>.config]` table as TOML
     pub fn transform(&mut self, source: &str, config: &str) -> Result<Outcome> {
         let src = self.push(source.as_bytes())?;
         let cfg = self.push(config.as_bytes())?;

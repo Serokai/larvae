@@ -98,7 +98,6 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
                 &root,
                 &root.join(&config.process.cache_dir),
                 &named,
-                &config.config,
             )?
         }
 
