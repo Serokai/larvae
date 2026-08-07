@@ -55,13 +55,80 @@ pub fn run(root: &Path) -> Result<ExitCode> {
         }
     });
     template.push_str("output = \"dist\"\n\n[requires]\ntarget = \"roblox-string\"\n");
+    template.push_str(&fmt_section(root));
+    template.push_str(&lint_section(root));
 
     std::fs::write(&path, template)?;
     ui::print_success(&format!("Wrote {}", crate::ui::rel(&path)));
     report(&found);
+    report_existing(root);
     ensure_gitignore(root)?;
 
     Ok(ExitCode::SUCCESS)
+}
+
+/// The formatter and linter configs another tool may have left, read as they are
+const STYLUA: [&str; 2] = ["stylua.toml", ".stylua.toml"];
+const SELENE: [&str; 1] = ["selene.toml"];
+
+/*
+The formatter's defaults, spelled out rather than left implicit.
+
+Spelled out because the config is also where somebody finds out an option
+exists: nobody goes looking for `quote_style` in a file that never mentions it.
+Only the handful people actually reach for, since a wall of defaults is a wall
+nobody reads. The rest are in the schema, which `larvae self code` wires up.
+
+Nothing is written when the project already has a stylua.toml. These keys layer
+over that file, so writing the defaults here would quietly overrule settings the
+project already made.
+*/
+fn fmt_section(root: &Path) -> String {
+    match existing(root, &STYLUA) {
+        Some(name) => format!(
+            "\n# Formatting follows {name}, which larvae reads as it is.\n\
+             # A [fmt] table here would layer over it.\n"
+        ),
+
+        None => "\n[fmt]\n\
+             column_width = 120\n\
+             indent_type = \"tabs\"\n\
+             indent_width = 4\n\
+             quote_style = \"auto-prefer-double\"\n"
+            .to_string(),
+    }
+}
+
+/// The same for the linter, and for the same reasons
+fn lint_section(root: &Path) -> String {
+    match existing(root, &SELENE) {
+        Some(name) => format!(
+            "\n# Linting follows {name}, which larvae reads as it is.\n\
+             # A [lint] table here would layer over it.\n"
+        ),
+
+        None => "\n[lint]\n\
+             std = \"roblox\"\n\
+             \n[lint.rules]\n\
+             # Every lint keeps its own default until it is named here.\n\
+             # unused_variable = \"deny\"\n\
+             # multiple_statements = \"warn\"\n"
+            .to_string(),
+    }
+}
+
+/// The first of these files the project has, if any
+fn existing<'a>(root: &Path, names: &[&'a str]) -> Option<&'a str> {
+    names.iter().copied().find(|name| root.join(name).exists())
+}
+
+/// Another tool's config being picked up is worth saying out loud
+fn report_existing(root: &Path) {
+    for name in STYLUA.iter().chain(SELENE.iter()) {
+        if root.join(name).exists() {
+            eprintln!("  found {name}, larvae reads it as it is");
+        }
+    }
 }
 
 /// Say what was picked up, so nobody has to diff the file to find out
@@ -145,7 +212,59 @@ fn ignores(content: &str, entry: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::ignores;
+    use super::*;
+
+    /// What init writes has to be what larvae already does, or the first run
+    /// after `larvae init` formats differently than the one before it
+    #[test]
+    fn the_written_defaults_are_the_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("larvae.toml");
+
+        std::fs::write(
+            &path,
+            format!("{}{}", fmt_section(dir.path()), lint_section(dir.path())),
+        )
+        .unwrap();
+
+        let config = crate::config::Config::load(&path).unwrap();
+        let fmt = crate::fmt::FmtConfig::discover(dir.path(), config.fmt.as_ref()).unwrap();
+        let lint = crate::lint::LintConfig::discover(dir.path(), config.lint.as_ref()).unwrap();
+
+        fn value<T: serde::Serialize>(v: &T) -> toml::Value {
+            toml::Value::try_from(v).unwrap()
+        }
+
+        assert_eq!(value(&fmt), value(&crate::fmt::FmtConfig::default()));
+        assert_eq!(value(&lint), value(&crate::lint::LintConfig::default()));
+    }
+
+    /// A project that already formats with stylua must not have its settings
+    /// overruled by a file it just asked us to write
+    #[test]
+    fn another_tools_config_is_left_in_charge() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("stylua.toml"), "column_width = 60\n").unwrap();
+        std::fs::write(dir.path().join("selene.toml"), "std = \"luau\"\n").unwrap();
+
+        let path = dir.path().join("larvae.toml");
+        std::fs::write(
+            &path,
+            format!("{}{}", fmt_section(dir.path()), lint_section(dir.path())),
+        )
+        .unwrap();
+
+        let config = crate::config::Config::load(&path).unwrap();
+
+        assert!(config.fmt.is_none(), "[fmt] should not have been written");
+        assert!(config.lint.is_none(), "[lint] should not have been written");
+
+        let fmt = crate::fmt::FmtConfig::discover(dir.path(), config.fmt.as_ref()).unwrap();
+        let lint = crate::lint::LintConfig::discover(dir.path(), config.lint.as_ref()).unwrap();
+
+        assert_eq!(fmt.column_width, 60);
+        assert_eq!(lint.std, crate::lint::config::StdLib::Luau);
+    }
 
     #[test]
     fn gitignore_matching() {

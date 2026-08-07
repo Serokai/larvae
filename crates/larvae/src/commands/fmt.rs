@@ -20,7 +20,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use rayon::prelude::*;
 
-use crate::config::Config;
+use crate::config::{Config, Excludes};
 use crate::fmt::{FmtConfig, format};
 use crate::ui;
 
@@ -44,7 +44,7 @@ pub fn run(
         return from_stdin(&cfg);
     }
 
-    let files = collect(root, &paths)?;
+    let files = collect(root, &paths, &cfg.excludes(root)?)?;
 
     if files.is_empty() {
         ui::print_error("no Luau files found");
@@ -131,10 +131,21 @@ Which files to format.
 Explicit paths win, and a named file is formatted whatever it is called, since
 someone naming a file means it. Without paths the project's input directory is
 walked when there is a config, and the working directory otherwise.
+
+`exclude` applies to what a walk turns up, named directories included, and not
+to a file somebody named themselves. That is the same line: a walk is us
+guessing, a name is somebody telling us.
 */
-pub fn collect(root: &Path, paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+pub fn collect(root: &Path, paths: &[PathBuf], excludes: &Excludes) -> Result<Vec<PathBuf>> {
+    let walked = |dir: &Path| {
+        walk(dir)
+            .into_iter()
+            .filter(|p| !excludes.skips(p))
+            .collect::<Vec<_>>()
+    };
+
     if paths.is_empty() {
-        return Ok(default_roots(root).iter().flat_map(|d| walk(d)).collect());
+        return Ok(default_roots(root).iter().flat_map(|d| walked(d)).collect());
     }
 
     let mut out = Vec::new();
@@ -147,7 +158,7 @@ pub fn collect(root: &Path, paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
         };
 
         if path.is_dir() {
-            out.extend(walk(&path));
+            out.extend(walked(&path));
         } else if path.exists() {
             out.push(path);
         } else {

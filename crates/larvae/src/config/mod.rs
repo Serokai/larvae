@@ -6,6 +6,7 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+mod excludes;
 mod overrides;
 mod process;
 mod profile;
@@ -13,6 +14,7 @@ mod requires;
 mod rules;
 pub mod worms;
 
+pub use excludes::Excludes;
 pub use overrides::{Override, lookup as override_for, parse as parse_overrides};
 pub use process::{Input, ProcessConfig, QuoteStyle};
 pub use requires::{IndexingStyle, RequiresConfig, RojoConfig, Target};

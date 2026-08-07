@@ -24,8 +24,17 @@
     "rules": {
       "$ref": "#/$defs/rules"
     },
+    "fmt": {
+      "$ref": "#/$defs/fmt"
+    },
+    "lint": {
+      "$ref": "#/$defs/lint"
+    },
     "worms": {
       "$ref": "#/$defs/worms"
+    },
+    "config": {
+      "$ref": "#/$defs/worm_config"
     },
     "bundle": {
       "$ref": "#/$defs/bundle"
@@ -57,6 +66,12 @@
           },
           "rules": {
             "$ref": "#/$defs/rules"
+          },
+          "fmt": {
+            "$ref": "#/$defs/fmt"
+          },
+          "lint": {
+            "$ref": "#/$defs/lint"
           },
           "minify": {
             "$ref": "#/$defs/minify"
@@ -588,6 +603,428 @@
           "$ref": "#/$defs/rule",
           "description": "Rename locals and params to short names."
         }
+      }
+    },
+    "fmt": {
+      "description": "Formatter settings for `larvae fmt`. Every stylua option under its own name, so a stylua.toml can move in here whole, plus the ones stylua does not have. A stylua.toml left in the project is still read, and these keys layer over it.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "column_width": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 120,
+          "description": "The width to fit lines into. A line only breaks when it has to."
+        },
+        "line_endings": {
+          "enum": [
+            "unix",
+            "windows"
+          ],
+          "default": "unix",
+          "description": "The newline written out."
+        },
+        "indent_type": {
+          "enum": [
+            "tabs",
+            "spaces"
+          ],
+          "default": "tabs",
+          "description": "What one level of indentation is made of."
+        },
+        "indent_width": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 4,
+          "description": "Spaces per level, and the width a tab is assumed to display as when measuring a line."
+        },
+        "quote_style": {
+          "enum": [
+            "auto-prefer-double",
+            "auto-prefer-single",
+            "force-double",
+            "force-single",
+            "preserve"
+          ],
+          "default": "auto-prefer-double",
+          "description": "Where a string literal's quotes come from. The auto pair switches when the other quote needs fewer escapes; \"preserve\" leaves every literal exactly as written."
+        },
+        "call_parentheses": {
+          "enum": [
+            "always",
+            "no-single-string",
+            "no-single-table",
+            "none",
+            "input"
+          ],
+          "default": "always",
+          "description": "Whether a call with one string or table argument keeps its parentheses. \"input\" keeps whatever the author wrote."
+        },
+        "space_after_function_names": {
+          "enum": [
+            "never",
+            "definitions",
+            "calls",
+            "always"
+          ],
+          "default": "never",
+          "description": "Where a space goes between a function name and its parentheses."
+        },
+        "collapse_simple_statement": {
+          "enum": [
+            "never",
+            "function-only",
+            "conditional-only",
+            "always"
+          ],
+          "default": "never",
+          "description": "Which one-line bodies may stay on one line."
+        },
+        "block_newline_gaps": {
+          "enum": [
+            "never",
+            "preserve"
+          ],
+          "default": "never",
+          "description": "Whether a blank line the author left at the very start or end of a block survives."
+        },
+        "sort_requires": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Sort the run of requires at the top of a file.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "grouping": {
+              "enum": [
+                "flat",
+                "by-kind"
+              ],
+              "default": "flat",
+              "description": "\"flat\" is one sorted run, which is what stylua does. \"by-kind\" puts aliases, then absolute, then relative, with a blank line between each."
+            }
+          }
+        },
+        "magic_trailing_comma": {
+          "type": "boolean",
+          "default": true,
+          "description": "A trailing comma the author left in a table means \"keep this expanded\", so line breaking becomes something an author decides per table rather than something width alone decides. Tables only: Luau rejects `f(a, b,)`, so a call has no trailing comma to read."
+        },
+        "space_inside_parens": {
+          "type": "boolean",
+          "default": false,
+          "description": "`f( a )` rather than `f(a)`."
+        },
+        "space_inside_brackets": {
+          "type": "boolean",
+          "default": false,
+          "description": "`t[ k ]` rather than `t[k]`."
+        },
+        "space_inside_braces": {
+          "type": "boolean",
+          "default": true,
+          "description": "`{ a }` rather than `{a}`, which is the Luau convention."
+        },
+        "trailing_comma": {
+          "type": "boolean",
+          "default": true,
+          "description": "A table that broke over several lines keeps a trailing comma on its last field."
+        },
+        "exclude": {
+          "$ref": "#/$defs/exclude",
+          "description": "Paths `larvae fmt` walks past, as globs relative to the project root, ex: [\"Packages/**\"]. Naming a directory is enough. A file named on the command line is still formatted, since naming it is saying you meant it."
+        },
+        "syntax": {
+          "type": "string",
+          "description": "Accepted from stylua and ignored. larvae formats Luau and only Luau, which is what every value of this asks for here."
+        }
+      }
+    },
+    "lint": {
+      "description": "Linter settings for `larvae lint`. A selene.toml left in the project is still read, and these keys layer over it. selene's own names work here too, so its file can move in whole.",
+      "type": "object",
+      "additionalProperties": false,
+      "not": {
+        "required": [
+          "options",
+          "config"
+        ],
+        "description": "options and config are two names for one table, so only one of them can be written."
+      },
+      "properties": {
+        "std": {
+          "default": "roblox",
+          "description": "Which globals exist before a file runs. Anything else is undefined_variable.",
+          "anyOf": [
+            {
+              "enum": [
+                "roblox",
+                "luau",
+                "none"
+              ]
+            },
+            {
+              "type": "string",
+              "description": "A selene std name is accepted too: lua51, lua52, lua53, lua54 and luajit all mean \"luau\", and a chain like \"roblox+testez\" is decided by its first name."
+            }
+          ]
+        },
+        "globals": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Extra names the project defines beyond the standard library, ex: [\"shared\", \"_TESTING\"]."
+        },
+        "exclude": {
+          "$ref": "#/$defs/exclude",
+          "description": "Paths `larvae lint` walks past, as globs relative to the project root, ex: [\"Packages/**\"]. Naming a directory is enough. Same key selene has, and a selene.toml's list is picked up too. A file named on the command line is still linted, since naming it is saying you meant it."
+        },
+        "rules": {
+          "$ref": "#/$defs/lint_rules"
+        },
+        "options": {
+          "$ref": "#/$defs/lint_options"
+        },
+        "config": {
+          "$ref": "#/$defs/lint_options",
+          "description": "selene's name for [lint.options], accepted so a selene.toml can be pasted in. It is the same table, so write one or the other, not both."
+        }
+      }
+    },
+    "exclude": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "lint_level": {
+      "enum": [
+        "allow",
+        "warn",
+        "deny"
+      ],
+      "description": "\"allow\" is off, \"warn\" is reported and leaves the exit code alone, \"deny\" is reported and fails the run."
+    },
+    "lint_rules": {
+      "description": "How loudly each lint speaks. A lint keeps its own default until it is named here.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "almost_swapped": {
+          "$ref": "#/$defs/lint_level",
+          "description": "Two assignments that look like a swap but overwrite one of the values. Default: warn."
+        },
+        "compare_nan": {
+          "$ref": "#/$defs/lint_level",
+          "description": "Comparing against nan, which is never equal to anything including itself. Default: warn."
+        },
+        "constant_table_comparison": {
+          "$ref": "#/$defs/lint_level",
+          "description": "Comparing against a table literal, which compares identity and is always false. Default: warn."
+        },
+        "divide_by_zero": {
+          "$ref": "#/$defs/lint_level",
+          "description": "Dividing by a literal zero. Default: warn."
+        },
+        "duplicate_keys": {
+          "$ref": "#/$defs/lint_level",
+          "description": "A table key written twice, where only the last one survives. Default: warn."
+        },
+        "ifs_same_cond": {
+          "$ref": "#/$defs/lint_level",
+          "description": "An elseif repeating a condition already tested, which can never run. Default: warn."
+        },
+        "if_same_then_else": {
+          "$ref": "#/$defs/lint_level",
+          "description": "Two branches of the same if with identical bodies. Default: warn."
+        },
+        "suspicious_reverse_loop": {
+          "$ref": "#/$defs/lint_level",
+          "description": "A numeric for counting down without a negative step, which never runs. Default: warn."
+        },
+        "type_check_inside_call": {
+          "$ref": "#/$defs/lint_level",
+          "description": "A comparison inside type(), where it belongs outside. Default: warn."
+        },
+        "unbalanced_assignments": {
+          "$ref": "#/$defs/lint_level",
+          "description": "More names than values, or more values than names. Default: warn."
+        },
+        "bad_string_escape": {
+          "$ref": "#/$defs/lint_level",
+          "description": "An escape sequence the language does not define. Default: warn."
+        },
+        "mismatched_arg_count": {
+          "$ref": "#/$defs/lint_level",
+          "description": "Calling a function in this file with the wrong number of arguments. Default: warn."
+        },
+        "must_use": {
+          "$ref": "#/$defs/lint_level",
+          "description": "Calling a pure function and discarding what it returned. Default: warn."
+        },
+        "undefined_variable": {
+          "$ref": "#/$defs/lint_level",
+          "description": "A name nothing declares, which is nil at runtime. Default: deny."
+        },
+        "unscoped_variables": {
+          "$ref": "#/$defs/lint_level",
+          "description": "An assignment with no local, which creates a global. Default: warn."
+        },
+        "unused_variable": {
+          "$ref": "#/$defs/lint_level",
+          "description": "A name declared and never read. Default: warn. Tunable under [lint.options.unused_variable]."
+        },
+        "shadowing": {
+          "$ref": "#/$defs/lint_level",
+          "description": "A name that hides another still in scope. Default: warn."
+        },
+        "global_usage": {
+          "$ref": "#/$defs/lint_level",
+          "description": "Reaching into _G, which is shared with every other script. Default: warn."
+        },
+        "deprecated": {
+          "$ref": "#/$defs/lint_level",
+          "description": "A function that still works but has been replaced. Default: warn. Extend it under [lint.options.deprecated]."
+        },
+        "restricted_module_paths": {
+          "$ref": "#/$defs/lint_level",
+          "description": "Requiring a module the project has ruled out. Default: warn, and quiet until [lint.options.restricted_module_paths] names something."
+        },
+        "high_cyclomatic_complexity": {
+          "$ref": "#/$defs/lint_level",
+          "description": "A function with more branches than anyone can hold at once. Default: allow. Threshold under [lint.options.high_cyclomatic_complexity]."
+        },
+        "manual_table_clone": {
+          "$ref": "#/$defs/lint_level",
+          "description": "A loop that copies a table, which table.clone does in one call. Default: warn."
+        },
+        "roblox_incorrect_color3_new_bounds": {
+          "$ref": "#/$defs/lint_level",
+          "description": "Color3.new given a channel over 1, where the scale is 0 to 1. Default: warn."
+        },
+        "roblox_suspicious_udim2_new": {
+          "$ref": "#/$defs/lint_level",
+          "description": "UDim2.new given two arguments, where it takes four. Default: warn."
+        },
+        "roblox_manual_fromscale_or_fromoffset": {
+          "$ref": "#/$defs/lint_level",
+          "description": "A UDim2.new that fromScale or fromOffset says more clearly. Default: warn."
+        },
+        "unreachable_code": {
+          "$ref": "#/$defs/lint_level",
+          "description": "Statements after a return, break or continue, which never run. Default: warn."
+        },
+        "self_assignment": {
+          "$ref": "#/$defs/lint_level",
+          "description": "Assigning a value to itself, which does nothing. Default: warn."
+        },
+        "string_concat_in_loop": {
+          "$ref": "#/$defs/lint_level",
+          "description": "Building a string by concatenation in a loop, which is quadratic. Default: warn."
+        },
+        "loop_invariant_call": {
+          "$ref": "#/$defs/lint_level",
+          "description": "A call inside a loop whose result cannot change between iterations. Default: warn."
+        },
+        "empty_if": {
+          "$ref": "#/$defs/lint_level",
+          "description": "An if branch with nothing in it. Default: warn."
+        },
+        "empty_loop": {
+          "$ref": "#/$defs/lint_level",
+          "description": "A loop body with nothing in it. Default: warn."
+        },
+        "mixed_table": {
+          "$ref": "#/$defs/lint_level",
+          "description": "A table with both array entries and named keys. Default: warn."
+        },
+        "multiple_statements": {
+          "$ref": "#/$defs/lint_level",
+          "description": "More than one statement on a line. Default: allow."
+        },
+        "parenthese_conditions": {
+          "$ref": "#/$defs/lint_level",
+          "description": "Parentheses around a condition, which Luau does not need. Default: warn."
+        }
+      }
+    },
+    "lint_options": {
+      "description": "Per-lint settings, keyed by the lint's name and handed to the lint that asked for them.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object"
+      },
+      "properties": {
+        "unused_variable": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "parameters": {
+              "type": "boolean",
+              "default": false,
+              "description": "Report unused function parameters too. Off by default: a parameter is part of a signature the caller decides."
+            },
+            "loop_variables": {
+              "type": "boolean",
+              "default": false,
+              "description": "Report unused `for` variables too. Off by default: `for k, v` where only `k` is wanted is how the language is written."
+            },
+            "ignore_pattern": {
+              "type": "string",
+              "default": "^_",
+              "description": "Names exempted, as a regular expression."
+            }
+          }
+        },
+        "high_cyclomatic_complexity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maximum_complexity": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 40,
+              "description": "Branches a function may have before it is reported. selene's default, kept so a project moving over gets the same answers."
+            }
+          }
+        },
+        "deprecated": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "additional": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Names the project has deprecated of its own, as old = \"what to use instead\"."
+            }
+          }
+        },
+        "restricted_module_paths": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "paths": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Require paths the project forbids, as path = \"why\"."
+            }
+          }
+        }
+      }
+    },
+    "worm_config": {
+      "description": "Per-worm settings, keyed by the name under [worms] and handed to that worm untouched. larvae never reads inside one.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object"
       }
     },
     "worms": {

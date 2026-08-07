@@ -40,7 +40,7 @@ pub fn run(
         return from_stdin(&cfg);
     }
 
-    let files = collect(root, &paths)?;
+    let files = collect(root, &paths, &cfg.excludes(root)?)?;
 
     if files.is_empty() {
         ui::print_error("no Luau files found");

@@ -3,8 +3,13 @@
 
 Every stylua option is accepted under its own name, so a project can point
 larvae at an existing `stylua.toml` and get the same output without editing
-anything. The options past that are the ones people keep asking stylua for and
-Biome already has: granular spacing, and a trailing comma that means something.
+anything, or paste the whole file into `[fmt]` and delete it. The options past
+that are the ones people keep asking stylua for and Biome already has: granular
+spacing, and a trailing comma that means something.
+
+A key we do not know is dropped from `stylua.toml`, since that file belongs to
+another tool and may name options from a version we have not caught up with.
+The same key in `[fmt]` is still an error, because there it is a typo.
 */
 
 use std::path::Path;
@@ -13,6 +18,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use super::doc::{Indent, Style};
+use crate::config::Excludes;
 
 /// Where a string literal's quotes come from
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
@@ -174,6 +180,20 @@ pub struct FmtConfig {
     /// A table that broke keeps a trailing comma on its last field
     #[serde(default = "default_true")]
     pub trailing_comma: bool,
+
+    /// Globs a walk passes over, relative to the project root. A file named on
+    /// the command line is still formatted, see [`Excludes`].
+    #[serde(default)]
+    pub exclude: Vec<String>,
+
+    // --- accepted, and nothing to do with ------------------------------
+    /*
+    stylua's dialect switch, taken so a `stylua.toml` can move into `[fmt]`
+    whole rather than key by key. larvae formats Luau and only Luau, which is
+    what every value of this asks for here, so it is read and then ignored.
+    */
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub syntax: Option<String>,
 }
 
 fn default_width() -> usize {
@@ -219,6 +239,11 @@ impl FmtConfig {
             self.space_after_function_names,
             SpaceAfterFunctionNames::Definitions | SpaceAfterFunctionNames::Always
         )
+    }
+
+    /// The paths this config asked `larvae fmt` to leave alone
+    pub fn excludes(&self, root: &Path) -> Result<Excludes> {
+        Excludes::new(root, &self.exclude).context("[fmt]")
     }
 
     /// Whether a call puts a space before its parentheses
@@ -295,14 +320,48 @@ fn stylua_file(root: &Path) -> Result<Option<FmtConfig>> {
         let text = std::fs::read_to_string(&path)
             .with_context(|| format!("cannot read {}", crate::ui::rel(&path)))?;
 
-        let lowered = lower_enum_values(&text);
+        let mut value: toml::Value =
+            toml::from_str(&lower_enum_values(&text)).with_context(|| format!("in {name}"))?;
+
+        let known = toml::Value::try_from(FmtConfig::default()).expect("the config serializes");
+
+        if let (Some(table), Some(known)) = (value.as_table_mut(), known.as_table()) {
+            prune_unknown(table, known);
+        }
 
         return Ok(Some(
-            toml::from_str(&lowered).with_context(|| format!("in {name}"))?,
+            value.try_into().with_context(|| format!("in {name}"))?,
         ));
     }
 
     Ok(None)
+}
+
+/*
+Drop the keys we do not know, in place.
+
+This is stylua's file, not ours, so a key we do not recognise is not a mistake
+in it: stylua adds options on its own schedule and a project may well be using
+one we have not caught up with. Refusing to read the file over that would mean
+the whole config is ignored for the sake of one line, so the line is dropped
+and the rest is honoured. `larvae.toml` stays strict, where an unknown key
+really is a typo.
+
+The known set is the serialized default rather than a hand written list, so
+adding an option later needs no change here.
+*/
+fn prune_unknown(table: &mut toml::value::Table, known: &toml::value::Table) {
+    table.retain(|key, value| {
+        let Some(reference) = known.get(key) else {
+            return false;
+        };
+
+        if let (Some(nested), Some(reference)) = (value.as_table_mut(), reference.as_table()) {
+            prune_unknown(nested, reference);
+        }
+
+        true
+    });
 }
 
 /// `"AutoPreferDouble"` becomes `"auto-prefer-double"`, in place, for values only
@@ -484,11 +543,37 @@ call_parentheses = "NoSingleTable"
         assert!(both.space_before_call_parens());
     }
 
+    /// stylua's file, so a key from a version we do not track costs nothing
     #[test]
-    fn an_unknown_key_is_refused_like_everywhere_else() {
+    fn an_unknown_key_in_the_stylua_file_is_dropped() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("stylua.toml"), "whoops = true\n").unwrap();
+        std::fs::write(
+            dir.path().join("stylua.toml"),
+            "column_width = 90\nwhoops = true\nsyntax = \"Luau\"\n\n[sort_requires]\nenabled = true\nsomething_new = 3\n",
+        )
+        .unwrap();
 
-        assert!(FmtConfig::discover(dir.path(), None).is_err());
+        let c = FmtConfig::discover(dir.path(), None).unwrap();
+
+        assert_eq!(c.column_width, 90, "the keys we know still apply");
+        assert!(c.sort_requires.enabled, "including nested ones");
+    }
+
+    /// A stylua.toml can be pasted into [fmt] whole, dialect switch and all
+    #[test]
+    fn a_stylua_only_key_is_accepted_in_larvae_toml() {
+        let over = toml::from_str::<toml::Value>("syntax = \"Luau\"\ncolumn_width = 80").unwrap();
+        let c = FmtConfig::default().merged(&over).unwrap();
+
+        assert_eq!(c.column_width, 80);
+        assert_eq!(c.syntax.as_deref(), Some("Luau"));
+    }
+
+    /// Our file, where an unknown key is a typo and worth saying so
+    #[test]
+    fn an_unknown_key_in_larvae_toml_is_still_refused() {
+        let over = toml::from_str::<toml::Value>("colum_width = 80").unwrap();
+
+        assert!(FmtConfig::default().merged(&over).is_err());
     }
 }

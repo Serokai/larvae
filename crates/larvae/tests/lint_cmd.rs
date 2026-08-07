@@ -195,3 +195,40 @@ fn a_suppression_comment_is_honoured_end_to_end() {
     assert!(ok, "{out}");
     assert!(out.contains("nothing to report"), "{out}");
 }
+
+/// selene's own exclude list is honoured, and [lint] adds to it
+#[test]
+fn excluded_paths_are_walked_past() {
+    let dir = tempfile::tempdir().unwrap();
+    let bad = "local unused = 1\nreturn 1\n";
+
+    write(dir.path(), "selene.toml", "exclude = [\"src/Packages\"]\n");
+    write(
+        dir.path(),
+        "larvae.toml",
+        "[process]\ninput = \"src\"\n\n[lint]\nexclude = [\"**/*.gen.luau\"]\n",
+    );
+    write(dir.path(), "src/Packages/vendor.luau", bad);
+    write(dir.path(), "src/made.gen.luau", bad);
+    write(dir.path(), "src/mine.luau", bad);
+
+    let (_, out) = run(dir.path(), &["lint"]);
+
+    assert!(out.contains("mine.luau"), "{out}");
+    assert!(!out.contains("vendor.luau"), "selene's exclude: {out}");
+    assert!(!out.contains("made.gen.luau"), "larvae's exclude: {out}");
+    assert!(out.contains("1 file"), "only the one file was linted: {out}");
+}
+
+/// Naming the file is saying you meant it, exclude or no exclude
+#[test]
+fn an_excluded_file_is_still_linted_when_named() {
+    let dir = tempfile::tempdir().unwrap();
+
+    write(dir.path(), "larvae.toml", "[lint]\nexclude = [\"src/Packages\"]\n");
+    write(dir.path(), "src/Packages/vendor.luau", "local unused = 1\nreturn 1\n");
+
+    let (_, out) = run(dir.path(), &["lint", "src/Packages/vendor.luau"]);
+
+    assert!(out.contains("unused_variable"), "{out}");
+}

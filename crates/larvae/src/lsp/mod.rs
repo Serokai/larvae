@@ -24,6 +24,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use serde_json::{Value, json};
 
+use crate::config::Excludes;
 use crate::fmt::{self, FmtConfig};
 use crate::lint::{self, Level, LintConfig};
 
@@ -51,6 +52,8 @@ struct Server {
     root: Option<PathBuf>,
     fmt: FmtConfig,
     lint: LintConfig,
+    /// What `[lint] exclude` covers, so an excluded file stays quiet
+    excluded: Excludes,
     /// Set by `shutdown`, so a later `exit` is clean rather than abrupt
     shutting_down: bool,
 }
@@ -209,6 +212,7 @@ impl Server {
 
         if let Ok(cfg) = LintConfig::discover(root, project.as_ref().and_then(|c| c.lint.as_ref()))
         {
+            self.excluded = cfg.excludes(root).unwrap_or_default();
             self.lint = cfg;
         }
     }
@@ -218,6 +222,19 @@ impl Server {
         let Some(src) = self.documents.get(uri) else {
             return Ok(());
         };
+
+        /*
+        An excluded file is published empty rather than skipped. Skipping would
+        leave whatever was on screen before the exclude was added sitting there
+        until the editor closed the file.
+        */
+        if path_of_uri(uri).is_some_and(|p| self.excluded.skips(&p)) {
+            return rpc::notify(
+                out,
+                "textDocument/publishDiagnostics",
+                json!({ "uri": uri, "diagnostics": [] }),
+            );
+        }
 
         let lines = rpc::Lines::new(src);
 
@@ -553,6 +570,30 @@ mod tests {
     #[test]
     fn a_clean_document_produces_no_diagnostics() {
         assert_eq!(diagnostics_of("return 1\n"), json!([]));
+    }
+
+    /*
+    An excluded file has to be published empty rather than left alone. Anything
+    already on screen when the exclude was added would otherwise stay there
+    until the editor closed the file.
+    */
+    #[test]
+    fn an_excluded_document_is_published_empty() {
+        let mut server = server_with("local unused = 1\nreturn 1\n");
+        server.documents.clear();
+        server
+            .documents
+            .insert("file:///project/Packages/t.luau".into(), "local unused = 1\n".into());
+        server.excluded =
+            Excludes::new(std::path::Path::new("/project"), &["Packages".to_string()]).unwrap();
+
+        let mut out = Vec::new();
+        server.publish("file:///project/Packages/t.luau", &mut out).unwrap();
+
+        let text = String::from_utf8(out).unwrap();
+
+        assert!(text.contains("publishDiagnostics"), "{text}");
+        assert!(text.contains("\"diagnostics\":[]"), "{text}");
     }
 
     /// The help is worth having in the editor, where there is room for it

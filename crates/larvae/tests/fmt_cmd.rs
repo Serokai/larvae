@@ -230,3 +230,66 @@ fn the_project_input_is_the_default_target() {
         "outside the configured input, so untouched"
     );
 }
+
+/// A walk passes over what [fmt] excluded, whether it starts at the project
+/// input or at a directory somebody named
+#[test]
+fn an_excluded_path_is_walked_past() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "larvae.toml",
+        "[process]\ninput = \"src\"\n\n[fmt]\nexclude = [\"src/vendor\", \"**/*.gen.luau\"]\n",
+    );
+
+    let mine = write(dir.path(), "src/a.luau", "local x={a=1}\n");
+    let vendored = write(dir.path(), "src/vendor/b.luau", "local y={b=2}\n");
+    let generated = write(dir.path(), "src/c.gen.luau", "local z={c=3}\n");
+
+    run(dir.path(), &["fmt"]);
+
+    assert_eq!(std::fs::read_to_string(&mine).unwrap(), "local x = { a = 1 }\n");
+    assert_eq!(
+        std::fs::read_to_string(&vendored).unwrap(),
+        "local y={b=2}\n",
+        "a named directory takes what is under it"
+    );
+    assert_eq!(std::fs::read_to_string(&generated).unwrap(), "local z={c=3}\n");
+
+    run(dir.path(), &["fmt", "src"]);
+
+    assert_eq!(
+        std::fs::read_to_string(&vendored).unwrap(),
+        "local y={b=2}\n",
+        "naming the directory above it changes nothing"
+    );
+}
+
+/// Naming the file is saying you meant it, exclude or no exclude
+#[test]
+fn an_excluded_file_is_still_formatted_when_named() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "larvae.toml", "[fmt]\nexclude = [\"src/vendor\"]\n");
+
+    let vendored = write(dir.path(), "src/vendor/b.luau", "local y={b=2}\n");
+
+    let (ok, out) = run(dir.path(), &["fmt", "src/vendor/b.luau"]);
+
+    assert!(ok, "{out}");
+    assert_eq!(
+        std::fs::read_to_string(&vendored).unwrap(),
+        "local y = { b = 2 }\n"
+    );
+}
+
+#[test]
+fn a_broken_exclude_glob_is_reported() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "larvae.toml", "[fmt]\nexclude = [\"a[\"]\n");
+    write(dir.path(), "a.luau", "local x={a=1}\n");
+
+    let (ok, out) = run(dir.path(), &["fmt", "a.luau"]);
+
+    assert!(!ok);
+    assert!(out.contains("exclude"), "should name the key: {out}");
+}
