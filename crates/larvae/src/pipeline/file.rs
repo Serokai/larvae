@@ -24,6 +24,8 @@ pub struct FileOpts {
     const_requires: bool,
     /// Compiled `except` patterns, Some means the rule is on
     remove_comments: Option<Vec<regex::Regex>>,
+    /// Drop `-- larvae: allow(...)` comments from the output
+    strip_flags: bool,
     /// Comment text and whether it goes at the start
     append_comment: Option<(String, bool)>,
     directive: Option<String>,
@@ -81,6 +83,13 @@ impl FileOpts {
             quotes: config.process.quotes,
             validate_syntax: !write,
             const_requires: config.rules.const_requires,
+            /*
+            remove_comments speaks for every comment in the file, this one for
+            a handful, so the broader rule wins outright rather than the two
+            both editing the same span. A project that kept flags alive with an
+            `except` pattern meant it.
+            */
+            strip_flags: config.process.strip_flags && remove_comments.is_none(),
             remove_comments,
             append_comment,
             directive: config.rules.add_luau_directive.clone(),
@@ -332,6 +341,12 @@ fn native_pass(
         if let Some(except) = &opts.remove_comments {
             edits.run("remove_comments", |e| {
                 crate::rules::remove_comments(src, &lexed.comments, except, e)
+            });
+        }
+
+        if opts.strip_flags {
+            edits.run("strip_flags", |e| {
+                crate::rules::strip_flags(src, &lexed.comments, e)
             });
         }
 

@@ -168,6 +168,40 @@ pub fn remove_comments(
 }
 
 /*
+strip_flags, drop the comments that were talking to larvae.
+
+A `-- larvae: allow(...)` is an instruction to the linter, not something the
+game needs to carry, so it goes the way every other build time instruction
+goes. Notes to a reader stay: only what [`crate::flags`] recognises is touched.
+
+Newlines are kept the way remove_comments keeps them, so retain-lines output
+stays on the same line numbers.
+*/
+pub fn strip_flags(src: &str, comments: &[(u32, u32)], replacements: &mut Vec<(u32, u32, String)>) {
+    let bytes = src.as_bytes();
+
+    for &(start, end) in comments {
+        if !crate::flags::is_flag(&src[start as usize..end as usize]) {
+            continue;
+        }
+
+        // eat the horizontal space in front so no trailing blanks are left
+        let mut from = start as usize;
+
+        while from > 0 && matches!(bytes[from - 1], b' ' | b'\t') {
+            from -= 1;
+        }
+
+        let newlines = src[start as usize..end as usize]
+            .bytes()
+            .filter(|&b| b == b'\n')
+            .count();
+
+        replacements.push((from as u32, end, "\n".repeat(newlines)));
+    }
+}
+
+/*
 add_luau_directive, make sure every file opts into a Luau mode, an existing
 directive of the same kind is left alone and so is a different mode, an
 explicit choice in the source always wins
@@ -314,6 +348,41 @@ mod tests {
         assert!(out.starts_with("--!strict"));
         assert!(!out.contains("trailing"));
         assert!(!out.contains("spans lines"));
+        assert_eq!(src.lines().count(), out.lines().count());
+    }
+
+    #[test]
+    fn strip_flags_takes_the_instructions_and_leaves_the_notes() {
+        let src = concat!(
+            "--!strict\n",
+            "-- larvae: allow(unused_variable)\n",
+            "local a = 1 -- selene: allow(shadowing)\n",
+            "-- larvae: this one is a note\n",
+            "return a -- why\n",
+        );
+
+        let lexed = lexer::lex(src).unwrap();
+        let mut reps = Vec::new();
+
+        strip_flags(src, &lexed.comments, &mut reps);
+        reps.sort_by_key(|r| r.0);
+
+        let mut out = String::new();
+        let mut cursor = 0usize;
+
+        for (s, e, new) in reps {
+            out.push_str(&src[cursor..s as usize]);
+            out.push_str(&new);
+            cursor = e as usize;
+        }
+
+        out.push_str(&src[cursor..]);
+
+        assert!(!out.contains("allow("), "the flags go: {out}");
+        assert!(out.contains("--!strict"));
+        assert!(out.contains("this one is a note"), "a note stays: {out}");
+        assert!(out.contains("-- why"));
+        assert!(out.contains("local a = 1\n"), "no trailing space left: {out}");
         assert_eq!(src.lines().count(), out.lines().count());
     }
 

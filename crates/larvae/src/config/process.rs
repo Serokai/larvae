@@ -58,6 +58,17 @@ pub struct ProcessConfig {
     #[serde(default = "default_run_order")]
     pub run_order: i64,
 
+    /*
+    Whether a flag comment survives into the output.
+
+    On by default because these are instructions to larvae, and shipping them
+    is shipping the scaffolding. Set it false when the output is read by people
+    rather than by a game, ex: a library published as source, where a stripped
+    suppression would just turn back into a warning for whoever reads it next.
+    */
+    #[serde(default = "default_true")]
+    pub strip_flags: bool,
+
     #[serde(default = "default_true")]
     pub cache: bool,
 
@@ -97,6 +108,7 @@ impl Default for ProcessConfig {
             generator: default_generator(),
             quotes: QuoteStyle::default(),
             run_order: default_run_order(),
+            strip_flags: true,
             cache: true,
             cache_dir: default_cache_dir(),
         }

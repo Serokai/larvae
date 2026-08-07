@@ -419,3 +419,78 @@ fn the_summary_counts_rules_that_actually_did_something() {
     assert_eq!(s.applied(Family::Native), 3, "{:?}", s.rules_applied);
     assert_eq!(s.applied(Family::Extension), 0);
 }
+
+/// A flag comment is an instruction to larvae, so by default it does not ship
+#[test]
+fn flag_comments_are_stripped_from_the_output() {
+    let tmp = fixture();
+    let root = tmp.path();
+
+    write(
+        root,
+        "src/shared/flagged.luau",
+        "-- larvae: allow(unused_variable)\nlocal unused = 1 -- a note\nreturn unused\n",
+    );
+
+    let config = Config::load_or_default(root).unwrap();
+    let outcome = pipeline::run(root, &config, true).unwrap();
+
+    assert!(!outcome.has_errors());
+
+    let out = read(root, "dist/shared/flagged.luau");
+
+    assert!(!out.contains("allow("), "the flag goes: {out}");
+    assert!(out.contains("-- a note"), "an ordinary comment stays: {out}");
+    assert_eq!(out.lines().count(), 3, "line numbers hold: {out}");
+}
+
+#[test]
+fn strip_flags_false_keeps_them() {
+    let tmp = fixture();
+    let root = tmp.path();
+
+    write(
+        root,
+        "larvae.toml",
+        "[aliases]\npkg = \"@game/ReplicatedStorage/Packages\"\n\n[process]\nstrip_flags = false\n",
+    );
+    write(
+        root,
+        "src/shared/flagged.luau",
+        "-- larvae: allow(unused_variable)\nlocal unused = 1\nreturn unused\n",
+    );
+
+    let config = Config::load_or_default(root).unwrap();
+    let outcome = pipeline::run(root, &config, true).unwrap();
+
+    assert!(!outcome.has_errors());
+    assert!(read(root, "dist/shared/flagged.luau").contains("allow(unused_variable)"));
+}
+
+/// remove_comments already speaks for every comment, so the two never both run
+#[test]
+fn remove_comments_wins_over_strip_flags() {
+    let tmp = fixture();
+    let root = tmp.path();
+
+    write(
+        root,
+        "larvae.toml",
+        "[aliases]\npkg = \"@game/ReplicatedStorage/Packages\"\n\n[rules]\nremove_comments = { except = [\"larvae:\"] }\n",
+    );
+    write(
+        root,
+        "src/shared/flagged.luau",
+        "-- larvae: allow(unused_variable)\nlocal unused = 1 -- a note\nreturn unused\n",
+    );
+
+    let config = Config::load_or_default(root).unwrap();
+    let outcome = pipeline::run(root, &config, true).unwrap();
+
+    assert!(!outcome.has_errors());
+
+    let out = read(root, "dist/shared/flagged.luau");
+
+    assert!(out.contains("allow(unused_variable)"), "kept on purpose: {out}");
+    assert!(!out.contains("a note"), "and the rest still goes: {out}");
+}

@@ -155,6 +155,12 @@
           "default": "preserve",
           "description": "Quote style for require strings in the output. preserve keeps whatever the source used, double/single requote every require string and generated instance expression."
         },
+        "strip_flags": {
+          "type": "boolean",
+          "default": true,
+          "description": "Drop flag comments, the `-- larvae: allow(...)` and `-- selene: allow(...)` ones, from the output. They are instructions to larvae rather than notes to a reader, so they are scaffolding the build does not need to ship. Ordinary comments are untouched. Set false when the output is read by people rather than by a game. Ignored when [rules] remove_comments is on, since that speaks for every comment already.",
+          "$comment": "Flag comments are read by `larvae lint` to suppress a finding on the line they sit on, and the line below."
+        },
         "cache": {
           "type": "boolean",
           "default": true,

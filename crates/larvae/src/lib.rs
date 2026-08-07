@@ -4,6 +4,7 @@ pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod diag;
+pub mod flags;
 pub mod fmt;
 pub mod lint;
 pub mod lsp;

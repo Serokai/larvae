@@ -355,9 +355,8 @@ impl<'a> Collected<'a> {
 /*
 Find every `-- larvae: allow(name, other)` in the file.
 
-selene's spelling is accepted too, because a project switching over has these
-comments scattered through it already and rewriting them all by hand to say
-the same thing is not a migration anyone should have to do.
+What counts as one lives in [`crate::flags`], because `larvae process` reads
+the same comments to know which ones it can leave out of the output.
 */
 fn collect_suppressions(
     src: &str,
@@ -367,32 +366,13 @@ fn collect_suppressions(
     let mut out: HashMap<u32, Vec<String>> = HashMap::new();
 
     for &(start, end) in comments {
-        let text = &src[start as usize..end as usize];
-
-        let Some(rest) = ["larvae:", "selene:"]
-            .iter()
-            .find_map(|prefix| text.split_once(prefix).map(|(_, rest)| rest))
-        else {
-            continue;
-        };
-
-        let rest = rest.trim_start();
-
-        let Some(inner) = rest
-            .strip_prefix("allow(")
-            .and_then(|r| r.split_once(')').map(|(inner, _)| inner))
-        else {
+        let Some(names) = crate::flags::allows(&src[start as usize..end as usize]) else {
             continue;
         };
 
         let line = (line_starts.partition_point(|&s| s <= start) - 1) as u32;
-        let names = inner
-            .split(',')
-            .map(str::trim)
-            .filter(|n| !n.is_empty())
-            .map(str::to_string);
 
-        out.entry(line).or_default().extend(names);
+        out.entry(line).or_default().extend(names.map(str::to_string));
     }
 
     out
