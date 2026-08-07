@@ -155,6 +155,12 @@
           "default": "preserve",
           "description": "Quote style for require strings in the output. preserve keeps whatever the source used, double/single requote every require string and generated instance expression."
         },
+        "run_order": {
+          "type": "integer",
+          "default": 1,
+          "description": "Where larvae's own rules sit in the sequence. A worm runs after this unless it says otherwise, so a worm asking to run \"before\" gets a smaller number and \"after\" a larger one.",
+          "$comment": "Between two slots the buffer is spliced and re-lexed, so a later stage reads what an earlier one produced."
+        },
         "strip_flags": {
           "type": "boolean",
           "default": true,
