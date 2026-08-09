@@ -20,7 +20,7 @@ use crate::syntax::ast::*;
 use crate::syntax::lexer::{Tok, TokKind};
 
 use super::config::{
-    CallParens, CollapseSimpleStatement, FmtConfig, QuoteStyle, RequireGrouping,
+    BlockNewlineGaps, CallParens, CollapseSimpleStatement, FmtConfig, QuoteStyle, RequireGrouping,
 };
 use super::doc::Doc;
 use super::trivia::{Attached, Comment, Trivia};
@@ -33,12 +33,7 @@ pub struct Emitter<'a> {
 }
 
 impl<'a> Emitter<'a> {
-    pub fn new(
-        src: &'a str,
-        toks: &'a [Tok],
-        trivia: &'a Trivia<'a>,
-        cfg: &'a FmtConfig,
-    ) -> Self {
+    pub fn new(src: &'a str, toks: &'a [Tok], trivia: &'a Trivia<'a>, cfg: &'a FmtConfig) -> Self {
         Self {
             src,
             toks,
@@ -439,11 +434,15 @@ impl<'a> Emitter<'a> {
             return None;
         }
 
-        let Expr::Call { func, method, args, .. } = &local.values[0] else {
+        let Expr::Call {
+            func, method, args, ..
+        } = &local.values[0]
+        else {
             return None;
         };
 
-        if method.is_some() || !matches!(func.as_ref(), Expr::Name(n) if self.one(*n) == "require") {
+        if method.is_some() || !matches!(func.as_ref(), Expr::Name(n) if self.one(*n) == "require")
+        {
             return None;
         }
 
@@ -497,11 +496,50 @@ impl<'a> Emitter<'a> {
             return Doc::concat([open, Doc::Hard]);
         }
 
-        Doc::concat([
-            open,
-            Doc::indent(Doc::concat([Doc::Hard, body])),
-            Doc::Hard,
-        ])
+        let (before, after) = self.block_gaps(block);
+
+        Doc::concat([open, Doc::indent(Doc::concat([before, body])), after])
+    }
+
+    /*
+    The breaks at the two edges of a block, which `block_newline_gaps` decides.
+
+    A blank line just inside `do` or just before `end` is dropped by default,
+    which is what almost everyone wants and what stylua does. `preserve` keeps
+    the author's, for the style that uses them to give a long body room to
+    breathe.
+
+    Only the edges: blank lines between statements are kept either way, because
+    those separate ideas rather than pad a boundary.
+    */
+    fn block_gaps(&self, block: &Block) -> (Doc<'a>, Doc<'a>) {
+        if self.cfg.block_newline_gaps == BlockNewlineGaps::Never {
+            return (Doc::Hard, Doc::Hard);
+        }
+
+        let lo = self.block_lo(block);
+        let hi = self.block_hi(block);
+
+        let first = block
+            .stmts
+            .iter()
+            .find(|s| !matches!(s, Stmt::Empty(_)))
+            .map_or(hi, |s| self.tok_start(s.span().start));
+
+        let last = block
+            .stmts
+            .iter()
+            .rev()
+            .find(|s| !matches!(s, Stmt::Empty(_)))
+            .map_or(lo, |s| self.tok_end(s.span().end - 1));
+
+        let gap = |from: u32, to: u32| match self.trivia.blank_between(from, to) {
+            true => Doc::Blank,
+
+            false => Doc::Hard,
+        };
+
+        (gap(lo, first), gap(last, hi))
     }
 
     /*
@@ -643,10 +681,7 @@ impl<'a> Emitter<'a> {
 
     fn local(&self, n: &Local) -> Doc<'a> {
         let keyword = self.one(n.keyword);
-        let names = Doc::join(
-            Doc::text(", "),
-            n.names.iter().map(|b| self.binding(b)),
-        );
+        let names = Doc::join(Doc::text(", "), n.names.iter().map(|b| self.binding(b)));
 
         if n.values.is_empty() {
             return Doc::concat([Doc::text(keyword), Doc::text(" "), names]);
@@ -699,7 +734,8 @@ impl<'a> Emitter<'a> {
 
     fn if_stmt(&self, n: &If) -> Doc<'a> {
         let mut parts = Vec::with_capacity(n.branches.len() * 4 + 3);
-        let collapse = self.collapse_conditionals() && n.branches.len() == 1 && n.else_block.is_none();
+        let collapse =
+            self.collapse_conditionals() && n.branches.len() == 1 && n.else_block.is_none();
 
         for (i, (cond, block)) in n.branches.iter().enumerate() {
             parts.push(Doc::text(if i == 0 { "if " } else { "elseif " }));
@@ -788,7 +824,11 @@ impl<'a> Emitter<'a> {
     fn local_function(&self, n: &LocalFunction) -> Doc<'a> {
         Doc::concat([
             self.attributes(&n.attributes),
-            Doc::text(if n.is_const { "const function " } else { "local function " }),
+            Doc::text(if n.is_const {
+                "const function "
+            } else {
+                "local function "
+            }),
             Doc::text(self.one(n.name)),
             self.function_body(&n.body),
         ])
@@ -853,7 +893,12 @@ impl<'a> Emitter<'a> {
             None => Doc::text(self.one(p.name)),
         });
 
-        self.bracketed("(", ")", Doc::join(Doc::concat([Doc::text(","), Doc::Line]), each), false)
+        self.bracketed(
+            "(",
+            ")",
+            Doc::join(Doc::concat([Doc::text(","), Doc::Line]), each),
+            false,
+        )
     }
 
     fn ret(&self, n: &Return) -> Doc<'a> {
@@ -1448,7 +1493,6 @@ impl<'a> Emitter<'a> {
     }
 }
 
-
 /// Whether a statement has no block nested inside it
 fn is_simple(stmt: &Stmt) -> bool {
     matches!(
@@ -1653,7 +1697,6 @@ fn precedence(op: &str) -> u8 {
         _ => 0,
     }
 }
-
 
 /// Unescaped quote characters of each kind
 fn count_quotes(inner: &str) -> (usize, usize) {

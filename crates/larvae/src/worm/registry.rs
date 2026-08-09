@@ -23,6 +23,8 @@ pub struct Loaded {
     pub worm: Worm,
     /// Kept so a worker can build its own instance without touching the disk
     pub artifact: Vec<u8>,
+    /// Where it was unpacked, which only a native worm needs, to exec from
+    pub dir: std::path::PathBuf,
     /// `[worms.<name>.config]`, untouched, handed over at init
     pub config: toml::Value,
     /// Rules that are on, by name, with the value each resolved to
@@ -51,6 +53,24 @@ pub struct Registry {
 
 impl Registry {
     /// Load every worm the config named, relative to the project root
+    /*
+    The worms a project asks for, or an empty set when it asks for none.
+
+    Every command that touches a project's files needs this, not just the
+    pipeline: a front-end decides which files exist as far as larvae is
+    concerned, so `fmt` and `lint` walking a tree without asking would miss the
+    claimed ones and format the wrong set.
+    */
+    pub fn for_project(root: &Path, config: &crate::config::Config) -> Result<Self> {
+        let Some(value) = config.worms.as_ref() else {
+            return Ok(Self::default());
+        };
+
+        let named = crate::config::worms::Worms::parse(value)?;
+
+        Self::load(root, &root.join(&config.process.cache_dir), &named)
+    }
+
     pub fn load(root: &Path, cache: &Path, config: &WormsConfig) -> Result<Self> {
         let mut worms = Vec::new();
 
@@ -69,7 +89,7 @@ impl Registry {
             let (manifest, artifact) =
                 Worm::read_parts(&dir).with_context(|| format!("loading worm `{name}`"))?;
 
-            let worm = Worm::from_parts(manifest, &artifact)
+            let worm = Worm::build(manifest, &artifact, Some(&dir))
                 .with_context(|| format!("loading worm `{name}`"))?;
 
             /*
@@ -87,6 +107,7 @@ impl Registry {
             let enabled = resolve_rules(name, &worm, &entry.rules)?;
 
             worms.push(Loaded {
+                dir,
                 worm,
                 artifact,
                 config: entry.config.clone(),
@@ -144,6 +165,7 @@ impl Registry {
                 std::sync::Arc::new(super::pool::Spec {
                     manifest: l.worm.manifest.clone(),
                     artifact: l.artifact.clone(),
+                    dir: l.dir.clone(),
                     config: l.config.clone(),
                     rules: l.rules.clone(),
                     run_order: l.run_order,
