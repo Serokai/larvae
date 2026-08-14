@@ -1,4 +1,4 @@
-//! CLI definition, dispatch, and the fastfetch style help layout
+//! The CLI definition, the dispatch, and the fastfetch style help layout
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -26,7 +26,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Process the project, rewrite requires into the output directory
+    /// Process the project and rewrite requires into the output directory
     Process {
         /// Path to larvae.toml (defaults to ./larvae.toml when present)
         #[arg(long)]
@@ -34,7 +34,7 @@ enum Command {
         /// Merge [profile.<name>] over the config before building
         #[arg(long)]
         profile: Option<String>,
-        /// Rebuild whenever a source file changes, Ctrl-C to stop
+        /// Rebuild when a source file changes; Ctrl-C stops it
         #[arg(long, short)]
         watch: bool,
     },
@@ -51,26 +51,32 @@ enum Command {
 
     /// Format Luau source in place
     Fmt {
-        /// Files or directories, defaults to the project's input
+        /// Files or directories; the default is the input of the project
         paths: Vec<PathBuf>,
-        /// Write nothing, exit non zero if anything would change
+        /// Write nothing; exit non zero if a file would change
         #[arg(long)]
         check: bool,
         /// Read one file from stdin and write the result to stdout
         #[arg(long, conflicts_with_all = ["paths", "check"])]
         stdin: bool,
+        /// The path the stdin content has, so a worm can claim it
+        #[arg(long, requires = "stdin")]
+        stdin_filepath: Option<PathBuf>,
         /// Path to larvae.toml (defaults to ./larvae.toml when present)
         #[arg(long)]
         config: Option<PathBuf>,
     },
 
-    /// Report suspicious code without changing it
+    /// Report suspicious code; do not change it
     Lint {
-        /// Files or directories, defaults to the project's input
+        /// Files or directories; the default is the input of the project
         paths: Vec<PathBuf>,
         /// Read one file from stdin
         #[arg(long, conflicts_with = "paths")]
         stdin: bool,
+        /// The path the stdin content has, so a worm can claim it
+        #[arg(long, requires = "stdin")]
+        stdin_filepath: Option<PathBuf>,
         /// Describe one lint and stop
         #[arg(long, value_name = "LINT")]
         explain: Option<String>,
@@ -85,13 +91,13 @@ enum Command {
     /// Create a starter larvae.toml for this project
     Init,
 
-    /// Develop a worm, before it is published or installed
+    /// Develop a worm before publication or installation
     Worm {
         #[command(subcommand)]
         command: commands::worm::WormCommand,
     },
 
-    /// Manage the larvae installation itself
+    /// Manage the larvae installation
     #[command(name = "self")]
     SelfManage {
         #[command(subcommand)]
@@ -117,11 +123,11 @@ fn run() -> Result<ExitCode> {
     let root = std::env::current_dir()?;
 
     if cli.help {
-        // sub -h prints that subcommand's help, bare -h gets the fancy layout
+        // A sub -h prints the help of that subcommand; a bare -h gets the fancy layout.
         let mut chain = Vec::new();
         let mut level = &matches;
 
-        // follow the whole path so `self update -h` lands on update, not self
+        // Follow the full path, so `self update -h` lands on update and not on self.
         while let Some((name, sub)) = level.subcommand() {
             chain.push(name.to_string());
             level = sub;
@@ -151,7 +157,7 @@ fn run() -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
 
-    // Bare `larvae` gets the fastfetch style logo + help layout too
+    // A bare `larvae` also gets the fastfetch style logo + help layout.
     let Some(command) = cli.command else {
         print_fancy_help(ui::want_color())?;
 
@@ -171,15 +177,17 @@ fn run() -> Result<ExitCode> {
             paths,
             check,
             stdin,
+            stdin_filepath,
             config,
-        } => commands::fmt::run(&root, paths, check, stdin, config),
+        } => commands::fmt::run(&root, paths, check, stdin, stdin_filepath, config),
 
         Command::Lint {
             paths,
             stdin,
+            stdin_filepath,
             explain,
             config,
-        } => commands::lint::run(&root, paths, stdin, explain, config),
+        } => commands::lint::run(&root, paths, stdin, stdin_filepath, explain, config),
 
         Command::Lsp => {
             crate::lsp::run()?;
@@ -195,7 +203,7 @@ fn run() -> Result<ExitCode> {
             Some(cmd) => commands::self_cmd::run(&root, cmd),
 
             None => {
-                // Bare `larvae self`, show the group's help
+                // A bare `larvae self` shows the help of the group.
                 let mut cmd = Cli::command().styles(ui::help_styles());
                 let sub = cmd.find_subcommand_mut("self").expect("self exists");
 
@@ -211,7 +219,7 @@ fn run() -> Result<ExitCode> {
     }
 }
 
-/// fastfetch style help, logo left, gradient help text right, stacked when the terminal is narrow
+/// fastfetch style help: logo left, gradient help text right, stacked when the terminal is narrow
 fn print_fancy_help(color: bool) -> Result<()> {
     use std::io::Write;
 
@@ -235,7 +243,7 @@ fn print_fancy_help(color: bool) -> Result<()> {
         width.min(100)
     };
 
-    // help text gets gradient colors, clap only adds bold markers
+    // The help text gets gradient colors; clap only adds bold markers.
     let mut cmd = Cli::command()
         .styles(ui::bold_styles())
         .term_width(help_width);
@@ -253,7 +261,7 @@ fn print_fancy_help(color: bool) -> Result<()> {
     if side_by_side {
         let rows = logo_lines.len().max(help_lines.len());
 
-        // Vertically center the shorter column against the taller one
+        // Center the shorter column vertically against the taller one.
         let logo_off = (rows - logo_lines.len()) / 2;
         let help_off = (rows - help_lines.len()) / 2;
 
@@ -276,7 +284,7 @@ fn print_fancy_help(color: bool) -> Result<()> {
             }
 
             if color && !help_line.is_empty() {
-                // row gradient color, reapplied after each clap reset so the line stays painted
+                // The row gradient color, applied again after each clap reset so the line keeps its color.
                 let c = ui::fg(art::row_color(row, rows));
                 let reapplied = help_line.replace(ui::RESET, &format!("{}{c}", ui::RESET));
 
@@ -287,7 +295,7 @@ fn print_fancy_help(color: bool) -> Result<()> {
                 out.push_str(help_line);
             }
 
-            // Avoid trailing whitespace on logo only rows
+            // Remove trailing whitespace on logo only rows.
             while out.ends_with(' ') {
                 out.pop();
             }

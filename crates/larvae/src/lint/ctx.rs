@@ -1,9 +1,9 @@
 /*!
-What every lint gets to look at, and the suppression comments that overrule it.
+The data that every lint reads, and the suppression comments that override it.
 
-The shared analysis lives here rather than in each lint because several of them
-want the same thing, which name refers to what, and recomputing it per lint
-would multiply the cost of a pass that has to finish between keystrokes.
+The shared analysis lives here and not in each lint. Several lints need the
+same result: which name refers to what. If each lint computed that result
+again, the cost would multiply, and the pass must finish between keystrokes.
 */
 
 use std::collections::HashMap;
@@ -14,23 +14,29 @@ use crate::syntax::lexer::Tok;
 use super::config::{Level, LintConfig};
 use super::scope::Names;
 
-/// One thing a lint found
+/// One result that a lint found.
 #[derive(Debug, Clone)]
 pub struct Finding {
-    /// Which lint said so
-    pub lint: &'static str,
-    /// Filled in by the runner from the config, a lint leaves it at its default
+    /// The lint that reported this finding. The name is borrowed for a
+    /// builtin lint. It is owned for a worm's lint, because larvae reads
+    /// worm lint names from the manifest at runtime.
+    pub lint: std::borrow::Cow<'static, str>,
+    /// The runner fills this in from the config. A lint leaves it at its default.
     pub level: Level,
-    /// Byte range in the source
+    /// The byte range in the source.
     pub span: (u32, u32),
     pub message: String,
     pub help: Option<String>,
 }
 
 impl Finding {
-    pub fn new(lint: &'static str, span: (u32, u32), message: impl Into<String>) -> Self {
+    pub fn new(
+        lint: impl Into<std::borrow::Cow<'static, str>>,
+        span: (u32, u32),
+        message: impl Into<String>,
+    ) -> Self {
         Self {
-            lint,
+            lint: lint.into(),
             level: Level::Warn,
             span,
             message: message.into(),
@@ -51,23 +57,23 @@ pub struct LintCtx<'a> {
     pub comments: &'a [(u32, u32)],
     pub chunk: &'a Chunk,
     pub cfg: &'a LintConfig,
-    /// What every name in the file refers to, resolved once
+    /// The target of every name in the file. larvae resolves this once.
     pub names: Names<'a>,
     /*
-    Every node in the file, flattened once.
+    These lists hold every node in the file, flattened once.
 
-    Each lint used to walk the tree itself, so a file was walked once per
-    lint and thirty of them meant thirty walks. Collecting into three lists
-    up front turns that into one walk and thirty passes over a vector of
-    references, which is the same work stated once instead of thirty times.
-    Measured on a 367 file corpus: 74ms to 34ms.
+    Before, each lint walked the tree itself. Thus larvae walked a file
+    once per lint, and thirty lints meant thirty walks. Now larvae collects
+    the nodes into three lists up front. That is one walk, plus thirty
+    passes over a vector of references. Measured on a corpus of 367 files:
+    74ms to 34ms.
     */
     pub exprs: Vec<&'a Expr>,
     pub stmts: Vec<&'a Stmt>,
     pub blocks: Vec<&'a Block>,
-    /// Which lints are suppressed on which line
+    /// The lints that the author suppresses on each line.
     allowed: HashMap<u32, Vec<String>>,
-    /// Byte offset of the start of each line, for the line lookup
+    /// The byte offset of the start of each line, for the line lookup.
     line_starts: Vec<u32>,
 }
 
@@ -79,13 +85,7 @@ impl<'a> LintCtx<'a> {
         chunk: &'a Chunk,
         cfg: &'a LintConfig,
     ) -> Self {
-        let mut line_starts = vec![0u32];
-
-        for (i, b) in src.bytes().enumerate() {
-            if b == b'\n' {
-                line_starts.push(i as u32 + 1);
-            }
-        }
+        let line_starts = line_starts_of(src);
 
         let names = super::scope::resolve(src, toks, chunk);
         let allowed = collect_suppressions(src, comments, &line_starts);
@@ -106,7 +106,7 @@ impl<'a> LintCtx<'a> {
         }
     }
 
-    /// Byte range covered by a token span, half open
+    /// Returns the byte range that a token span covers. The range is half open.
     pub fn bytes(&self, span: TokSpan) -> (u32, u32) {
         if span.is_empty() {
             let at = self
@@ -123,48 +123,35 @@ impl<'a> LintCtx<'a> {
         )
     }
 
-    /// Source text covered by a token span
+    /// Returns the source text that a token span covers.
     pub fn text(&self, span: TokSpan) -> &'a str {
         let (a, b) = self.bytes(span);
 
         &self.src[a as usize..b as usize]
     }
 
-    /// Text of one token
+    /// Returns the text of one token.
     pub fn tok(&self, index: u32) -> &'a str {
         self.toks[index as usize].text(self.src)
     }
 
-    /// Zero based line holding this byte
+    /// Returns the zero-based line that holds this byte.
     pub fn line(&self, byte: u32) -> u32 {
         (self.line_starts.partition_point(|&s| s <= byte) - 1) as u32
     }
 
-    /*
-    Whether an author already said this one is wrong here.
-
-    A suppression on the line above covers the line below, which is the form
-    people write, and one on the same line covers itself, which is the form
-    people write when the statement is short. Both are checked because guessing
-    which an author meant is worse than accepting either.
-    */
+    /// Returns true if the author already suppressed this finding here, see [`allowed_here`].
     pub fn suppressed(&self, finding: &Finding) -> bool {
-        let line = self.line(finding.span.0);
-
-        [line, line.wrapping_sub(1)].iter().any(|l| {
-            self.allowed
-                .get(l)
-                .is_some_and(|names| names.iter().any(|n| n == "*" || n == finding.lint))
-        })
+        allowed_here(&self.allowed, self.line(finding.span.0), &finding.lint)
     }
 
     /*
-    Whether two spans are the same code, wherever they sit.
+    Returns true if two spans are the same code, at any position.
 
-    Compared token by token rather than as text, because the text carries the
-    author's spacing and `a+b` and `a + b` are the same expression. Splitting
-    the text on whitespace does not fix that either, since it still reads `+y`
-    as one piece and `+ y` as two.
+    The function compares token by token, not as text. The text carries the
+    author's spacing, and `a+b` and `a + b` are the same expression. To
+    split the text on whitespace does not fix that. It still reads `+y` as
+    one piece and `+ y` as two.
     */
     pub fn same_text(&self, a: TokSpan, b: TokSpan) -> bool {
         if a.end - a.start != b.end - b.start {
@@ -176,13 +163,13 @@ impl<'a> LintCtx<'a> {
 }
 
 /*
-One walk, collecting every node so no lint has to walk again.
+One walk that collects every node, so that no lint walks the tree again.
 
-Written out rather than driven through the shared `Visit` trait, because that
-trait hands a callback a reference whose lifetime is the visit call rather than
-the tree. Storing those would need the lifetime laundered, and a walk written
-honestly is cheaper than an `unsafe` that has to be argued about every time
-somebody reads it.
+This walk is written out, and does not use the shared `Visit` trait. That
+trait gives a callback a reference whose lifetime is the visit call, not the
+tree. To store those references would need an `unsafe` change of the
+lifetime. A plain walk is cheaper than an `unsafe` block that each reader
+must verify again.
 */
 fn flatten(chunk: &Chunk) -> (Vec<&Expr>, Vec<&Stmt>, Vec<&Block>) {
     let mut out = Collected::default();
@@ -352,13 +339,46 @@ impl<'a> Collected<'a> {
     }
 }
 
+/// Returns the start of each line, to turn a byte offset into a line number.
+pub(crate) fn line_starts_of(src: &str) -> Vec<u32> {
+    let mut line_starts = vec![0u32];
+
+    for (i, b) in src.bytes().enumerate() {
+        if b == b'\n' {
+            line_starts.push(i as u32 + 1);
+        }
+    }
+
+    line_starts
+}
+
+/*
+Returns true if the author already suppressed `lint` on `line`.
+
+A suppression on the line above covers the line below, which is the usual
+form. A suppression on the same line covers itself, which authors write when
+the statement is short. The function accepts both forms, because to guess
+the author's intent is worse than to accept either form.
+
+Worm findings share this function. Their comments arrive as spans in the
+lint reply, not from larvae's lexer.
+*/
+pub(crate) fn allowed_here(allowed: &HashMap<u32, Vec<String>>, line: u32, lint: &str) -> bool {
+    [line, line.wrapping_sub(1)].iter().any(|l| {
+        allowed
+            .get(l)
+            .is_some_and(|names| names.iter().any(|n| n == "*" || n == lint))
+    })
+}
+
 /*
 Find every `-- larvae: allow(name, other)` in the file.
 
-What counts as one lives in [`crate::flags`], because `larvae process` reads
-the same comments to know which ones it can leave out of the output.
+The definition of a valid suppression lives in [`crate::flags`], because
+`larvae process` reads the same comments to know which ones it can omit
+from the output.
 */
-fn collect_suppressions(
+pub(crate) fn collect_suppressions(
     src: &str,
     comments: &[(u32, u32)],
     line_starts: &[u32],
@@ -419,7 +439,7 @@ mod tests {
         assert_eq!(found[&0], ["unused_variable", "shadowing"]);
     }
 
-    /// A project switching over should not have to rewrite its comments
+    /// A project that switches to larvae does not have to rewrite its comments.
     #[test]
     fn selenes_spelling_works_too() {
         let found = suppressions("-- selene: allow(unused_variable)\nlocal x = 1\n");

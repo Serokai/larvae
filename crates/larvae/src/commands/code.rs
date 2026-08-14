@@ -1,11 +1,12 @@
 /*!
-`larvae self code`, wiring an editor up for completion and hover docs.
+`larvae self code` configures an editor for completion and hover docs.
 
-Two ways to get there, and we prefer the tidier one. Even Better TOML can map a
-filename pattern to a schema in the editor's user settings, which leaves every
-`larvae.toml` alone and covers every project at once, since the pattern matches
-the filename wherever it sits. Without it we fall back to the `#:schema` line at
-the top of the file, which any Taplo based editor reads.
+The command has two methods, and it prefers the first. Even Better TOML can map
+a filename pattern to a schema in the editor's user settings. This method does
+not change any `larvae.toml` file. The pattern matches the filename in every
+location, so one entry covers every project. If Even Better TOML is not
+installed, the command writes the `#:schema` line at the top of the file. Every
+Taplo based editor reads that line.
 */
 
 use std::path::{Path, PathBuf};
@@ -15,7 +16,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::ui;
 
-/// Where the schema is hosted (this repo)
+/// The URL where this repository hosts the schema
 pub const SCHEMA_URL: &str =
     "https://raw.githubusercontent.com/larvae-luau/larvae/master/crates/larvae/larvae.schema.json";
 
@@ -23,13 +24,12 @@ pub const SCHEMA_URL: &str =
 const ASSOCIATIONS: &str = "evenBetterToml.schema.associations";
 
 /*
-Matches `larvae.toml` at a path root or after a separator, on either platform.
-Written as a regex because that is what the setting takes, not because we want
-one.
+The pattern matches `larvae.toml` at a path root or after a separator, on each
+platform. The setting accepts only a regex, so the pattern is a regex.
 */
 const PATTERN: &str = r"(^|[/\\])larvae\.toml$";
 
-/// The directive line, for the fallback and for `init`
+/// The directive line for the fallback and for `init`
 pub fn directive() -> String {
     format!("#:schema {SCHEMA_URL}")
 }
@@ -40,6 +40,9 @@ pub fn run(root: &Path) -> Result<ExitCode> {
     if !path.exists() {
         bail!("no larvae.toml here - run `larvae init` first");
     }
+
+    // a project with worms has a schema of its own, and it wins for that project
+    project_schema(root)?;
 
     match installed() {
         Some(editor) => {
@@ -56,7 +59,7 @@ pub fn run(root: &Path) -> Result<ExitCode> {
     }
 }
 
-/// One editor's extension directory and where its user settings live
+/// The extension directory of one editor and the path of its user settings
 struct Editor {
     name: &'static str,
     extensions: PathBuf,
@@ -64,11 +67,12 @@ struct Editor {
 }
 
 /*
-The editors that ship Even Better TOML, in the order we would rather find them.
+The editors that can hold Even Better TOML, in the preferred search order.
 
-Extensions live beside the home directory and settings under the config
-directory, which `dirs` already resolves per platform: `~/.config` on Linux,
-Application Support on macOS, Roaming on Windows.
+Each editor keeps extensions beside the home directory and user settings under
+the config directory. The `dirs` crate resolves the config directory for each
+platform: `~/.config` on Linux, Application Support on macOS, Roaming on
+Windows.
 */
 fn editors() -> Vec<Editor> {
     let (Some(home), Some(config)) = (dirs::home_dir(), dirs::config_dir()) else {
@@ -92,8 +96,8 @@ fn editors() -> Vec<Editor> {
 }
 
 /*
-Look for the extension on disk rather than shelling out to `code`, which is
-often not on PATH even where the editor is installed.
+Look for the extension on disk and do not run `code`. The `code` command is
+often not on PATH when the editor is installed.
 */
 fn installed() -> Option<Editor> {
     editors().into_iter().find(|editor| {
@@ -101,7 +105,7 @@ fn installed() -> Option<Editor> {
             return false;
         };
 
-        // versioned directories, ex: tamasfe.even-better-toml-0.19.2
+        // The directory names have versions, for example: tamasfe.even-better-toml-0.19.2
         entries.flatten().any(|e| {
             e.file_name()
                 .to_string_lossy()
@@ -111,12 +115,118 @@ fn installed() -> Option<Editor> {
 }
 
 /*
-Add the association to the editor's user settings.
+Add the association to the user settings of the editor.
 
-User settings rather than a `.vscode` folder in the project, because the
-pattern matches `larvae.toml` wherever it sits, so one entry covers every
-project this person will ever open instead of one per repo.
+The command writes user settings and not a `.vscode` folder in the project.
+The pattern matches `larvae.toml` in every location. So one entry covers every
+project that the user opens, and each repository does not need its own entry.
 */
+/*
+Point this project at the schema that knows its worms.
+
+The hosted schema covers every project, so it cannot describe the rules, the
+lints, and the settings that one project's worms declare. Larvae writes a
+merged copy into the cache directory when it loads worms. This association
+lives in the settings of the project, so it applies to this repository alone.
+*/
+/*
+The `file://` URL of a path, because an editor takes a URL and not a path.
+
+Even Better TOML refuses a relative value: it reports `relative URL without a
+base`. So larvae writes an absolute URL. The URL names this machine, which is
+why this entry belongs to a developer and not to a repository.
+*/
+fn file_url(path: &Path) -> String {
+    let absolute = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let text = absolute.display().to_string();
+
+    match cfg!(windows) {
+        // a windows path starts with a drive letter, and the URL needs a root
+        true => format!("file:///{}", text.replace('\\', "/")),
+
+        false => format!("file://{text}"),
+    }
+}
+
+fn project_schema(root: &Path) -> Result<()> {
+    let config = crate::config::Config::load(&root.join("larvae.toml"))?;
+    let generated = root
+        .join(&config.process.cache_dir)
+        .join(crate::schema::FILE);
+
+    /*
+    The command writes the schema itself rather than wait for a build.
+
+    A user runs this command to set an editor up, often before any other
+    command has run in the project. Without this the schema does not exist
+    yet, the command finds nothing to point at, and the editor completes
+    nothing that a worm declares. Loading the worms also refreshes a schema
+    that a worm has since changed.
+    */
+    match crate::worm::registry::Registry::for_project(root, &config) {
+        Ok(worms) if !worms.is_empty() => {
+            crate::schema::write(&root.join(&config.process.cache_dir), &worms)?;
+        }
+
+        // a project with no worms wants the schema that larvae hosts
+        Ok(_) => return Ok(()),
+
+        /*
+        A worm that larvae cannot load is a problem for a build to report.
+        Here it only means there is no schema of this project to point at,
+        and the hosted schema still answers.
+        */
+        Err(e) => {
+            eprintln!(
+                "Cannot read the worms of this project, so the editor keeps the hosted schema."
+            );
+            eprintln!("  {e:#}");
+
+            return Ok(());
+        }
+    }
+
+    if !generated.exists() {
+        return Ok(());
+    }
+
+    let settings = root.join(".vscode/settings.json");
+    let target = file_url(&generated);
+    let listed = target.clone();
+
+    let changed = edit_settings(&settings, move |table| {
+        let associations = table
+            .entry(ASSOCIATIONS)
+            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+
+        let Some(associations) = associations.as_object_mut() else {
+            bail!("{ASSOCIATIONS} is not an object, leaving it alone");
+        };
+
+        if associations.get(PATTERN).and_then(|v| v.as_str()) == Some(listed.as_str()) {
+            return Ok(false);
+        }
+
+        associations.insert(PATTERN.to_owned(), listed.into());
+
+        Ok(true)
+    })?;
+
+    match changed {
+        true => ui::print_success(&format!(
+            "{} now points at {target}, which knows this project's worms",
+            ui::rel(&settings)
+        )),
+
+        false => ui::print_success(&format!(
+            "{} already points at {target}",
+            ui::rel(&settings)
+        )),
+    }
+
+    Ok(())
+}
+
 fn associate(path: &Path) -> Result<ExitCode> {
     let changed = edit_settings(path, |table| {
         let associations = table
@@ -147,9 +257,10 @@ fn associate(path: &Path) -> Result<ExitCode> {
 }
 
 /*
-Read an editor's settings, let a caller change them, and write back only if it
-did. Not writing when nothing changed matters because reserializing drops the
-comments VS Code allows, so an unnecessary write costs somebody their notes.
+Read the settings of an editor, let the caller change them, and write the file
+only after a change. A write serializes plain JSON and removes the comments
+that VS Code permits. So a write without a change deletes the notes of the
+user.
 */
 pub fn edit_settings(
     path: &Path,
@@ -179,9 +290,9 @@ pub fn edit_settings(
 }
 
 /*
-Read existing settings, tolerating the comments and trailing commas VS Code
-allows. We reserialize as plain JSON, so a comment in there does not survive,
-which is why an association that is already correct returns without writing.
+Read the current settings, and accept the comments and trailing commas that
+VS Code permits. The write path serializes plain JSON and removes comments.
+For that reason, a correct association returns without a write.
 */
 fn read_settings(path: &Path) -> Result<serde_json::Value> {
     if !path.exists() {
@@ -198,7 +309,7 @@ fn read_settings(path: &Path) -> Result<serde_json::Value> {
     json5::from_str(&text).with_context(|| format!("{} is not valid JSON", ui::rel(path)))
 }
 
-/// The fallback, a `#:schema` line any Taplo based editor reads
+/// The fallback: a `#:schema` line that every Taplo based editor reads
 fn directive_in(path: &Path) -> Result<ExitCode> {
     let content = std::fs::read_to_string(path)?;
     let directive = directive();
@@ -209,7 +320,7 @@ fn directive_in(path: &Path) -> Result<ExitCode> {
 
         return Ok(ExitCode::SUCCESS);
     } else if first.starts_with("#:schema") {
-        // replace a stale or foreign directive rather than stacking a second
+        // Replace a stale or foreign directive; do not add a second directive.
         let rest = content.split_once('\n').map(|(_, r)| r).unwrap_or("");
 
         format!("{directive}\n{rest}")
@@ -250,7 +361,7 @@ mod tests {
         );
     }
 
-    /// The pattern has to survive JSON escaping as the regex it is
+    /// JSON escaping must keep the pattern a valid regex.
     #[test]
     fn the_written_pattern_is_the_regex_even_better_toml_expects() {
         let tmp = tempfile::tempdir().unwrap();
@@ -266,7 +377,7 @@ mod tests {
         );
     }
 
-    /// Somebody's real settings, which we must not trample
+    /// The real settings of a user; the command must not overwrite them.
     #[test]
     fn other_settings_keep_their_keys() {
         let tmp = tempfile::tempdir().unwrap();
@@ -324,7 +435,7 @@ mod tests {
         assert_eq!(read(&path)["editor.tabSize"], 2);
     }
 
-    /// Rewriting drops comments, so an already correct file must not be touched
+    /// A rewrite removes comments, so the command must not change a correct file.
     #[test]
     fn a_correct_association_leaves_the_file_byte_identical() {
         let tmp = tempfile::tempdir().unwrap();
@@ -379,7 +490,7 @@ mod tests {
         assert!(run(tmp.path()).is_err());
     }
 
-    /// A settings path per editor, so we never write into the wrong one
+    /// Each editor has its own settings path, so the command writes to the correct file.
     #[test]
     fn every_editor_has_its_own_settings_path() {
         let paths: Vec<_> = editors().into_iter().map(|e| e.settings).collect();

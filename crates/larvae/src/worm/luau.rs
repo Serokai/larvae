@@ -1,10 +1,10 @@
 /*!
 The Luau guest form, over `mlua`.
 
-Nothing crosses a memory boundary here. mlua marshals strings natively, so a
-Luau worm is an ordinary function and the whole ptr/len dance in [`super::host`]
-has no equivalent. That is the point of offering the form: a transform somebody
-writes in an afternoon should not need a toolchain or a `wasm32` target.
+No data crosses a memory boundary here. mlua marshals strings natively. Thus a
+Luau worm is an ordinary function, and the ptr/len protocol in [`super::host`]
+has no equivalent. This is the purpose of the form: a small transform that an
+author writes quickly must not need a toolchain or a `wasm32` target.
 
 ```lua
 return {
@@ -21,30 +21,40 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
+use mlua::LuaSerdeExt;
 
 use super::Outcome;
 use super::ctx::FileCtx;
+use super::proto;
 use crate::rules::edits::Edit;
 
-/// A runaway worm dies instead of hanging the build, checked every N VM instructions
+/// Larvae checks every N VM instructions and stops a worm that runs too long. Thus a
+/// worm that does not stop cannot hang the build.
 const INTERRUPT_EVERY: u32 = 1_000_000;
 
-/// Ceiling on one worm's VM, generous for a transform and fatal for a leak
+/// The memory limit for one worm VM. It is large for a transform and stops a leak.
 const MEMORY_LIMIT: usize = 256 * 1024 * 1024;
 
 /// A loaded Luau worm
 pub struct LuauWorm {
-    /// Owns the VM `compile` came out of, so the worm outlives nothing it needs
+    /// The worm owns the VM that `compile` came from, so each item the worm needs stays alive
     #[allow(dead_code)]
     lua: mlua::Lua,
-    /// The front-end entry point, absent when the worm only ships rules
+    /// The name of the worm, so an error about a missing function names it
+    name: String,
+    /// The front-end entry point. It is absent when the worm supplies only rules.
     compile: Option<mlua::Function>,
-    /// `visit` per rule the worm declared, by rule name
+    /// Optional. It returns the layout of a claimed file for `larvae fmt`.
+    format: Option<mlua::Function>,
+    /// Optional. It returns the findings of a claimed file for `larvae lint`.
+    lint: Option<mlua::Function>,
+    /// The `visit` function for each rule the worm declared, keyed by rule name
     rules: BTreeMap<String, mlua::Function>,
-    /// Optional, called once with settings before any file is seen
+    /// Optional. Larvae calls it once with the settings before the worm sees a file.
     init: Option<mlua::Function>,
-    /// Interrupt budget, reset per call so the cap is per file and not per build
+    /// The interrupt budget. A reset before each call makes the limit apply
+    /// per file, not per build.
     budget: Arc<AtomicU32>,
 }
 
@@ -57,10 +67,10 @@ impl LuauWorm {
             .context("could not bound the worm's memory")?;
 
         /*
-        Luau's own sandbox, which freezes the globals and gives each chunk a
-        fresh environment. It is what makes "purity is enforced, not requested"
-        true rather than aspirational, and it is the reason the Luau form does
-        not need the import-table argument the wasm form leans on.
+        This is the sandbox of Luau itself. It freezes the globals and gives
+        each chunk a new environment. The sandbox enforces purity and does not
+        only request it. For this reason the Luau form does not need the
+        import-table argument that the wasm form uses.
         */
         lua.sandbox(true).context("could not sandbox the worm")?;
 
@@ -70,14 +80,30 @@ impl LuauWorm {
             .eval()
             .with_context(|| format!("worm `{chunk_name}` failed to load"))?;
 
-        let compile = match exports.get::<Option<mlua::Table>>("frontend")? {
+        let (compile, format, lint) = match exports.get::<Option<mlua::Table>>("frontend")? {
             Some(frontend) => {
-                Some(frontend.get::<mlua::Function>("compile").with_context(|| {
+                let compile = frontend.get::<mlua::Function>("compile").with_context(|| {
                     format!("worm `{chunk_name}`: frontend.compile is not a function")
-                })?)
+                })?;
+
+                // both are optional, in the same way `fmt` and `[lints]` are
+                // optional in the manifest
+                let format = frontend
+                    .get::<Option<mlua::Function>>("format")
+                    .with_context(|| {
+                        format!("worm `{chunk_name}`: frontend.format is not a function")
+                    })?;
+
+                let lint = frontend
+                    .get::<Option<mlua::Function>>("lint")
+                    .with_context(|| {
+                        format!("worm `{chunk_name}`: frontend.lint is not a function")
+                    })?;
+
+                (Some(compile), format, lint)
             }
 
-            None => None,
+            None => (None, None, None),
         };
 
         let mut rules = BTreeMap::new();
@@ -101,9 +127,10 @@ impl LuauWorm {
         }
 
         /*
-        A worm that loops forever would otherwise hang the build with no way
-        out, so the VM is interrupted periodically and asked to stop. Armed
-        once here, and the budget is reset per call so the cap is per file.
+        A worm that loops forever would hang the build with no escape. Thus
+        larvae interrupts the VM at intervals and stops the worm. Larvae arms
+        the interrupt once here. A reset of the budget before each call makes
+        the limit apply per file.
         */
         let budget = Arc::new(AtomicU32::new(0));
         let counter = Arc::clone(&budget);
@@ -118,22 +145,26 @@ impl LuauWorm {
 
         Ok(Self {
             lua,
+            name: chunk_name.to_owned(),
             compile,
+            format,
+            lint,
             rules,
             init,
             budget,
         })
     }
 
-    /// Hand over settings once, before any file is seen
+    /// Give the settings to the worm once, before the worm sees a file
     ///
-    /// A Luau worm gets real tables rather than a TOML string, because mlua
-    /// marshals them natively and making an author parse TOML in Luau would be
-    /// hostile. The wasm form gets the string, since that is what is natural there.
+    /// A Luau worm gets real tables and not a TOML string. mlua marshals the
+    /// tables natively, and an author must not have to parse TOML in Luau. The
+    /// wasm form gets the string, because the string is the natural shape there.
     pub fn init(
         &mut self,
         config: &toml::Value,
         rules: &BTreeMap<String, toml::Value>,
+        settings: &super::Settings,
     ) -> Result<()> {
         let Some(init) = self.init.clone() else {
             return Ok(());
@@ -146,21 +177,30 @@ impl LuauWorm {
             table.set(name.as_str(), to_lua(&self.lua, value)?)?;
         }
 
-        init.call::<()>((cfg, table))
+        /*
+        The third argument holds the project settings, for a worm that formats
+        or reports. A worm with a two-argument init stays correct, because Lua
+        drops the arguments a function does not name.
+        */
+        let extra = self.lua.create_table()?;
+        extra.set("fmt", json_to_lua(&self.lua, &settings.fmt)?)?;
+        extra.set("lint", json_to_lua(&self.lua, &settings.lint)?)?;
+
+        init.call::<()>((cfg, table, extra))
             .context("worm rejected its configuration")?;
 
         Ok(())
     }
 
-    /// Rule names this worm actually implements
+    /// The rule names this worm implements
     pub fn rule_names(&self) -> impl Iterator<Item = &str> {
         self.rules.keys().map(String::as_str)
     }
 
     /*
-    Run one rule over every node its filter matched. The tree, the source and
-    the edit queue live in Lua app data for the duration, so a handle is only
-    ever a pair of integers and never a pointer into anything of ours.
+    Run one rule over every node that its filter matched. The tree, the source,
+    and the edit queue live in the Lua app data while the rule runs. Thus a
+    handle is only a pair of integers and never a pointer into host data.
     */
     pub fn run_rule(
         &mut self,
@@ -214,7 +254,7 @@ impl LuauWorm {
                 ok: true,
             }),
 
-            // a worm reporting a problem rather than producing output
+            // the worm reports a problem and does not produce output
             Ok(mlua::Value::Nil) => bail!("worm returned nothing"),
 
             Ok(other) => bail!("worm returned {}, expected a string", other.type_name()),
@@ -225,12 +265,88 @@ impl LuauWorm {
             }),
         }
     }
+
+    /*
+    Get the layout of one claimed file, for the host to render.
+
+    The reply crosses as one Lua table in the wire shape of [`proto`], and
+    serde deserializes it directly. Thus this transport cannot drift from the
+    contract, because no conversion is written by hand.
+    */
+    pub fn format(&mut self, source: &str) -> Result<proto::FormatReply> {
+        let Some(format) = self.format.clone() else {
+            bail!(
+                "worm `{}` sets fmt = true but its table has no frontend.format",
+                self.name
+            );
+        };
+
+        self.budget.store(0, Ordering::Relaxed);
+
+        let value = format
+            .call::<mlua::Value>(source)
+            .map_err(|e| anyhow!(worm_message(&e)))?;
+
+        let reply: LuaFormatReply = self
+            .lua
+            .from_value(value)
+            .context("the format reply does not have the documented shape")?;
+
+        Ok(proto::FormatReply {
+            /*
+            The version field is a contract between transports that ship
+            apart. A Luau worm and this host share one process, so the host
+            fills the version and the worm does not state it.
+            */
+            doc: proto::DOC_VERSION,
+            document: reply.document,
+            spans: reply.spans,
+            comments: reply.comments,
+        })
+    }
+
+    /// Get the problems of one claimed file. The host decides the severity.
+    pub fn lint(&mut self, source: &str) -> Result<proto::LintReply> {
+        let Some(lint) = self.lint.clone() else {
+            bail!(
+                "worm `{}` declares lints but its table has no frontend.lint",
+                self.name
+            );
+        };
+
+        self.budget.store(0, Ordering::Relaxed);
+
+        let value = lint
+            .call::<mlua::Value>(source)
+            .map_err(|e| anyhow!(worm_message(&e)))?;
+
+        self.lua
+            .from_value(value)
+            .context("the lint reply does not have the documented shape")
+    }
 }
 
 /*
-A handle is two integers and nothing else. It deliberately does not hold the
-file it came from, so that stashing one in a global and using it on the next
-file is caught by the epoch rather than silently reading the wrong tree.
+The format reply, as a Luau worm returns it.
+
+The shape is [`proto::FormatReply`] without the `doc` field. See the comment
+in [`LuauWorm::format`] for the reason the field is absent here.
+*/
+#[derive(serde::Deserialize)]
+struct LuaFormatReply {
+    #[serde(default)]
+    document: Option<proto::WireDoc>,
+    #[serde(default)]
+    spans: Vec<(u32, u32)>,
+    #[serde(default)]
+    comments: Vec<(u32, u32)>,
+}
+
+/*
+A handle is two integers and nothing else. By intent, it does not hold the
+file it came from. If a worm stores a handle in a global and uses it on the
+next file, the epoch check catches this. Thus the handle does not read the
+wrong tree silently.
 */
 #[derive(Clone, Copy)]
 struct NodeRef {
@@ -244,7 +360,7 @@ impl NodeRef {
     }
 }
 
-// Needed to take a NodeRef as a function argument rather than an AnyUserData
+// This impl lets a function take a NodeRef argument and not an AnyUserData
 impl mlua::FromLua for NodeRef {
     fn from_lua(value: mlua::Value, _: &mlua::Lua) -> mlua::Result<Self> {
         match value {
@@ -258,7 +374,7 @@ impl mlua::FromLua for NodeRef {
     }
 }
 
-/// The file currently being walked, or an error if a worm called us outside one
+/// The file that larvae walks now, or an error if a worm calls this outside a walk
 fn current(lua: &mlua::Lua) -> mlua::Result<Arc<FileCtx>> {
     lua.app_data_ref::<Arc<FileCtx>>()
         .map(|file| Arc::clone(&file))
@@ -292,7 +408,7 @@ impl mlua::UserData for NodeRef {
             Ok(file.table.text(this.id, &file.src).unwrap_or("").to_owned())
         });
 
-        // byte offsets into the original source, half open
+        // byte offsets into the original source, as a half open range
         methods.add_method("span", |lua, this, ()| {
             let file = checked(lua, this)?;
             let node = file
@@ -348,7 +464,7 @@ fn edit_remove(lua: &mlua::Lua, (_ctx, node): (mlua::Value, NodeRef)) -> mlua::R
         .map_err(|e| mlua::Error::runtime(e.to_string()))
 }
 
-/// TOML to a Luau value, so a Luau worm reads a table rather than a string
+/// Convert TOML to a Luau value, so a Luau worm reads a table and not a string
 fn to_lua(lua: &mlua::Lua, value: &toml::Value) -> mlua::Result<mlua::Value> {
     Ok(match value {
         toml::Value::String(s) => mlua::Value::String(lua.create_string(s)?),
@@ -392,9 +508,35 @@ fn to_lua_opt(lua: &mlua::Lua, value: Option<&toml::Value>) -> mlua::Result<mlua
 }
 
 /*
-A Luau error arrives with the chunk name and line glued to the front and a
-traceback glued to the back. Neither helps a user who wants to know what the
-worm objected to, so take the message the worm actually wrote.
+Convert one settings field to a Luau value.
+
+The registry stores each field as JSON text, because the native transport
+speaks JSON. A Luau worm gets a real table instead, for the same reason it
+gets its config as a table. An empty field gives an empty table, so a worm
+indexes the settings without a nil check.
+
+The serializer turns a JSON null into `nil` and not into a userdata marker,
+so an absent option compares equal to nil in the worm.
+*/
+fn json_to_lua(lua: &mlua::Lua, json: &str) -> Result<mlua::Value> {
+    let value: serde_json::Value = match json {
+        "" => serde_json::Value::Object(Default::default()),
+
+        text => serde_json::from_str(text).context("the settings are not valid JSON")?,
+    };
+
+    let options = mlua::serde::SerializeOptions::new()
+        .serialize_none_to_null(false)
+        .serialize_unit_to_null(false);
+
+    lua.to_value_with(&value, options)
+        .context("the settings do not convert to Luau")
+}
+
+/*
+A Luau error arrives with the chunk name and line at the front and a traceback
+at the back. These parts do not help a user who wants the reason from the
+worm. Thus this function extracts the message that the worm wrote.
 */
 fn worm_message(e: &mlua::Error) -> String {
     let full = match e {
@@ -684,7 +826,7 @@ return {
         );
     }
 
-    /// The whole reason handles carry an epoch
+    /// This test shows the reason a handle carries an epoch
     #[test]
     fn a_handle_stashed_across_files_is_caught() {
         let mut w = LuauWorm::load(
@@ -712,7 +854,7 @@ return {
         let ids = matching(&first, Kind::Number);
         w.run_rule("stash", Arc::clone(&first), &ids).unwrap();
 
-        // second file, and the worm reaches for the handle it kept
+        // on the second file, the worm uses the handle it kept
         let second = file("local b = 2\n");
         let ids = matching(&second, Kind::Number);
         let err = w.run_rule("stash", Arc::clone(&second), &ids).unwrap_err();
@@ -761,7 +903,8 @@ return {
         let config = toml::from_str::<toml::Value>("factory = \"vide\"").unwrap();
         let rules = BTreeMap::from([("strip".to_owned(), toml::Value::Boolean(true))]);
 
-        w.init(&config, &rules).unwrap();
+        // the default settings also show that a two-argument init keeps working
+        w.init(&config, &rules, &Default::default()).unwrap();
 
         let f = file("local x = 1\n");
         let ids = matching(&f, Kind::Number);
@@ -769,6 +912,251 @@ return {
         assert_eq!(
             w.run_rule("strip", Arc::clone(&f), &ids).unwrap()[0].2,
             "vide/true"
+        );
+    }
+}
+
+#[cfg(test)]
+mod frontend_tests {
+    use super::*;
+    use crate::fmt::FmtConfig;
+
+    fn worm(body: &str) -> LuauWorm {
+        LuauWorm::load(body, "test").expect("worm loads")
+    }
+
+    /// The full path: a worm document with a host span, rendered by the host
+    #[test]
+    fn a_document_with_a_host_span_renders_in_the_project_style() {
+        let mut w = worm(
+            r#"
+return {
+    frontend = {
+        compile = function(source) return source end,
+        format = function(source)
+            local at = string.find(source, "local", 1, true) - 1
+            return {
+                document = {
+                    concat = {
+                        { src = { 0, at } },
+                        { host = { start = at, ["end"] = #source, parse = "block" } },
+                    },
+                },
+                comments = {},
+            }
+        end,
+    },
+}
+"#,
+        );
+
+        let src = "<Frame>\nlocal  x  =  1";
+        let reply = w.format(src).unwrap();
+        let out = proto::render_format(src, &reply, &FmtConfig::default()).unwrap();
+
+        assert_eq!(out, "<Frame>\nlocal x = 1\n");
+    }
+
+    /// The least a worm can do: name the Luau, and larvae lays it out
+    #[test]
+    fn named_luau_spans_format_through_the_host() {
+        let mut w = worm(
+            r#"
+return {
+    frontend = {
+        compile = function(source) return source end,
+        format = function(source)
+            local first = string.find(source, "local", 1, true) - 1
+            local stop = string.find(source, "\n</Frame>", 1, true) - 1
+            return { spans = { { first, stop } } }
+        end,
+    },
+}
+"#,
+        );
+
+        let src = "<Frame>\nlocal  x   =  1\n</Frame>\n";
+        let reply = w.format(src).unwrap();
+        let out = proto::render_format(src, &reply, &FmtConfig::default()).unwrap();
+
+        assert_eq!(out, "<Frame>\nlocal x = 1\n</Frame>\n");
+    }
+
+    #[test]
+    fn a_lint_reply_crosses_with_findings_and_a_shadow() {
+        let mut w = worm(
+            r#"
+return {
+    frontend = {
+        compile = function(source) return source end,
+        lint = function(source)
+            return {
+                findings = {
+                    { span = { 0, 4 }, lint = "tidy", message = "untidy", help = "tidy it" },
+                },
+                comments = { { 5, 9 } },
+                luau = string.rep(" ", #source),
+            }
+        end,
+    },
+}
+"#,
+        );
+
+        let reply = w.lint("ab cd efgh").unwrap();
+
+        assert_eq!(reply.findings.len(), 1);
+        assert_eq!(reply.findings[0].span, (0, 4));
+        assert_eq!(reply.findings[0].lint, "tidy");
+        assert_eq!(reply.findings[0].message, "untidy");
+        assert_eq!(reply.findings[0].help.as_deref(), Some("tidy it"));
+        assert_eq!(reply.comments, vec![(5, 9)]);
+        assert_eq!(reply.luau.as_deref(), Some("          "));
+    }
+
+    /// An empty list and an absent list both mean "none"
+    #[test]
+    fn empty_and_absent_lists_both_cross() {
+        let mut w = worm(
+            r#"
+return {
+    frontend = {
+        compile = function(source) return source end,
+        lint = function() return { findings = {} } end,
+    },
+}
+"#,
+        );
+
+        let reply = w.lint("x").unwrap();
+
+        assert!(reply.findings.is_empty());
+        assert!(reply.comments.is_empty());
+        assert_eq!(reply.luau, None);
+    }
+
+    /// The manifest promised a capability that the table does not supply
+    #[test]
+    fn a_missing_format_function_names_the_manifest_flag() {
+        let mut w = worm("return { frontend = { compile = function(source) return source end } }");
+
+        let err = w.format("x").unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("sets fmt = true but its table has no frontend.format"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_missing_lint_function_names_the_manifest_declaration() {
+        let mut w = worm("return { frontend = { compile = function(source) return source end } }");
+
+        let err = w.lint("x").unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("declares lints but its table has no frontend.lint"),
+            "{err}"
+        );
+    }
+
+    /// The settings arrive as tables, so no worm parses JSON
+    #[test]
+    fn init_hands_over_the_settings_as_tables() {
+        let mut w = worm(
+            r#"
+local seen = nil
+return {
+    init = function(config, rules, settings)
+        seen = tostring(settings.fmt.column_width) .. "/" .. tostring(settings.lint.tidy)
+    end,
+    frontend = {
+        compile = function(source) return source end,
+        lint = function()
+            return {
+                findings = {
+                    { span = { 0, 1 }, lint = "probe", message = "saw " .. seen },
+                },
+            }
+        end,
+    },
+}
+"#,
+        );
+
+        let settings = crate::worm::Settings {
+            fmt: r#"{"column_width":88}"#.to_owned(),
+            lint: r#"{"tidy":"warn"}"#.to_owned(),
+        };
+        let config = toml::from_str::<toml::Value>("").unwrap();
+
+        w.init(&config, &BTreeMap::new(), &settings).unwrap();
+
+        let reply = w.lint("x").unwrap();
+
+        assert_eq!(reply.findings[0].message, "saw 88/warn");
+    }
+
+    /// The version field is an in-tree contract, so the host fills it
+    #[test]
+    fn a_reply_without_a_doc_field_gets_the_host_version() {
+        let mut w = worm(
+            r#"
+return {
+    frontend = {
+        compile = function(source) return source end,
+        format = function() return { document = "nil" } end,
+    },
+}
+"#,
+        );
+
+        let reply = w.format("x").unwrap();
+
+        assert_eq!(reply.doc, proto::DOC_VERSION);
+        assert_eq!(reply.document, Some(proto::WireDoc::Nil));
+    }
+
+    /// A worm error carries the reason the worm wrote, not a traceback
+    #[test]
+    fn a_format_error_carries_the_worm_message() {
+        let mut w = worm(
+            r#"
+return {
+    frontend = {
+        compile = function(source) return source end,
+        format = function() error("line 2 is not markup") end,
+    },
+}
+"#,
+        );
+
+        let err = w.format("x").unwrap_err();
+
+        assert!(err.to_string().contains("line 2 is not markup"), "{err}");
+    }
+
+    /// A reply of the wrong shape is refused with the reason, not a panic
+    #[test]
+    fn a_malformed_reply_is_refused() {
+        let mut w = worm(
+            r#"
+return {
+    frontend = {
+        compile = function(source) return source end,
+        format = function() return "not a table" end,
+    },
+}
+"#,
+        );
+
+        let err = w.format("x").unwrap_err();
+
+        assert!(
+            format!("{err:#}").contains("does not have the documented shape"),
+            "{err:#}"
         );
     }
 }

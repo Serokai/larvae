@@ -1,14 +1,14 @@
 /*!
-`[worms]`, where a project names the extensions it wants.
+`[worms]`: the table where a project names the extensions that it wants.
 
-The key is the worm's name, which has to match `name` in its `worm.toml`,
-because it is also what namespaces the worm's rules and its settings. One
-identity rather than three that can drift.
+The key is the name of the worm, and it must match `name` in its `worm.toml`.
+The same name also namespaces the rules and the settings of the worm. One
+identity cannot drift; three identities can.
 
-Everything about one worm sits under its own key: where it comes from, when it
-runs, which of its rules are on, and the settings it reads. The settings stay a
-table of their own rather than loose keys, so a worm calling something `repo`
-cannot collide with the key that says where to fetch it from.
+All data about one worm sits under its own key: its source, its run position,
+its enabled rules, and the settings that it reads. The settings stay in their
+own table and not in loose keys. So a worm setting named `repo` cannot
+collide with the key that names the fetch source.
 */
 
 use std::collections::BTreeMap;
@@ -19,64 +19,97 @@ use serde::Deserialize;
 
 use crate::worm::manifest::Stage;
 
-/// One worm, as the project asked for it
+/// One worm, as the project requests it
 #[derive(Debug, Clone, PartialEq)]
 pub struct Entry {
+    /// The choice of the user about the inherited lints. It overrides what
+    /// the worm declared in its manifest.
+    pub inherit_lints: Option<bool>,
+    /// Which of the inherited lints and format options apply to this worm
+    pub inherit: Inherit,
     pub source: Source,
-    /// Where this worm's rules sit, the user's word being final
+    /// The position of the rules of this worm; the user setting wins
     pub run_order: Option<Stage>,
     /*
-    Rules the user switched on, by name. They live here rather than in [rules]
-    so a worm cannot shadow a builtin: a worm declaring const_requires would
-    otherwise be eaten by our typed config and never see it.
+    The rules that the user switched on, by name. They live here and not in
+    [rules], so a worm cannot shadow a builtin. Otherwise the typed config of
+    larvae would consume a worm declaration of const_requires, and the worm
+    would never see it.
     */
     pub rules: BTreeMap<String, toml::Value>,
-    /// The worm's own settings, handed over untouched. We never read inside one.
+    /// The settings of the worm, passed on unchanged. larvae never reads inside them.
     pub config: toml::Value,
 }
 
-/// Where one worm comes from
+/// The source of one worm
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
     /// A GitHub release, `owner/repo@version`
     Release {
         repo: String,
         version: String,
-        /// Asset to fetch, defaults to `<name>-worm.zip` then `worm.zip`
+        /// The asset to fetch; the default is `<name>-worm.zip`, then `worm.zip`
         asset: Option<String>,
     },
 
     /*
-    A directory on disk. Not how a worm ships, but a worm author has to be able
-    to run their own before publishing it, and so does anyone debugging one.
+    A directory on disk. A worm does not ship this way. But a worm author
+    must run their worm before publication, and a debug session needs the
+    same access.
     */
     Local {
         path: PathBuf,
     },
+
+    /*
+    A crate on crates.io that ships the worm as its binary.
+
+    `cargo install` builds from source on the machine of the user, so one
+    published crate serves every platform and a worm author uploads no
+    per platform zip. The binary carries its own `worm.toml` and returns it
+    over the pipe, because `cargo install` ships no data files.
+    */
+    Cargo {
+        package: String,
+        version: String,
+    },
 }
 
 impl Source {
-    /// The asset name to look for in a release, given the worm's key
+    /// The asset names to look for in a release, given the key of the worm
     pub fn asset_names(&self, name: &str) -> Vec<String> {
         match self {
             Self::Release {
                 asset: Some(asset), ..
             } => vec![asset.clone()],
 
-            Self::Release { .. } => vec![format!("{name}-worm.zip"), "worm.zip".to_owned()],
+            /*
+            The platform name comes first, because a native worm ships one
+            artifact per platform. A worm with one portable artifact, wasm or
+            Luau, has no such asset and the plain names answer instead.
+            */
+            Self::Release { .. } => vec![
+                format!(
+                    "{name}-worm-{}-{}.zip",
+                    std::env::consts::ARCH,
+                    std::env::consts::OS
+                ),
+                format!("{name}-worm.zip"),
+                "worm.zip".to_owned(),
+            ],
 
-            Self::Local { .. } => Vec::new(),
+            Self::Local { .. } | Self::Cargo { .. } => Vec::new(),
         }
     }
 }
 
-/// The shapes `[worms]` accepts, before validation
+/// The shapes that `[worms]` accepts, before validation
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum Raw {
     /// `luaux = "luau-xml/worm@0.1.0"`
     Pin(String),
-    Table(Table),
+    Table(Box<Table>),
 }
 
 #[derive(Debug, Deserialize)]
@@ -91,19 +124,68 @@ struct Table {
     #[serde(default)]
     path: Option<PathBuf>,
     #[serde(default)]
+    cargo: Option<String>,
+    #[serde(default)]
     run_order: Option<Stage>,
     #[serde(default)]
     rules: BTreeMap<String, toml::Value>,
     #[serde(default)]
     config: Option<toml::Value>,
+    #[serde(default)]
+    inherit_lints: Option<bool>,
+    #[serde(default)]
+    inherit: Inherit,
 }
 
-/// Every worm a project asked for, by name
+/*
+Which inherited lints and format options apply inside the files of one worm.
+
+A project turns inheritance on and gets everything, because that is the answer
+a project wants almost every time. A project that wants less states `only` or
+`except`. The two are exclusive: a list of what to keep and a list of what to
+drop, given together, cannot both be the answer.
+*/
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Inherit {
+    /// The only lints of larvae that run in the files of this worm
+    #[serde(default)]
+    pub lints_only: Vec<String>,
+    /// The lints of larvae that do not run in the files of this worm
+    #[serde(default)]
+    pub lints_except: Vec<String>,
+    /// The format options of larvae that do not apply in the files of this
+    /// worm. An option named here keeps its own default there.
+    #[serde(default)]
+    pub fmt_except: Vec<String>,
+}
+
+impl Inherit {
+    /// Report if one inherited lint runs in the files of this worm
+    pub fn allows_lint(&self, name: &str) -> bool {
+        if !self.lints_only.is_empty() {
+            return self.lints_only.iter().any(|n| n == name);
+        }
+
+        !self.lints_except.iter().any(|n| n == name)
+    }
+
+    /// Check that the project stated one list and not both
+    pub fn validate(&self, name: &str) -> Result<()> {
+        if !self.lints_only.is_empty() && !self.lints_except.is_empty() {
+            bail!("worm `{name}`: inherit takes lints_only or lints_except, not both");
+        }
+
+        Ok(())
+    }
+}
+
+/// Every worm that a project requests, by name
 #[derive(Debug, Default)]
 pub struct Worms(pub BTreeMap<String, Entry>);
 
 impl Worms {
-    /// Read the `[worms]` table, rejecting anything ambiguous
+    /// Read the `[worms]` table, and reject each ambiguous entry
     pub fn parse(value: &toml::Value) -> Result<Self> {
         let entries: BTreeMap<String, Raw> = value
             .clone()
@@ -129,15 +211,25 @@ impl Worms {
 }
 
 fn source_of(name: &str, raw: Raw) -> Result<Entry> {
-    let (run_order, rules, config) = match &raw {
+    let (run_order, rules, config, inherit_lints, inherit) = match &raw {
         Raw::Table(t) => (
             t.run_order,
             t.rules.clone(),
             t.config.clone().unwrap_or_else(empty_table),
+            t.inherit_lints,
+            t.inherit.clone(),
         ),
 
-        Raw::Pin(_) => (None, BTreeMap::new(), empty_table()),
+        Raw::Pin(_) => (
+            None,
+            BTreeMap::new(),
+            empty_table(),
+            None,
+            Inherit::default(),
+        ),
     };
+
+    inherit.validate(name)?;
 
     if !config.is_table() {
         bail!("worm `{name}`: config has to be a table, ex: [worms.{name}.config]");
@@ -146,7 +238,38 @@ fn source_of(name: &str, raw: Raw) -> Result<Entry> {
     let source = match raw {
         Raw::Pin(pin) => parse_pin(name, &pin)?,
 
-        Raw::Table(t) => match (t.path, t.repo, t.version) {
+        Raw::Table(t) => match (t.path.clone(), t.repo.clone(), t.version.clone()) {
+            _ if t.cargo.is_some() => {
+                if t.path.is_some() || t.repo.is_some() || t.asset.is_some() {
+                    bail!("worm `{name}`: cargo excludes path, repo, and asset");
+                }
+
+                let package = t.cargo.clone().expect("checked in the guard");
+
+                /*
+                The version can sit in the package pin or in the version key,
+                because both forms read naturally. Two versions at one time
+                cannot both be the answer.
+                */
+                let (package, pinned) = match package.rsplit_once('@') {
+                    Some((p, v)) => (p.to_owned(), Some(v.to_owned())),
+
+                    None => (package, None),
+                };
+
+                let version = match (pinned, t.version.clone()) {
+                    (Some(a), Some(b)) if a != b => {
+                        bail!("worm `{name}`: cargo pins {a} and version says {b}")
+                    }
+
+                    (Some(v), _) | (None, Some(v)) => v.trim_start_matches('v').to_owned(),
+
+                    (None, None) => bail!("worm `{name}`: cargo needs a version to pin"),
+                };
+
+                Source::Cargo { package, version }
+            }
+
             (Some(path), None, None) => {
                 if t.asset.is_some() {
                     bail!("worm `{name}`: asset means nothing with path, it is not a release");
@@ -174,6 +297,8 @@ fn source_of(name: &str, raw: Raw) -> Result<Entry> {
         run_order,
         rules,
         config,
+        inherit_lints,
+        inherit,
     })
 }
 
@@ -181,7 +306,7 @@ fn empty_table() -> toml::Value {
     toml::Value::Table(toml::map::Map::new())
 }
 
-/// `owner/repo@version`, which is the form almost every worm uses
+/// `owner/repo@version`, the form that almost every worm uses
 fn parse_pin(name: &str, pin: &str) -> Result<Source> {
     let Some((repo, version)) = pin.rsplit_once('@') else {
         bail!("worm `{name}`: {pin:?} has no @version, ex: \"owner/repo@0.1.0\"");
@@ -234,13 +359,73 @@ mod tests {
     }
 
     #[test]
-    fn the_asset_defaults_to_the_worms_own_name() {
-        let w = worms(r#"luaux = "luau-xml/worm@0.1.0""#).unwrap();
+    fn a_cargo_worm_parses_with_the_version_in_either_place() {
+        let w = worms(r#"luaux = { cargo = "luaux-worm@0.1.0" }"#).unwrap();
 
         assert_eq!(
-            w.0["luaux"].source.asset_names("luaux"),
-            ["luaux-worm.zip", "worm.zip"]
+            w.0["luaux"].source,
+            Source::Cargo {
+                package: "luaux-worm".into(),
+                version: "0.1.0".into()
+            }
         );
+
+        let w = worms(r#"luaux = { cargo = "luaux-worm", version = "0.1.0" }"#).unwrap();
+
+        assert_eq!(
+            w.0["luaux"].source,
+            Source::Cargo {
+                package: "luaux-worm".into(),
+                version: "0.1.0".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_cargo_worm_without_a_version_is_refused() {
+        let err = worms(r#"luaux = { cargo = "luaux-worm" }"#).err().unwrap();
+
+        assert!(format!("{err:#}").contains("needs a version"), "{err:#}");
+    }
+
+    #[test]
+    fn two_versions_that_disagree_are_refused() {
+        let err = worms(r#"luaux = { cargo = "luaux-worm@0.1.0", version = "0.2.0" }"#)
+            .err()
+            .unwrap();
+
+        assert!(format!("{err:#}").contains("0.1.0"), "{err:#}");
+        assert!(format!("{err:#}").contains("0.2.0"), "{err:#}");
+    }
+
+    #[test]
+    fn cargo_excludes_the_other_sources() {
+        let err = worms(r#"luaux = { cargo = "luaux-worm@0.1.0", path = "w" }"#)
+            .err()
+            .unwrap();
+
+        assert!(format!("{err:#}").contains("excludes"), "{err:#}");
+    }
+
+    #[test]
+    fn the_asset_defaults_to_the_worms_own_name() {
+        let w = worms(r#"luaux = "luau-xml/worm@0.1.0""#).unwrap();
+        let names = w.0["luaux"].source.asset_names("luaux");
+
+        /*
+        The platform name comes first, because a native worm ships one
+        artifact per platform. The plain names follow, for a worm with one
+        portable artifact.
+        */
+        assert_eq!(
+            names[0],
+            format!(
+                "luaux-worm-{}-{}.zip",
+                std::env::consts::ARCH,
+                std::env::consts::OS
+            )
+        );
+        assert_eq!(names[1..], ["luaux-worm.zip", "worm.zip"]);
     }
 
     #[test]
@@ -258,7 +443,7 @@ asset = "custom.zip"
         assert_eq!(w.0["luaux"].source.asset_names("luaux"), ["custom.zip"]);
     }
 
-    /// The whole point of the local form
+    /// The main purpose of the local form
     #[test]
     fn a_path_needs_no_release_at_all() {
         let w = worms(
@@ -335,7 +520,7 @@ asset = "y.zip"
         assert!(err.to_string().contains("not a release"), "{err}");
     }
 
-    /// An author says which side of our rules they want, not a number
+    /// An author names a side of the larvae rules and does not give a number
     #[test]
     fn a_worm_can_ask_for_before_or_after_by_name() {
         let w = worms(
@@ -372,14 +557,14 @@ rules = { tidy = true, const_requires = false }
         .unwrap();
 
         assert_eq!(w.0["mine"].rules["tidy"], toml::Value::Boolean(true));
-        // a name that is also ours, kept apart rather than colliding
+        // A name that larvae also uses; the two stay apart and do not collide.
         assert_eq!(
             w.0["mine"].rules["const_requires"],
             toml::Value::Boolean(false)
         );
     }
 
-    /// Everything about one worm under one key, settings included
+    /// All data about one worm under one key, settings included
     #[test]
     fn settings_live_with_the_worm_that_reads_them() {
         let w = worms(
@@ -400,7 +585,7 @@ indent = 2
         assert_eq!(config["indent"], toml::Value::Integer(2));
     }
 
-    /// A table of its own, so a worm's own `repo` key cannot collide with ours
+    /// A separate table, so the `repo` key of a worm cannot collide with the larvae key
     #[test]
     fn settings_are_kept_apart_from_the_source() {
         let w = worms(

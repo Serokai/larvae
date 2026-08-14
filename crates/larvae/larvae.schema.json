@@ -617,7 +617,10 @@
     "fmt": {
       "description": "Formatter settings for `larvae fmt`. Every stylua option under its own name, so a stylua.toml can move in here whole, plus the ones stylua does not have. A stylua.toml left in the project is still read, and these keys layer over it.",
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": {
+        "type": "object",
+        "description": "The format options of one worm, under its key. Run `larvae self code` to name and describe them here."
+      },
       "properties": {
         "column_width": {
           "type": "integer",
@@ -819,144 +822,286 @@
       "description": "\"allow\" is off, \"warn\" is reported and leaves the exit code alone, \"deny\" is reported and fails the run."
     },
     "lint_rules": {
-      "description": "How loudly each lint speaks. A lint keeps its own default until it is named here.",
+      "description": "How loudly each lint speaks. A lint keeps its own default until it is named here. A name not listed below is a worm's lint, declared in that worm's [lints] and levelled here the same way.",
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": {
+        "type": "object",
+        "description": "The lints of one worm, under its key. Run `larvae self code` to name and describe them here.",
+        "additionalProperties": {
+          "$ref": "#/$defs/lint_level"
+        }
+      },
       "properties": {
         "almost_swapped": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "Two assignments that look like a swap but overwrite one of the values. Default: warn."
         },
         "compare_nan": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "Comparing against nan, which is never equal to anything including itself. Default: warn."
         },
         "constant_table_comparison": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "Comparing against a table literal, which compares identity and is always false. Default: warn."
         },
         "divide_by_zero": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "Dividing by a literal zero. Default: warn."
         },
         "duplicate_keys": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "A table key written twice, where only the last one survives. Default: warn."
         },
         "ifs_same_cond": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "An elseif repeating a condition already tested, which can never run. Default: warn."
         },
         "if_same_then_else": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "Two branches of the same if with identical bodies. Default: warn."
         },
         "suspicious_reverse_loop": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "A numeric for counting down without a negative step, which never runs. Default: warn."
         },
         "type_check_inside_call": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "A comparison inside type(), where it belongs outside. Default: warn."
         },
         "unbalanced_assignments": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "More names than values, or more values than names. Default: warn."
         },
         "bad_string_escape": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "An escape sequence the language does not define. Default: warn."
         },
         "mismatched_arg_count": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "Calling a function in this file with the wrong number of arguments. Default: warn."
         },
         "must_use": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "Calling a pure function and discarding what it returned. Default: warn."
         },
         "undefined_variable": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "A name nothing declares, which is nil at runtime. Default: deny."
         },
         "unscoped_variables": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "An assignment with no local, which creates a global. Default: warn."
         },
         "unused_variable": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "A name declared and never read. Default: warn. Tunable under [lint.options.unused_variable]."
         },
         "shadowing": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "A name that hides another still in scope. Default: warn."
         },
         "global_usage": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "Reaching into _G, which is shared with every other script. Default: warn."
         },
         "deprecated": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "A function that still works but has been replaced. Default: warn. Extend it under [lint.options.deprecated]."
         },
         "restricted_module_paths": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "Requiring a module the project has ruled out. Default: warn, and quiet until [lint.options.restricted_module_paths] names something."
         },
         "high_cyclomatic_complexity": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "A function with more branches than anyone can hold at once. Default: allow. Threshold under [lint.options.high_cyclomatic_complexity]."
         },
         "manual_table_clone": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "A loop that copies a table, which table.clone does in one call. Default: warn."
         },
         "roblox_incorrect_color3_new_bounds": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "Color3.new given a channel over 1, where the scale is 0 to 1. Default: warn."
         },
         "roblox_suspicious_udim2_new": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "UDim2.new given two arguments, where it takes four. Default: warn."
         },
         "roblox_manual_fromscale_or_fromoffset": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "A UDim2.new that fromScale or fromOffset says more clearly. Default: warn."
         },
         "unreachable_code": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "Statements after a return, break or continue, which never run. Default: warn."
         },
         "self_assignment": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "Assigning a value to itself, which does nothing. Default: warn."
         },
         "string_concat_in_loop": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "Building a string by concatenation in a loop, which is quadratic. Default: warn."
         },
         "loop_invariant_call": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "A call inside a loop whose result cannot change between iterations. Default: warn."
         },
         "empty_if": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "An if branch with nothing in it. Default: warn."
         },
         "empty_loop": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "A loop body with nothing in it. Default: warn."
         },
         "mixed_table": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "A table with both array entries and named keys. Default: warn."
         },
         "multiple_statements": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "More than one statement on a line. Default: allow."
         },
         "parenthese_conditions": {
-          "$ref": "#/$defs/lint_level",
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
           "description": "Parentheses around a condition, which Luau does not need. Default: warn."
         }
       }
@@ -1057,6 +1202,11 @@
                 "required": [
                   "path"
                 ]
+              },
+              {
+                "required": [
+                  "cargo"
+                ]
               }
             ],
             "properties": {
@@ -1102,6 +1252,42 @@
               },
               "config": {
                 "$ref": "#/$defs/worm_config"
+              },
+              "inherit_lints": {
+                "type": "boolean",
+                "description": "Run the lints of larvae on the files this worm claims. It overrides what the worm declared in its worm.toml."
+              },
+              "inherit": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Which inherited lints and format options apply inside the files of this worm. Inheritance takes everything unless this table states less.",
+                "properties": {
+                  "lints_only": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "The only lints of larvae that run in the files of this worm."
+                  },
+                  "lints_except": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "The lints of larvae that do not run in the files of this worm."
+                  },
+                  "fmt_except": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "The format options that do not apply in the files of this worm. An option named here keeps its own default there."
+                  }
+                }
+              },
+              "cargo": {
+                "type": "string",
+                "description": "A crate on crates.io that ships the worm as its binary, ex: \"luaux-worm@0.1.0\". cargo install builds it from source on this machine, so one crate serves every platform. Excludes repo, path, and asset; the version can sit here after @ or in the version key."
               }
             }
           }

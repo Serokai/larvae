@@ -1,11 +1,11 @@
 /*!
-larvae.schema.json against the code it documents.
+These tests compare larvae.schema.json with the code it documents.
 
-The schema is what an editor shows while somebody types, so a key that exists
-in one and not the other is worse than no schema at all: completion stops
-offering a real option, or offers one that errors on the next run. The two
-tables that grow are the lints and the formatter's options, so those are
-checked name by name and the rest is checked for dangling refs.
+An editor shows the schema while the user types. Thus a key that exists in one
+and not the other is worse than no schema at all. Completion stops offering a
+real option, or offers an option that errors on the next run. The two tables
+that grow are the lints and the formatter's options, so the tests check those
+name by name. The tests check the rest for dangling refs.
 */
 
 use std::collections::BTreeSet;
@@ -29,7 +29,7 @@ fn keys(value: &serde_json::Value) -> BTreeSet<String> {
         .collect()
 }
 
-/// Every lint a project can name, and no lint it cannot
+/// The schema lists every lint that a project can name, and no other lint.
 #[test]
 fn lint_rules_match_the_registry() {
     let schema = schema();
@@ -47,9 +47,30 @@ fn lint_rules_match_the_registry() {
         Vec::<&String>::new(),
         "these lints are missing from [lint.rules] in the schema"
     );
+
+    /*
+    A name outside the builtins is not a level. A worm names its lints under
+    its own key, so an unknown key must be a table of levels and a flat
+    `luaux_x = "warn"` line is an error the editor shows.
+    */
+    let extra = &schema["$defs"]["lint_rules"]["additionalProperties"];
+
+    assert_eq!(extra["type"], "object", "an unknown key is a worm table");
+    assert_eq!(
+        extra["additionalProperties"],
+        serde_json::json!({ "$ref": "#/$defs/lint_level" }),
+        "the values of a worm table are levels"
+    );
+
+    // the same for [fmt]: an unknown key is the table of one worm
+    assert_eq!(
+        schema["$defs"]["fmt"]["additionalProperties"]["type"],
+        "object"
+    );
 }
 
-/// Every level a lint can be set to, spelled the way the config parses it
+/// The schema lists every level a lint accepts, with the spelling that the
+/// config parses.
 #[test]
 fn lint_levels_are_the_ones_the_config_takes() {
     let schema = schema();
@@ -68,7 +89,7 @@ fn lint_levels_are_the_ones_the_config_takes() {
     }
 }
 
-/// Every formatter option, and no option that is not one
+/// The schema lists every formatter option, and no other key.
 #[test]
 fn fmt_options_match_the_config() {
     let schema = schema();
@@ -82,7 +103,8 @@ fn fmt_options_match_the_config() {
         .cloned()
         .collect();
 
-    // taken from stylua and ignored, so it never appears in a serialized config
+    // This key comes from stylua, and larvae ignores it, so it never appears
+    // in a serialized config.
     real.insert("syntax".to_string());
 
     assert_eq!(
@@ -98,7 +120,7 @@ fn fmt_options_match_the_config() {
     );
 }
 
-/// A ref into a def that is not there silently documents nothing
+/// A ref to a def that does not exist documents nothing, and gives no error.
 #[test]
 fn every_ref_resolves() {
     let schema = schema();
