@@ -4,7 +4,7 @@ mod file;
 mod frontend;
 mod output;
 pub mod roots;
-mod setup;
+pub(crate) mod setup;
 
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
@@ -49,6 +49,25 @@ pub struct Outcome {
     pub stats: Stats,
     pub diags: Vec<Diag>,
     pub build_project: Option<PathBuf>,
+    /*
+    Which module requires which, for the whole project analyses in `check`.
+
+    The graph is complete when the cache is off, which holds for every read
+    only run: the cache applies only to writes.
+    */
+    pub graph: crate::requires::graph::Graph,
+    /*
+    The processed text of every module, keyed like the graph keys its nodes.
+
+    The bundler reads modules from here and not from disk, for two reasons.
+    A front-end worm compiles a claimed file inside the pipeline, so the
+    file on disk holds markup that is not Luau. And the require sites of the
+    graph hold byte spans, and the spans index this exact text.
+
+    The map fills only on a [`run_keeping_sources`] run, because it holds
+    the whole project in memory.
+    */
+    pub sources: std::collections::BTreeMap<PathBuf, String>,
 }
 
 impl Outcome {
@@ -60,6 +79,21 @@ impl Outcome {
 }
 
 pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
+    run_inner(root, config, write, false)
+}
+
+/*
+Run the pipeline without writes, and keep the processed text of every module.
+
+This is the entry for the bundler. The run does not write, so the cache is
+off, and the graph and the sources cover every file. See [`Outcome::sources`]
+for why the bundler must not read the files from disk itself.
+*/
+pub fn run_keeping_sources(root: &Path, config: &Config) -> Result<Outcome> {
+    run_inner(root, config, false, true)
+}
+
+fn run_inner(root: &Path, config: &Config, write: bool, keep_sources: bool) -> Result<Outcome> {
     let root = root
         .canonicalize()
         .with_context(|| format!("cannot resolve project root {}", root.display()))?;
@@ -162,6 +196,8 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
 
     // --- Parallel per file processing ---------------------------------------
     let shared_diags = Mutex::new(diags);
+    let shared_graph = Mutex::new(crate::requires::graph::Graph::default());
+    let shared_sources = Mutex::new(std::collections::BTreeMap::new());
     let stats = Mutex::new(Stats::default());
 
     let fresh_hashes: Mutex<Vec<(String, u64)>> = Mutex::new(Vec::new());
@@ -238,8 +274,10 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
             }
         }
 
+        let owns = pool.owns_requires(front);
+
         let mut local_diags = Vec::new();
-        let rewritten = process_file(
+        let mut rewritten = process_file(
             path,
             &text,
             &rel,
@@ -249,7 +287,8 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
             &config.rules,
             write,
             &pool,
-            pool.owns_requires(front),
+            owns,
+            keep_sources,
             &mut local_diags,
         );
         let mut s = stats.lock().unwrap();
@@ -262,6 +301,46 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
         }
 
         drop(s);
+
+        /*
+        The serial half of section 4.4. Every worker collects its own edges
+        with no lock, and this merge is the one place they meet. So the graph
+        builds once at the end of each file, and no worker contends on a
+        require. An init file keys on its directory, so the edge into a
+        directory module meets the edges out of its init file on one node.
+        */
+        {
+            let node = crate::requires::graph::node_of(path);
+            let mut g = shared_graph.lock().unwrap();
+
+            if owns {
+                g.see(node);
+            } else {
+                // A worm resolves the requires of this file, so the graph
+                // holds no edges for it. The unused analysis checks the mark.
+                g.see_opaque(node);
+            }
+
+            if let Some(file) = &rewritten {
+                for to in &file.required {
+                    g.add(node, to);
+                }
+
+                // The sites key on the node too, so the bundler finds the
+                // sites of an init file under its directory.
+                for site in &file.sites {
+                    g.add_site(node, site.clone());
+                }
+            }
+        }
+
+        if let Some(text) = rewritten.as_mut().and_then(|f| f.source.take()) {
+            let node = crate::requires::graph::node_of(path);
+            shared_sources
+                .lock()
+                .unwrap()
+                .insert(node.to_path_buf(), text);
+        }
         // Only a clean file gets a cache entry; errors must appear again.
         if rewritten.is_some()
             && !local_diags
@@ -387,5 +466,7 @@ pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
         stats,
         diags,
         build_project,
+        graph: shared_graph.into_inner().unwrap(),
+        sources: shared_sources.into_inner().unwrap(),
     })
 }

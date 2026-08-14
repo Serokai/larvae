@@ -7,6 +7,8 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+pub mod bundle;
+pub mod check;
 mod excludes;
 mod overrides;
 mod process;
@@ -58,19 +60,21 @@ pub struct Config {
     #[serde(default)]
     pub worms: Option<toml::Value>,
 
+    /// The `larvae check` gate, see [`check`]
+    #[serde(default)]
+    pub check: check::CheckConfig,
+
+    /// The `larvae bundle` output, see [`bundle`]
+    #[serde(default)]
+    pub bundle: bundle::BundleConfig,
+
     // Parsed so the error can name the new location and not say "unknown key".
     #[serde(default)]
     config: Option<toml::Value>,
 
     // Parsed but not implemented, so the error can name the milestone.
     #[serde(default)]
-    bundle: Option<toml::Value>,
-
-    #[serde(default)]
     minify: Option<toml::Value>,
-
-    #[serde(default)]
-    check: Option<toml::Value>,
 }
 
 impl Config {
@@ -138,11 +142,8 @@ impl Config {
             );
         }
 
-        let unimplemented: &[(&str, &Option<toml::Value>, &str)] = &[
-            ("[bundle]", &self.bundle, "M3"),
-            ("[minify]", &self.minify, "M4"),
-            ("[check]", &self.check, "M3"),
-        ];
+        let unimplemented: &[(&str, &Option<toml::Value>, &str)] =
+            &[("[minify]", &self.minify, "M4")];
 
         for (name, value, milestone) in unimplemented {
             if value.is_some() {
@@ -349,10 +350,32 @@ mod tests {
 
     #[test]
     fn unimplemented_sections_error_with_milestone() {
-        let c: Config = toml::from_str("[bundle]\nentry = \"src/init.luau\"").unwrap();
+        let c: Config = toml::from_str("[minify]\ncolumn_span = 100").unwrap();
         let err = c.validate().unwrap_err().to_string();
 
-        assert!(err.contains("M3"), "{err}");
+        assert!(err.contains("M4"), "{err}");
+    }
+
+    /// [check] landed, so a [check] table is configuration and not an error
+    #[test]
+    fn a_check_table_is_read_rather_than_refused() {
+        let c: Config = toml::from_str("[check]\ncycles = \"deny\"").unwrap();
+
+        c.validate().unwrap();
+        assert_eq!(c.check.cycles, crate::lint::Level::Deny);
+    }
+
+    /// [bundle] landed, so a [bundle] table is configuration and not an error
+    #[test]
+    fn a_bundle_table_is_read_rather_than_refused() {
+        let c: Config = toml::from_str("[bundle]\nentry = \"src/init.luau\"").unwrap();
+
+        c.validate().unwrap();
+        assert_eq!(
+            c.bundle.entry,
+            Some(std::path::PathBuf::from("src/init.luau"))
+        );
+        assert!(c.bundle.tree_shake);
     }
 
     #[test]

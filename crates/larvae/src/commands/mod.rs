@@ -1,3 +1,4 @@
+pub mod bundle;
 pub mod check;
 pub mod code;
 pub mod detect;
@@ -6,5 +7,6 @@ pub mod init;
 pub mod lint;
 pub mod process;
 pub mod self_cmd;
+pub mod sync_luaurc;
 pub mod watch;
 pub mod worm;
