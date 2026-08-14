@@ -4,9 +4,10 @@
 
 # larvae
 
-**One toolchain for all of Luau.**
+**Format, lint, and ship Luau.**
 
-One parallel Rust binary. It has transformers today, and formatting and linting come next.
+One parallel Rust binary. Requires that cannot break, style that cannot
+drift, and worms that teach it languages beyond Luau.
 
 [![CI](https://github.com/larvae-luau/larvae/actions/workflows/ci.yml/badge.svg)](https://github.com/larvae-luau/larvae/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/larvae-luau/larvae?color=10E694&label=release)](https://github.com/larvae-luau/larvae/releases/latest)
@@ -15,10 +16,15 @@ One parallel Rust binary. It has transformers today, and formatting and linting 
 
 </div>
 
-larvae starts with require rewriting that no other tool in the ecosystem
-does. It refuses to emit a require that would fail at runtime. Roblox
-shipped native string requires, and `@game/...` became available in early
-2026. No tool generated them. larvae does.
+larvae is three tools and an extension system in one binary. `larvae
+process` rewrites requires and refuses to emit one that would fail at
+runtime. `larvae fmt` formats with stylua parity and a Wadler printer.
+`larvae lint` carries thirty four lints with selene's spellings. Worms
+extend all three to languages that compile to Luau, such as LuauX.
+
+The requires came first, because no other tool has them. Roblox shipped
+native string requires, and `@game/...` became available in early 2026. No
+tool generated them. larvae does.
 
 ```lua
 -- what you write
@@ -76,6 +82,61 @@ and keeps it current, so the user edits one file.
 **It never runs rojo.** Serving is rojo's job. larvae writes
 `.larvae/build.project.json` and does nothing more.
 
+## Why not stylua
+
+stylua is good software, and larvae does not ask a project to leave it.
+larvae reads `stylua.toml` as it is and aims at stylua parity for plain
+Luau, so trying larvae costs nothing and changes no diffs. Four things are
+different.
+
+**It formats languages that stylua cannot.** A worm compiles a language such
+as LuauX into the pipeline and formats its files through larvae's own
+printer. The markup and the Luau inside it come out in one style, with the
+project's width and indentation, because there is one printer.
+
+**It would rather decline than delete a comment.** The formatter checks
+every comment against its output at runtime. A file whose formatting would
+drop one is left exactly as it was, and the run reports it.
+
+**It has options past stylua.** `magic_trailing_comma`, `trailing_comma`,
+`space_inside_braces` and its siblings, and `block_newline_gaps`. Every
+stylua option keeps its stylua name.
+
+**The formatter is not alone.** It shares the config, the excludes, the
+schema, and the language server with the linter and the transformer. An
+excluded file loses its stale diagnostics; a claimed file routes to its
+worm; one `larvae.toml` describes all of it.
+
+## Why not selene
+
+The same answer, and the same respect. larvae reads `selene.toml`, keeps
+selene's lint names, levels, and `std` spellings, and honors
+`-- selene: allow(...)` comments, so a port costs nothing. Four things are
+different.
+
+**It carries lints that selene does not have.** Four so far, each for a
+problem no existing rule catches, and each cheap enough for a keystroke:
+`unreachable_code`, code after a `return`, a `break`, or a `continue`;
+`self_assignment`, a value assigned to itself; `loop_invariant_call`, a call
+in a loop whose result cannot change between iterations; and
+`string_concat_in_loop`, the accumulator pattern that copies the whole
+string on every pass.
+
+**It lints languages that selene cannot.** A worm reports findings that only
+its own parser can see, and the builtin lints run on the same files through
+a byte exact shadow, so a LuauX file reports `unused_variable` at the right
+column beside `luaux.useless_fragment`.
+
+**A project can add lints.** A worm declares a lint with a name, a default
+level, and a description. The lint sits in `[lint.rules.<worm>]` beside the
+builtins, obeys the same levels and the same allow comments, and appears in
+`--explain` and in editor completion. selene's lint set is fixed at compile
+time.
+
+**The editor knows every lint.** larvae generates a schema for the project,
+so `[lint.rules]` completes each name, builtin and worm alike, and hover
+shows the description of the lint rather than the meaning of a level.
+
 ## Install
 
 ```bash
@@ -112,7 +173,11 @@ live Studio session.
 | `larvae process` | rewrite requires into the output directory |
 | `larvae process --watch` | the same, on every save |
 | `larvae check` | validate requires and syntax, write nothing, exit non zero on errors |
-| `larvae init` | scaffold a config |
+| `larvae fmt` | format in place; `--check` for CI, `--stdin` for editors |
+| `larvae lint` | thirty four lints; `--explain <name>` describes one |
+| `larvae lsp` | diagnostics and formatting over stdio, for any editor |
+| `larvae worm` | develop an extension: `run`, `run --fmt`, `run --lint`, `info`, `types` |
+| `larvae init` | scaffold a config with every default written out |
 | `larvae self code` | set up editor completion for larvae.toml |
 | `larvae self install` | manage the install, with `update` and `uninstall` |
 
@@ -150,12 +215,19 @@ reports the release that adds the feature. larvae ignores nothing silently.
 
 ## Status
 
-Requires, the Rojo integration, the parser, the cache, and watch mode all
-work today. The next work items are: Instance requires as input, so that
-existing codebases can convert; compile time constants; build profiles; and
-the rest of the rules, now possible because the parser exists. After that:
-bundling with a documented module init order, cross module dead code
-elimination, and transforms that the user writes in Luau.
+Requires, formatting, linting, the language server, the Rojo integration,
+compile time constants, build profiles, the rule set, the cache, and watch
+mode all work today.
+
+Worms work today as well. A worm is an extension that adds a language on top
+of Luau: it compiles its files into the pipeline, formats them through
+larvae's own printer, and lints them beside the builtin lints. A worm ships
+as a GitHub release, as a crate on crates.io, or as a path during
+development. The [first worm](https://github.com/larvae-luau/luaux) is [LuauX](https://github.com/luau-xml/luaux),
+Luau with JSX syntax.
+
+The next work items are bundling with a documented module init order and
+cross module dead code elimination, then minify.
 
 ## License
 
