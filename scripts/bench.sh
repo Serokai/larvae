@@ -269,9 +269,4 @@ if [ -x "$LARVAE" ]; then
         tmp_dl="$WORK/darklua-stripped"
         cp "$dl_bin" "$tmp_dl" && strip "$tmp_dl" 2>/dev/null || true
         dl_size=$(stat -c%s "$tmp_dl")
-        printf "binary size, both stripped: larvae %s KB, darklua %s KB\n" \
-            $((cl_size / 1024)) $((dl_size / 1024))
-    else
-        printf "binary size: larvae %s KB\n" $((cl_size / 1024))
-    fi
 fi

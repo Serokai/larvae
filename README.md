@@ -67,12 +67,15 @@ the issue was filed in 2021.
 
 | files | larvae cold | larvae warm | darklua | speedup |
 |---:|---:|---:|---:|---:|
-| 3000 | 27 ms | 14 ms | 424 ms | 15.7x |
-| 5000 | 44 ms | 24 ms | 722 ms | 16.4x |
-| one 3.5 MB file | 21 ms | 3 ms | 1375 ms | 65.4x |
+| 3000 | 175 ms | 54 ms | 1233 ms | 7.0x |
+| 5000 | 275 ms | 82 ms | 1932 ms | 7.0x |
+| one 3.5 MB file | 57 ms | 12 ms | 3341 ms | 58.6x |
 
 darklua ran with an empty rule list, so it only parsed and reprinted, while
-larvae did the full job. Run `scripts/bench.sh` to reproduce the numbers.
+larvae did the full job. With ten matched rules on both sides the speedup is
+5.8x to 6.0x. Measured on 4 cores; larvae runs files in parallel and darklua
+does not, so more cores widen the gap. Run `scripts/bench.sh` to reproduce
+the numbers on your machine.
 
 **One Rojo project file.** The usual setup keeps two almost identical
 project files: one points at the source for sourcemaps, and one points at
