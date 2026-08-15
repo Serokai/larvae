@@ -48,12 +48,18 @@ jobs:
         include:
           # asset is what `self update` looks for, it is larvae-{os}-{arch}
           # spelled exactly as std::env::consts reports them at runtime
+          # The linux builds run inside rust:alpine, where g++ targets musl
+          # natively and no third party toolchain download can fail. The
+          # explicit --target keeps proc macros off crt-static, which is the
+          # documented alpine quirk.
           - asset: larvae-linux-x86_64
             target: x86_64-unknown-linux-musl
             runs-on: ubuntu-latest
+            container: rust:alpine
           - asset: larvae-linux-aarch64
             target: aarch64-unknown-linux-musl
             runs-on: ubuntu-24.04-arm
+            container: rust:alpine
           - asset: larvae-macos-x86_64
             target: x86_64-apple-darwin
             runs-on: macos-latest
@@ -67,37 +73,23 @@ jobs:
             target: aarch64-pc-windows-msvc
             runs-on: windows-latest
     runs-on: ${{ matrix.runs-on }}
+    container: ${{ matrix.container || '' }}
     steps:
+      - name: Alpine build tools
+        if: contains(matrix.target, 'musl')
+        run: |
+          apk add --no-cache g++ make zip
+          rustup target add ${{ matrix.target }} 2>/dev/null || true
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.verify.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
+        if: ${{ !contains(matrix.target, 'musl') }}
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-
-      # musl links statically, so one linux binary runs on any distro. The
-      # vendored Luau is C++, and musl-tools carries no C++ compiler, so the
-      # toolchain comes from musl.cc: a cross build on the x86 runner and a
-      # native build on the arm runner, each shipping <arch>-linux-musl-g++
-      # under the exact name that cc-rs looks for. The linker is the same
-      # g++, so the static libstdc++ comes from the musl toolchain and not
-      # from the glibc host.
-      - name: musl toolchain
-        if: contains(matrix.target, 'musl')
-        run: |
-          set -euo pipefail
-          ARCH=$(uname -m)
-          case "$ARCH" in
-            x86_64)  TGZ="x86_64-linux-musl-cross" ;;
-            aarch64) TGZ="aarch64-linux-musl-native" ;;
-          esac
-          curl -fsSL --retry 5 --retry-connrefused "https://musl.cc/${TGZ}.tgz" | sudo tar -xz -C /opt
-          echo "/opt/${TGZ}/bin" >> "$GITHUB_PATH"
-          UPPER=$(echo "${ARCH}_unknown_linux_musl" | tr '[:lower:]' '[:upper:]')
-          echo "CARGO_TARGET_${UPPER}_LINKER=${ARCH}-linux-musl-g++" >> "$GITHUB_ENV" 
 
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
@@ -112,23 +104,6 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: Compress-Archive -Path "target\${{ matrix.target }}\release\larvae.exe" -DestinationPath "${{ matrix.asset }}.zip"
-
-      - name: Report the size
-        if: runner.os != 'Windows'
-        run: |
-          set -euo pipefail
-          BIN=$(find "target/${{ matrix.target }}/release" -maxdepth 1 -name larvae -type f)
-          {
-            echo "**${{ matrix.asset }}**: binary $(numfmt --to=iec $(stat -c%s "$BIN" 2>/dev/null || stat -f%z "$BIN")), zip $(numfmt --to=iec $(stat -c%s "${{ matrix.asset }}.zip" 2>/dev/null || stat -f%z "${{ matrix.asset }}.zip"))"
-          } >> "$GITHUB_STEP_SUMMARY" || true
-
-      - name: Report the size
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $bin = (Get-Item "target\${{ matrix.target }}\release\larvae.exe").Length
-          $zip = (Get-Item "${{ matrix.asset }}.zip").Length
-          "**${{ matrix.asset }}**: binary $([math]::Round($bin/1MB,1)) MB, zip $([math]::Round($zip/1MB,1)) MB" >> $env:GITHUB_STEP_SUMMARY
 
       - uses: actions/upload-artifact@v4
         with:
@@ -159,38 +134,6 @@ jobs:
           fi
 
           gh release upload "$TAG" dist/*.zip --clobber
-
-      # One table for every platform: the zip a user downloads, and the
-      # binary inside it. The table lands in the run summary and in the
-      # release notes, and a re-run replaces it instead of appending twice.
-      - name: The size of every binary
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ needs.verify.outputs.tag }}
-        run: |
-          set -euo pipefail
-
-          {
-            echo "### Binaries"
-            echo ""
-            echo "| asset | binary | zip |"
-            echo "|---|---:|---:|"
-            for z in dist/*.zip; do
-              NAME=$(basename "$z" .zip)
-              ZIP=$(numfmt --to=iec "$(stat -c%s "$z")")
-              RAW=$(unzip -l "$z" | tail -1 | awk '{print $1}')
-              BIN=$(numfmt --to=iec "$RAW")
-              echo "| $NAME | $BIN | $ZIP |"
-            done
-          } > sizes.md
-
-          cat sizes.md >> "$GITHUB_STEP_SUMMARY"
-
-          gh release view "$TAG" --json body -q .body | awk '/^### Binaries$/{exit} {print}' > notes.md
-          printf '\n' >> notes.md
-          cat sizes.md >> notes.md
-          gh release edit "$TAG" --notes-file notes.md
 
   crates:
     name: Publish to crates.io
