@@ -76,13 +76,9 @@ const STYLUA: [&str; 2] = ["stylua.toml", ".stylua.toml"];
 const SELENE: [&str; 1] = ["selene.toml"];
 
 /*
-The defaults of the formatter, written out and not implicit.
-
-The template writes them out because the config shows a user which options
-exist. No user searches for `quote_style` in a file that does not name it.
-The template writes only the options that users change often, because no user
-reads a long list of defaults. The schema holds the rest, and `larvae self
-code` connects the schema.
+The template writes only the options that users change often, because no
+user reads a long list of defaults. The full list lives in the docs and in
+the schema, and `larvae self code` connects the schema to the editor.
 
 The function writes nothing when the project has a stylua.toml. These keys
 layer over that file. So a write of the defaults here would override settings
@@ -100,12 +96,10 @@ fn fmt_section(root: &Path) -> String {
 }
 
 /*
-Every format option at the value it keeps when the user states nothing.
+The four options a project states most often, at their default values.
 
-The list is generated from the defaults of the config type, so it cannot drift
-from the code. A scalar option appears; a table and a list do not, because
-their shape needs more than one line. The first four lines are live, because
-almost every project sets them, and the rest are comments.
+The values come from the config type, so they cannot drift from the code.
+Every other option keeps its default silently; the docs list them all.
 */
 fn fmt_defaults() -> String {
     let value = serde_json::to_value(crate::fmt::FmtConfig::default()).unwrap_or_default();
@@ -114,34 +108,13 @@ fn fmt_defaults() -> String {
         return String::new();
     };
 
-    // the options a project states most often, written live rather than commented
     const LIVE: [&str; 4] = ["column_width", "indent_type", "indent_width", "quote_style"];
-
-    let scalars: Vec<(&String, String)> = table
-        .iter()
-        .filter_map(|(key, value)| Some((key, scalar_of(value)?)))
-        .collect();
-
-    let width = scalars
-        .iter()
-        .filter(|(k, _)| !LIVE.contains(&k.as_str()))
-        .map(|(k, _)| k.len())
-        .max()
-        .unwrap_or(0);
 
     let mut out = String::new();
 
     for name in LIVE {
-        if let Some((_, value)) = scalars.iter().find(|(k, _)| k.as_str() == name) {
+        if let Some(value) = table.get(name).and_then(scalar_of) {
             out.push_str(&format!("{name} = {value}\n"));
-        }
-    }
-
-    out.push_str("\n# Every option below keeps the value shown until the user states it.\n");
-
-    for (key, value) in &scalars {
-        if !LIVE.contains(&key.as_str()) {
-            out.push_str(&format!("# {key:<width$} = {value}\n"));
         }
     }
 
@@ -162,41 +135,6 @@ fn scalar_of(value: &serde_json::Value) -> Option<String> {
     }
 }
 
-/*
-Every lint at the level it keeps when the user states nothing.
-
-The list is generated from the registry, so it cannot drift from the code. The
-lines are comments, because a project that writes nothing gets these levels
-already. To change one, remove the `#` and edit the level.
-*/
-fn defaults() -> String {
-    let mut lints: Vec<_> = crate::lint::registry().iter().collect();
-    lints.sort_by_key(|l| l.name());
-
-    let width = lints.iter().map(|l| l.name().len()).max().unwrap_or(0);
-
-    let mut out = String::from(
-        "# Every lint keeps the level below until the user names it here.\n\
-         # Remove the `#` to change one.\n",
-    );
-
-    for lint in lints {
-        let level = match lint.default_level() {
-            crate::lint::Level::Allow => "allow",
-            crate::lint::Level::Warn => "warn",
-            crate::lint::Level::Deny => "deny",
-        };
-
-        out.push_str(&format!(
-            "# {:<width$} = {level:?}\n",
-            lint.name(),
-            width = width
-        ));
-    }
-
-    out
-}
-
 /// The same behavior for the linter, for the same reasons
 fn lint_section(root: &Path) -> String {
     match existing(root, &SELENE) {
@@ -205,7 +143,9 @@ fn lint_section(root: &Path) -> String {
              # A [lint] table here would layer over it.\n"
         ),
 
-        None => format!("\n[lint]\nstd = \"roblox\"\n\n[lint.rules]\n{}", defaults()),
+        None => "\n[lint]\nstd = \"roblox\"\n\
+             # Set levels under [lint.rules]; `larvae lint --explain <name>` describes one.\n"
+            .to_string(),
     }
 }
 
