@@ -111,11 +111,7 @@ impl Config {
 
     /// Load a config, and merge `[profile.<name>]` over it when the caller requests one
     pub fn load_profile(path: &Path, profile: Option<&str>) -> Result<Self> {
-        let text = std::fs::read_to_string(path)
-            .with_context(|| format!("failed to read {}", crate::ui::rel(path)))?;
-
-        let mut raw: toml::Value = toml::from_str(&text)
-            .with_context(|| format!("invalid config in {}", crate::ui::rel(path)))?;
+        let mut raw = raw_config(path, &mut Vec::new())?;
 
         if let Some(name) = profile {
             profile::apply(&mut raw, name)
@@ -313,6 +309,76 @@ impl Config {
     }
 }
 
+/*
+The raw table of one config file, with its `extends` chain resolved.
+
+`extends` names another config file by path, relative to the file that
+writes it. The base loads first, and the writing file merges over it with
+the rules of `[profile]`: tables key by key, arrays and scalars whole. A
+base can extend another base, and the chain refuses a loop by path.
+
+The `[profile]` tables of a base merge like every other table. So a base
+can hold the profiles of a whole workspace, and `--profile` applies after
+the chain resolves.
+
+The path form only. A registry form, ex: `@company/larvae-config`, needs a
+fetch, a cache, and a pin, and an lpm template covers the same need at
+project start. The error says so, and does not guess.
+*/
+fn raw_config(path: &Path, chain: &mut Vec<std::path::PathBuf>) -> Result<toml::Value> {
+    let position = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+
+    if chain.contains(&position) {
+        bail!(
+            "extends loops: {} is already in the chain",
+            crate::ui::rel(path)
+        );
+    }
+
+    chain.push(position);
+
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", crate::ui::rel(path)))?;
+
+    let mut raw: toml::Value = toml::from_str(&text)
+        .with_context(|| format!("invalid config in {}", crate::ui::rel(path)))?;
+
+    let Some(table) = raw.as_table_mut() else {
+        return Ok(raw);
+    };
+
+    let Some(extends) = table.remove("extends") else {
+        return Ok(raw);
+    };
+
+    let Some(base_rel) = extends.as_str() else {
+        bail!("extends takes a path string in {}", crate::ui::rel(path));
+    };
+
+    if base_rel.starts_with('@') {
+        bail!(
+            "extends = \"{base_rel}\": a registry base is not supported; write a filesystem path"
+        );
+    }
+
+    let base_path = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(base_rel);
+
+    if !base_path.exists() {
+        bail!(
+            "extends = \"{base_rel}\": no such file next to {}",
+            crate::ui::rel(path)
+        );
+    }
+
+    let mut base = raw_config(&base_path, chain)?;
+    profile::merge(&mut base, &raw);
+
+    Ok(base)
+}
+
 pub fn validate_alias_name(name: &str) -> Result<()> {
     if name.is_empty() {
         bail!("empty alias name");
@@ -506,5 +572,154 @@ mod tests {
         .unwrap();
 
         assert_eq!(c.process.inputs(), vec![PathBuf::from("game")]);
+    }
+
+    /// Several files on disk; the first one is the config that loads.
+    fn load_files(files: &[(&str, &str)], profile: Option<&str>) -> Result<Config> {
+        let dir = tempfile::tempdir().unwrap();
+
+        for (name, text) in files {
+            let path = dir.path().join(name);
+
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+
+            std::fs::write(&path, text).unwrap();
+        }
+
+        Config::load_profile(&dir.path().join(files[0].0), profile)
+    }
+
+    #[test]
+    fn a_base_fills_what_the_file_does_not_write() {
+        let c = load_files(
+            &[
+                (
+                    "larvae.toml",
+                    "extends = \"./base.toml\"\ninput = \"code\"\n",
+                ),
+                ("base.toml", "target = \"path\"\n"),
+            ],
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(c.requires.target, Target::Path);
+        assert_eq!(c.process.inputs(), vec![PathBuf::from("code")]);
+    }
+
+    #[test]
+    fn the_file_wins_over_its_base() {
+        let c = load_files(
+            &[
+                (
+                    "larvae.toml",
+                    "extends = \"./base.toml\"\ntarget = \"path\"\n",
+                ),
+                ("base.toml", "target = \"roblox-instance\"\n"),
+            ],
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(c.requires.target, Target::Path);
+    }
+
+    /// The base path is relative to the file that writes it, chain deep.
+    #[test]
+    fn a_chain_of_bases_resolves() {
+        let c = load_files(
+            &[
+                (
+                    "larvae.toml",
+                    "extends = \"./shared/b.toml\"\ninput = \"code\"\n",
+                ),
+                (
+                    "shared/b.toml",
+                    "extends = \"./c.toml\"\noutput = \"build\"\n",
+                ),
+                ("shared/c.toml", "target = \"path\"\n"),
+            ],
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(c.process.inputs(), vec![PathBuf::from("code")]);
+        assert_eq!(c.process.output, PathBuf::from("build"));
+        assert_eq!(c.requires.target, Target::Path);
+    }
+
+    #[test]
+    fn an_extends_loop_is_refused() {
+        let err = load_files(
+            &[
+                ("larvae.toml", "extends = \"./b.toml\"\n"),
+                ("b.toml", "extends = \"./larvae.toml\"\n"),
+            ],
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("loops"), "{err}");
+    }
+
+    #[test]
+    fn a_missing_base_names_itself() {
+        let err = load_files(&[("larvae.toml", "extends = \"./nope.toml\"\n")], None)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("nope.toml"), "{err}");
+    }
+
+    #[test]
+    fn a_registry_base_is_refused_with_a_reason() {
+        let err = load_files(
+            &[("larvae.toml", "extends = \"@company/larvae-config\"\n")],
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("filesystem path"), "{err}");
+    }
+
+    /// A base can hold the profiles of a whole workspace.
+    #[test]
+    fn a_profile_of_the_base_applies_to_the_file() {
+        let c = load_files(
+            &[
+                ("larvae.toml", "extends = \"./base.toml\"\n"),
+                (
+                    "base.toml",
+                    "input = \"src\"\n\n[profile.ship]\ninput = \"game\"\n",
+                ),
+            ],
+            Some("ship"),
+        )
+        .unwrap();
+
+        assert_eq!(c.process.inputs(), vec![PathBuf::from("game")]);
+    }
+
+    /// One spelling per merged config, across files too.
+    #[test]
+    fn mixed_spellings_across_base_and_file_are_refused() {
+        let err = load_files(
+            &[
+                (
+                    "larvae.toml",
+                    "extends = \"./base.toml\"\noutput = \"build\"\n",
+                ),
+                ("base.toml", "[process]\noutput = \"dist\"\n"),
+            ],
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("set twice"), "{err}");
     }
 }

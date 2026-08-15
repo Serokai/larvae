@@ -42,8 +42,8 @@ pub fn apply(base: &mut toml::Value, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Deep merge for tables, replacement for all other values
-fn merge(base: &mut toml::Value, over: &toml::Value) {
+/// Deep merge for tables, replacement for all other values; `extends` reuses it
+pub(super) fn merge(base: &mut toml::Value, over: &toml::Value) {
     match (base.as_table_mut(), over.as_table()) {
         (Some(b), Some(o)) => {
             for (key, value) in o {

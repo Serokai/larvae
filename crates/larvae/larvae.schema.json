@@ -6,6 +6,10 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "extends": {
+      "type": "string",
+      "description": "Path of a base config that this file layers over, relative to this file, ex: \"./shared/larvae.base.toml\". The base loads first and this file wins key by key; arrays and scalars replace whole. A base can extend another base."
+    },
     "exclude": {
       "$ref": "#/$defs/exclude",
       "description": "Paths that every command skips, as globs relative to the project root, ex: [\"gen/**\"]. Naming a directory is enough. The include of an area wins over this list for that area, and a file named on the command line is still read."

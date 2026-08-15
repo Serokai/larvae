@@ -7,7 +7,12 @@
 
 # --- top level ---------------------------------------------------------------
 # TOML reads a root key only before the first table header, so these come
-# first. The three keys every project sets have short forms at the root. Each
+# first.
+
+# A base config that this file layers over, by path relative to this file.
+# The base loads first and this file wins key by key. A monorepo keeps its
+# shared twenty lines in one base this way.
+# extends = "./shared/larvae.base.toml" The three keys every project sets have short forms at the root. Each
 # one means the same as its long spelling further down; write one spelling,
 # both at once is an error.
 #

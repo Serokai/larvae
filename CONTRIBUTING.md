@@ -82,6 +82,15 @@ so explain the reasoning and do not restate the code.
 Turn a group of two or more line comments into a block comment. Keep a
 single line comment as a line comment.
 
+## Naming config keys
+
+The rule: keys are snake case, values are kebab case, and each table is
+named after the command it configures, so `[fmt]` configures `larvae fmt`.
+Keys belong to larvae, and values read as prose.
+
+Hold to the rule when you add a key. A key that breaks it needs a reason in
+review, not a preference.
+
 ## Where things live
 
 All data flows in one direction. A command in `src/commands/` loads the
