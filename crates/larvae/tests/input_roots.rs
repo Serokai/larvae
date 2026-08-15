@@ -120,3 +120,23 @@ fn deletions_still_mirror_with_several_roots() {
     assert!(!root.join("dist/vendor/b.luau").exists());
     assert_eq!(out.stats.files_pruned, 1);
 }
+
+/// The root short forms are the same keys, so the pipeline obeys them.
+#[test]
+fn the_root_short_forms_drive_the_pipeline() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    write(
+        root,
+        "larvae.toml",
+        "input = \"code\"\noutput = \"out\"\ntarget = \"path\"\n",
+    );
+    write(root, "code/a.luau", "return 1\n");
+
+    let config = Config::load_or_default(root).unwrap();
+    let out = pipeline::run(root, &config, true).unwrap();
+
+    assert!(!out.has_errors(), "{:?}", out.diags);
+    assert!(root.join("out/a.luau").exists());
+}

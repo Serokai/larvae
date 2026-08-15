@@ -5,6 +5,23 @@
 # Not committed, this file is a reference. `larvae init` writes a short one.
 
 
+# --- top level ---------------------------------------------------------------
+# TOML reads a root key only before the first table header, so these come
+# first. The three keys every project sets have short forms at the root. Each
+# one means the same as its long spelling further down; write one spelling,
+# both at once is an error.
+#
+# input = "src"                          # short for [process] input
+# output = "dist"                        # short for [process] output
+# target = "roblox-string"               # short for [requires] target
+
+# Globs relative to the project root that every command skips: process, fmt,
+# lint, and the editor. `include` cancels `exclude` here, and only that. The
+# include of one area is stronger: it also cancels for that area.
+# exclude = ["Packages"]
+# include = ["Packages/keep.luau"]
+
+
 # --- aliases -----------------------------------------------------------------
 # Merged over .luaurc per key, so a project with a .luaurc needs none of this.
 # The value is a DataModel path or a filesystem path. Names are matched case
@@ -21,8 +38,8 @@ shared = "./src/shared"
 [process]
 input = "src"                            # or a list: ["src/client", "src/shared"]
 output = "dist"
-include = ["**/*.luau", "**/*.lua"]      # relative to input
-# exclude = ["**/*.spec.luau"]           # relative to input, skipped entirely
+include = ["**/*.luau", "**/*.lua"]      # relative to the project root, picks what is transformed
+# exclude = ["**/*.spec.luau"]           # relative to the project root, skipped entirely
 generator = "retain-lines"               # dense and readable land in M4
 quotes = "preserve"                      # quotes on rewritten require strings
 strip_flags = true                       # drop `-- larvae: allow(...)` comments

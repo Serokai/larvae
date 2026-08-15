@@ -38,6 +38,23 @@ pub struct Config {
     #[serde(default)]
     pub include: Vec<String>,
 
+    /*
+    The three keys that almost every project sets, at the root so the first
+    line of a config needs no table header. Each one is a short form:
+    `input` and `output` for the same keys of `[process]`, and `target` for
+    `[requires] target`. `load_profile` folds a set value into its long home
+    and refuses a config that writes both spellings of one key. After the
+    fold the fields here are None, so the rest of larvae reads one place.
+    */
+    #[serde(default)]
+    input: Option<Input>,
+
+    #[serde(default)]
+    output: Option<std::path::PathBuf>,
+
+    #[serde(default)]
+    target: Option<Target>,
+
     #[serde(default)]
     pub aliases: HashMap<String, String>,
 
@@ -107,9 +124,38 @@ impl Config {
             table.remove("profile");
         }
 
-        let config: Config = raw
+        /*
+        The short form and the long form of one key must not both appear.
+        Serde fills a missing key with its default, so after the parse larvae
+        cannot tell a written key from a filled one. The raw table still can.
+        */
+        for (short, table) in [
+            ("input", "process"),
+            ("output", "process"),
+            ("target", "requires"),
+        ] {
+            if raw.get(short).is_some() && raw.get(table).and_then(|t| t.get(short)).is_some() {
+                bail!(
+                    "`{short}` is set twice, at the root and in [{table}]; keep one, they mean the same thing"
+                );
+            }
+        }
+
+        let mut config: Config = raw
             .try_into()
             .with_context(|| format!("invalid config in {}", crate::ui::rel(path)))?;
+
+        if let Some(input) = config.input.take() {
+            config.process.input = input;
+        }
+
+        if let Some(output) = config.output.take() {
+            config.process.output = output;
+        }
+
+        if let Some(target) = config.target.take() {
+            config.requires.target = target;
+        }
 
         config.validate()?;
 
@@ -401,5 +447,53 @@ mod tests {
         let c: Config =
             toml::from_str("[aliases]\nPkg = \"@game/ReplicatedStorage/packages\"").unwrap();
         assert!(c.alias_map().contains_key("pkg"));
+    }
+
+    /// The fold runs in `load_profile`, so these tests load from a file.
+    fn load_text(text: &str, profile: Option<&str>) -> Result<Config> {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("larvae.toml");
+
+        std::fs::write(&path, text).unwrap();
+
+        Config::load_profile(&path, profile)
+    }
+
+    #[test]
+    fn the_root_short_forms_fold_into_their_long_homes() {
+        let c = load_text(
+            "input = \"game\"\noutput = \"out\"\ntarget = \"path\"\n",
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(c.process.inputs(), vec![PathBuf::from("game")]);
+        assert_eq!(c.process.output, PathBuf::from("out"));
+        assert_eq!(c.requires.target, Target::Path);
+    }
+
+    #[test]
+    fn both_spellings_of_one_key_are_refused() {
+        for text in [
+            "input = \"src\"\n\n[process]\ninput = \"src\"\n",
+            "output = \"dist\"\n\n[process]\noutput = \"dist\"\n",
+            "target = \"path\"\n\n[requires]\ntarget = \"path\"\n",
+        ] {
+            let err = load_text(text, None).unwrap_err().to_string();
+
+            assert!(err.contains("set twice"), "{err}");
+        }
+    }
+
+    /// A profile merges before the fold, so a profile can set a short form.
+    #[test]
+    fn a_profile_can_set_a_short_form() {
+        let c = load_text(
+            "input = \"src\"\n\n[profile.ship]\ninput = \"game\"\n",
+            Some("ship"),
+        )
+        .unwrap();
+
+        assert_eq!(c.process.inputs(), vec![PathBuf::from("game")]);
     }
 }

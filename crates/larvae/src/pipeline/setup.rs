@@ -97,16 +97,23 @@ pub fn discover(
     claimed: &[String],
 ) -> Result<(Vec<PathBuf>, Vec<PathBuf>)> {
     let include = globset(&config.process.include)?;
-    let exclude = globset(&config.process.exclude)?;
 
     /*
-    The root level exclude removes a file from every command, so this walk
-    also drops it: not processed and not copied. The root include cancels
-    that, and only that. The `[process]` lists keep their own meaning and
-    match against the input root as before.
+    Every exclusion list matches relative to the project root, with one rule:
+    a match on a file or on any directory over it removes the file. A match
+    here drops the file fully, not transformed and not copied. `[process]`
+    exclude is the area list of this walk, so it wins over the root include,
+    and the root include cancels the root exclude alone. `[process]` include
+    keeps its own meaning: it is the filter that picks transform over copy,
+    and it also matches relative to the project root.
     */
-    let root_skip =
-        crate::config::Excludes::layered(project_root, &[], &[], &config.include, &config.exclude)?;
+    let skips = crate::config::Excludes::layered(
+        project_root,
+        &[],
+        &config.process.exclude,
+        &config.include,
+        &config.exclude,
+    )?;
     let mut to_process: Vec<PathBuf> = Vec::new();
     let mut to_copy: Vec<PathBuf> = Vec::new();
 
@@ -121,13 +128,12 @@ pub fn discover(
                 continue;
             }
 
-            let rel = entry.path().strip_prefix(&root.dir).unwrap();
+            let rel = entry
+                .path()
+                .strip_prefix(project_root)
+                .unwrap_or_else(|_| entry.path());
 
-            if exclude.is_match(rel) {
-                continue;
-            }
-
-            if root_skip.skips(entry.path()) {
+            if skips.skips(entry.path()) {
                 continue;
             }
 

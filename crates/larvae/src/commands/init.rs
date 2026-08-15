@@ -31,18 +31,13 @@ pub fn run(root: &Path) -> Result<ExitCode> {
     */
     let mut template = format!(
         "# larvae configuration, run `larvae self code` for editor completion.\n\
-         {project_note}"
+         {project_note}\n"
     );
 
-    if !found.aliases.is_empty() {
-        template.push_str("\n[aliases]\n");
-
-        for (name, value) in &found.aliases {
-            template.push_str(&format!("{name} = \"{value}\"\n"));
-        }
-    }
-
-    template.push_str("\n[process]\n");
+    /*
+    The three keys every project sets, in their root short forms. TOML reads
+    a root key only before the first table header, so these lines come first.
+    */
     template.push_str(&match found.inputs.as_slice() {
         [] => "input = \"src\"\n".to_string(),
 
@@ -54,7 +49,16 @@ pub fn run(root: &Path) -> Result<ExitCode> {
             format!("input = [{}]\n", list.join(", "))
         }
     });
-    template.push_str("output = \"dist\"\n\n[requires]\ntarget = \"roblox-string\"\n");
+    template.push_str("output = \"dist\"\ntarget = \"roblox-string\"\n");
+
+    if !found.aliases.is_empty() {
+        template.push_str("\n[aliases]\n");
+
+        for (name, value) in &found.aliases {
+            template.push_str(&format!("{name} = \"{value}\"\n"));
+        }
+    }
+
     template.push_str(&fmt_section(root));
     template.push_str(&lint_section(root));
 

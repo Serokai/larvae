@@ -55,3 +55,49 @@ fn the_root_include_brings_a_file_back_into_the_walk() {
     assert!(root.join("dist/gen/keep.luau").exists());
     assert!(!root.join("dist/gen/out.luau").exists());
 }
+
+/*
+`[process] exclude` matches relative to the project root, with the same
+directory rule as every other list. One relativity rule for all lists.
+*/
+#[test]
+fn the_process_exclude_matches_relative_to_the_project_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    write(
+        root,
+        "larvae.toml",
+        "[process]\ninput = \"src\"\noutput = \"dist\"\nexclude = [\"src/gen\"]\n\n[requires]\ntarget = \"path\"\n",
+    );
+    write(root, "src/a.luau", "return 1\n");
+    write(root, "src/gen/out.luau", "return 2\n");
+
+    let config = Config::load_or_default(root).unwrap();
+    let out = pipeline::run(root, &config, true).unwrap();
+
+    assert!(!out.has_errors(), "{:?}", out.diags);
+    assert!(root.join("dist/a.luau").exists());
+    assert!(!root.join("dist/gen/out.luau").exists());
+}
+
+/// The exclude of the area wins over the root include, here too.
+#[test]
+fn the_process_exclude_wins_over_the_root_include() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    write(
+        root,
+        "larvae.toml",
+        "include = [\"src/gen/keep.luau\"]\n\n[process]\ninput = \"src\"\noutput = \"dist\"\nexclude = [\"src/gen\"]\n\n[requires]\ntarget = \"path\"\n",
+    );
+    write(root, "src/a.luau", "return 1\n");
+    write(root, "src/gen/keep.luau", "return 2\n");
+
+    let config = Config::load_or_default(root).unwrap();
+    let out = pipeline::run(root, &config, true).unwrap();
+
+    assert!(!out.has_errors(), "{:?}", out.diags);
+    assert!(!root.join("dist/gen/keep.luau").exists());
+}
