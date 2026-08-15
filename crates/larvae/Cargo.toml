@@ -25,6 +25,11 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
 globset = "0.4"
+# Only a version pin. The tilde keeps idna on the small unicode-rs tables
+# instead of the ICU4X ones; same behavior, and about a megabyte less of
+# unicode data that URL parsing here never touches. The idna crate
+# documents this pin as the supported way to choose the small backend.
+idna_adapter = "~1.1"
 json5 = "0.4"
 mlua = { version = "0.12.0", features = ["luau", "vendored", "error-send", "serialize"] }
 notify-debouncer-full = "0.7.0"

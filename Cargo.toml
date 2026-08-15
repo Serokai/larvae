@@ -58,3 +58,15 @@ opt-level = "z"
 opt-level = "z"
 [profile.release.package.wasmparser]
 opt-level = "z"
+[profile.release.package.toml]
+opt-level = "z"
+[profile.release.package.toml_edit]
+opt-level = "z"
+[profile.release.package.sha2]
+opt-level = "z"
+[profile.release.package.dirs]
+opt-level = "z"
+[profile.release.package.url]
+opt-level = "z"
+[profile.release.package.idna]
+opt-level = "z"
