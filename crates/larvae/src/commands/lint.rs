@@ -65,8 +65,14 @@ pub fn run(
         false => crate::fmt::FmtConfig::default(),
     };
 
-    let pool = worm_pool(root, config, &mut fmt)?;
-    let files = collect(root, &paths, &cfg.excludes(root)?, &pool.lint_claimed())?;
+    let pool = worm_pool(root, config.clone(), &mut fmt)?;
+    let (root_in, root_ex) = crate::commands::fmt::root_lists(root, config)?;
+    let files = collect(
+        root,
+        &paths,
+        &cfg.excludes_under(root, &root_in, &root_ex)?,
+        &pool.lint_claimed(),
+    )?;
 
     if files.is_empty() {
         ui::print_error("no Luau files found");

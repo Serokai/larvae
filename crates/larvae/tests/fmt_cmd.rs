@@ -314,3 +314,49 @@ fn a_broken_exclude_glob_is_reported() {
     assert!(!ok);
     assert!(out.contains("exclude"), "should name the key: {out}");
 }
+
+/*
+The same project as the lint test: the root `exclude` removes the tree, and
+only `[lint]` has an include. So the format walk still skips both files. Each
+area overrides the root lists for itself alone.
+*/
+#[test]
+fn a_lint_include_does_not_reach_the_fmt_walk() {
+    let dir = tempfile::tempdir().unwrap();
+    let messy = "return          1\n";
+
+    write(
+        dir.path(),
+        "larvae.toml",
+        "exclude = [\"src/gen\"]\n\n[process]\ninput = \"src\"\n\n[lint]\ninclude = [\"src/gen/keep.luau\"]\n",
+    );
+    write(dir.path(), "src/gen/keep.luau", messy);
+    write(dir.path(), "src/mine.luau", messy);
+
+    let (ok, out) = run(dir.path(), &["fmt", "--check"]);
+
+    assert!(!ok, "mine.luau needs a format: {out}");
+    assert!(out.contains("mine.luau"), "{out}");
+    assert!(!out.contains("keep.luau"), "the root exclude holds: {out}");
+}
+
+/// The `[fmt]` include wins over the root `exclude`, the same as `[lint]`.
+#[test]
+fn a_fmt_include_wins_over_the_root_exclude() {
+    let dir = tempfile::tempdir().unwrap();
+    let messy = "return          1\n";
+
+    write(
+        dir.path(),
+        "larvae.toml",
+        "exclude = [\"src/gen\"]\n\n[process]\ninput = \"src\"\n\n[fmt]\ninclude = [\"src/gen/keep.luau\"]\n",
+    );
+    write(dir.path(), "src/gen/keep.luau", messy);
+    write(dir.path(), "src/gen/skip.luau", messy);
+
+    let (ok, out) = run(dir.path(), &["fmt", "--check"]);
+
+    assert!(!ok, "keep.luau needs a format: {out}");
+    assert!(out.contains("keep.luau"), "{out}");
+    assert!(!out.contains("skip.luau"), "{out}");
+}

@@ -248,7 +248,15 @@ impl Server {
 
         if let Ok(cfg) = LintConfig::discover(&root, project.as_ref().and_then(|c| c.lint.as_ref()))
         {
-            self.excluded = cfg.excludes(&root).unwrap_or_default();
+            // The root lists apply here too, so the editor and the command agree.
+            let (root_in, root_ex) = project
+                .as_ref()
+                .map(|c| (c.include.as_slice(), c.exclude.as_slice()))
+                .unwrap_or((&[], &[]));
+
+            self.excluded = cfg
+                .excludes_under(&root, root_in, root_ex)
+                .unwrap_or_default();
             self.lint = cfg;
         }
 

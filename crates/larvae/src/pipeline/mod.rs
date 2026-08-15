@@ -180,7 +180,7 @@ fn run_inner(
     let skip = setup::skip_dirs(&root, config);
     let mounts = setup::mount_table(&root, config, project.as_ref(), &mut diags);
     let luaurc = setup::luaurc_index(&root, &skip, &mut diags);
-    let (to_process, to_copy) = setup::discover(&roots, config, &claimed)?;
+    let (to_process, to_copy) = setup::discover(&root, &roots, config, &claimed)?;
 
     let epoch = setup::epoch(
         &root,

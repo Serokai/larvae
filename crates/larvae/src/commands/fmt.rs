@@ -57,8 +57,14 @@ pub fn run(
         return from_stdin(&cfg, stdin_filepath.as_deref(), &pool);
     }
 
-    let pool = worm_pool(root, config, &mut cfg)?;
-    let files = collect(root, &paths, &cfg.excludes(root)?, &pool.fmt_claimed())?;
+    let pool = worm_pool(root, config.clone(), &mut cfg)?;
+    let (root_in, root_ex) = root_lists(root, config)?;
+    let files = collect(
+        root,
+        &paths,
+        &cfg.excludes_under(root, &root_in, &root_ex)?,
+        &pool.fmt_claimed(),
+    )?;
 
     if files.is_empty() {
         ui::print_error("no Luau files found");
@@ -76,6 +82,25 @@ pub fn run(
         .collect();
 
     report(outcomes, check)
+}
+
+/*
+The root level include and exclude, which every area inherits.
+
+The lists live on the whole config and not on one area, so the two commands
+that walk a tree read them through this one helper. A project without a
+config file has empty lists, which cost nothing.
+*/
+pub fn root_lists(root: &Path, config: Option<PathBuf>) -> Result<(Vec<String>, Vec<String>)> {
+    let path = config.unwrap_or_else(|| root.join("larvae.toml"));
+
+    if !path.exists() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+
+    let cfg = Config::load(&path)?;
+
+    Ok((cfg.include, cfg.exclude))
 }
 
 /*

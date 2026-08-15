@@ -105,6 +105,10 @@ pub struct LintConfig {
     /// command line, see [`Excludes`].
     #[serde(default)]
     pub exclude: Vec<String>,
+
+    /// Globs that this area reads even when an exclude removes them
+    #[serde(default)]
+    pub include: Vec<String>,
 }
 
 impl LintConfig {
@@ -115,7 +119,24 @@ impl LintConfig {
 
     /// Returns the paths that this config tells `larvae lint` to skip.
     pub fn excludes(&self, root: &Path) -> Result<Excludes> {
-        Excludes::new(root, &self.exclude).context("[lint]")
+        self.excludes_under(root, &[], &[])
+    }
+
+    /// The same, with the root level lists that every area inherits
+    pub fn excludes_under(
+        &self,
+        root: &Path,
+        root_include: &[String],
+        root_exclude: &[String],
+    ) -> Result<Excludes> {
+        Excludes::layered(
+            root,
+            &self.include,
+            &self.exclude,
+            root_include,
+            root_exclude,
+        )
+        .context("[lint]")
     }
 
     /// Returns the settings for one lint, deserialised into the shape that the lint requests.
@@ -143,6 +164,7 @@ impl LintConfig {
             config.options.extend(over.options);
             config.globals.extend(over.globals);
             config.exclude.extend(over.exclude);
+            config.include.extend(over.include);
 
             if value.get("std").is_some() {
                 config.std = over.std;
@@ -198,6 +220,7 @@ fn selene_file(root: &Path) -> Result<Option<LintConfig>> {
         .unwrap_or_default();
 
     Ok(Some(LintConfig {
+        include: Vec::new(),
         rules: file.rules,
         options: file.config,
         std,

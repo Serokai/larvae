@@ -86,6 +86,7 @@ pub fn luaurc_index(root: &Path, skip: &[PathBuf], diags: &mut Vec<Diag>) -> Lua
 
 /// Split the input tree into files that larvae transforms and files that larvae copies
 pub fn discover(
+    project_root: &Path,
     roots: &[super::roots::Root],
     config: &Config,
     /*
@@ -97,6 +98,15 @@ pub fn discover(
 ) -> Result<(Vec<PathBuf>, Vec<PathBuf>)> {
     let include = globset(&config.process.include)?;
     let exclude = globset(&config.process.exclude)?;
+
+    /*
+    The root level exclude removes a file from every command, so this walk
+    also drops it: not processed and not copied. The root include cancels
+    that, and only that. The `[process]` lists keep their own meaning and
+    match against the input root as before.
+    */
+    let root_skip =
+        crate::config::Excludes::layered(project_root, &[], &[], &config.include, &config.exclude)?;
     let mut to_process: Vec<PathBuf> = Vec::new();
     let mut to_copy: Vec<PathBuf> = Vec::new();
 
@@ -114,6 +124,10 @@ pub fn discover(
             let rel = entry.path().strip_prefix(&root.dir).unwrap();
 
             if exclude.is_match(rel) {
+                continue;
+            }
+
+            if root_skip.skips(entry.path()) {
                 continue;
             }
 

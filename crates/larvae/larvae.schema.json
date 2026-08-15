@@ -6,6 +6,14 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "exclude": {
+      "$ref": "#/$defs/exclude",
+      "description": "Paths that every command skips, as globs relative to the project root, ex: [\"gen/**\"]. Naming a directory is enough. The include of an area wins over this list for that area, and a file named on the command line is still read."
+    },
+    "include": {
+      "$ref": "#/$defs/exclude",
+      "description": "Paths that come back in over the root `exclude`, as globs relative to the project root. This list cancels the root `exclude` and only that; the exclude of an area still applies."
+    },
     "aliases": {
       "$ref": "#/$defs/aliases"
     },
@@ -760,6 +768,10 @@
           "$ref": "#/$defs/exclude",
           "description": "Paths `larvae fmt` walks past, as globs relative to the project root, ex: [\"Packages/**\"]. Naming a directory is enough. A file named on the command line is still formatted, since naming it is saying you meant it."
         },
+        "include": {
+          "$ref": "#/$defs/exclude",
+          "description": "Paths `larvae fmt` reads even when an exclude matches them, as globs relative to the project root. This list wins over the `[fmt]` exclude and over the root lists."
+        },
         "syntax": {
           "type": "string",
           "description": "Accepted from stylua and ignored. larvae formats Luau and only Luau, which is what every value of this asks for here."
@@ -805,6 +817,10 @@
         "exclude": {
           "$ref": "#/$defs/exclude",
           "description": "Paths `larvae lint` walks past, as globs relative to the project root, ex: [\"Packages/**\"]. Naming a directory is enough. Same key selene has, and a selene.toml's list is picked up too. A file named on the command line is still linted, since naming it is saying you meant it."
+        },
+        "include": {
+          "$ref": "#/$defs/exclude",
+          "description": "Paths `larvae lint` reads even when an exclude matches them, as globs relative to the project root. This list wins over the `[lint]` exclude and over the root lists."
         },
         "rules": {
           "$ref": "#/$defs/lint_rules"

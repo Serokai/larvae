@@ -29,6 +29,15 @@ pub use rules::{
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// Globs that every command skips, relative to the project root
+    #[serde(default)]
+    pub exclude: Vec<String>,
+
+    /// Globs that cancel the root `exclude`, and only that. An area include
+    /// is stronger: it also cancels the exclude of its own area.
+    #[serde(default)]
+    pub include: Vec<String>,
+
     #[serde(default)]
     pub aliases: HashMap<String, String>,
 

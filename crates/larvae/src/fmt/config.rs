@@ -215,6 +215,10 @@ pub struct FmtConfig {
     #[serde(default)]
     pub exclude: Vec<String>,
 
+    /// Globs that this area reads even when an exclude removes them
+    #[serde(default)]
+    pub include: Vec<String>,
+
     // --- accepted keys with no effect -------------------------------------
     /*
     This is the dialect switch of stylua. Larvae accepts it, so a
@@ -320,7 +324,24 @@ impl FmtConfig {
 
     /// Returns the paths that this config tells `larvae fmt` to skip.
     pub fn excludes(&self, root: &Path) -> Result<Excludes> {
-        Excludes::new(root, &self.exclude).context("[fmt]")
+        self.excludes_under(root, &[], &[])
+    }
+
+    /// The same, with the root level lists that every area inherits
+    pub fn excludes_under(
+        &self,
+        root: &Path,
+        root_include: &[String],
+        root_exclude: &[String],
+    ) -> Result<Excludes> {
+        Excludes::layered(
+            root,
+            &self.include,
+            &self.exclude,
+            root_include,
+            root_exclude,
+        )
+        .context("[fmt]")
     }
 
     /// Reports if a call puts a space before its parentheses.

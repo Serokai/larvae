@@ -267,3 +267,49 @@ fn an_excluded_file_is_still_linted_when_named() {
 
     assert!(out.contains("unused_variable"), "{out}");
 }
+
+/*
+The root `exclude` removes a tree from every command. The include of one area
+brings one file back for that area alone, because the local list is more
+specific than the global one.
+*/
+#[test]
+fn a_lint_include_wins_over_the_root_exclude() {
+    let dir = tempfile::tempdir().unwrap();
+    let bad = "local unused = 1\nreturn 1\n";
+
+    write(
+        dir.path(),
+        "larvae.toml",
+        "exclude = [\"src/gen\"]\n\n[process]\ninput = \"src\"\n\n[lint]\ninclude = [\"src/gen/keep.luau\"]\n",
+    );
+    write(dir.path(), "src/gen/keep.luau", bad);
+    write(dir.path(), "src/gen/skip.luau", bad);
+    write(dir.path(), "src/mine.luau", bad);
+
+    let (_, out) = run(dir.path(), &["lint"]);
+
+    assert!(out.contains("keep.luau"), "the [lint] include: {out}");
+    assert!(out.contains("mine.luau"), "{out}");
+    assert!(!out.contains("skip.luau"), "the root exclude: {out}");
+}
+
+/// The root `include` cancels the root `exclude` for every command.
+#[test]
+fn the_root_include_cancels_the_root_exclude() {
+    let dir = tempfile::tempdir().unwrap();
+    let bad = "local unused = 1\nreturn 1\n";
+
+    write(
+        dir.path(),
+        "larvae.toml",
+        "exclude = [\"src/gen\"]\ninclude = [\"src/gen/keep.luau\"]\n\n[process]\ninput = \"src\"\n",
+    );
+    write(dir.path(), "src/gen/keep.luau", bad);
+    write(dir.path(), "src/gen/skip.luau", bad);
+
+    let (_, out) = run(dir.path(), &["lint"]);
+
+    assert!(out.contains("keep.luau"), "{out}");
+    assert!(!out.contains("skip.luau"), "{out}");
+}
