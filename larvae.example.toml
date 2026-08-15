@@ -253,6 +253,28 @@ paths = { "@game/ServerStorage/secrets" = "server only, never require this from 
 # path = "build/myworm"
 
 
+# --- check -------------------------------------------------------------------
+# The CI gate: whole project questions over the require graph. Each key is a
+# level like [lint.rules], and only a deny fails the run. Unresolvable
+# requires and realm violations are always reported; no level lowers them.
+
+[check]
+cycles = "warn"                          # modules that require each other; the report names the cycle
+unused_modules = "allow"                 # modules nothing requires; Scripts and LocalScripts never count
+early_require = "warn"                   # roblox-instance only: client requires that do not wait
+# entries = ["src/boot.luau"]            # extra entry points, never reported as unused
+
+
+# --- bundle ------------------------------------------------------------------
+# `larvae bundle` writes the project as one file. Modules load on demand, so
+# bundling cannot move a side effect.
+
+[bundle]
+# entry = "src/init.luau"                # the module the bundle starts from; --entry beats this
+# output = "bundle.luau"                 # where the single file goes, relative to the project root
+tree_shake = true                        # drop the modules the entry never reaches
+
+
 # --- profiles ----------------------------------------------------------------
 # The same keys the root has, merged over it when --profile <name> is passed.
 # Tables merge per key, arrays and scalars are replaced whole.
@@ -275,16 +297,8 @@ unused_variable = "deny"
 
 
 # --- not implemented yet -----------------------------------------------------
-# These parse and then error naming their milestone, rather than being ignored,
-# so a config written against them tells you when it will work.
-#
-# [bundle]                               # M3, single file output
-# entry = "src/init.luau"
-# tree_shake = true
-#
-# [check]                                # M3, CI gates
-# disallow_cycles = true
-# realm_analysis = true
+# This parses and then errors naming its milestone, rather than being ignored,
+# so a config written against it tells you when it will work.
 #
 # [minify]                               # M4, for generator = "dense"
 # column_span = 120

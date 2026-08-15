@@ -201,3 +201,32 @@ fn collect_refs(value: &serde_json::Value, out: &mut Vec<String>) {
         _ => {}
     }
 }
+
+/// The same guarantee for [check]: the schema and the config cannot drift.
+#[test]
+fn check_keys_match_the_config() {
+    let schema = schema();
+    let documented = keys(&schema["$defs"]["check"]["properties"]);
+
+    // Every field of the default serializes: the levels always, entries as [].
+    let real: BTreeSet<String> =
+        toml::Value::try_from(larvae::config::check::CheckConfig::default())
+            .expect("the config serializes")
+            .as_table()
+            .expect("a table")
+            .keys()
+            .cloned()
+            .collect();
+
+    assert_eq!(
+        documented.difference(&real).collect::<Vec<_>>(),
+        Vec::<&String>::new(),
+        "the schema offers [check] keys that do not exist"
+    );
+
+    assert_eq!(
+        real.difference(&documented).collect::<Vec<_>>(),
+        Vec::<&String>::new(),
+        "the config has [check] keys the schema does not offer"
+    );
+}

@@ -1412,7 +1412,8 @@
             "warn",
             "deny"
           ],
-          "description": "Modules that require each other, directly or through a chain. The report names the whole cycle. Default: warn."
+          "description": "Modules that require each other, directly or through a chain. The report names the whole cycle. Default: warn.",
+          "default": "warn"
         },
         "unused_modules": {
           "enum": [
@@ -1420,7 +1421,8 @@
             "warn",
             "deny"
           ],
-          "description": "Modules that nothing requires. A Script or LocalScript is never reported, because Roblox runs those. Default: allow."
+          "description": "Modules that nothing requires. A Script or LocalScript is never reported, because Roblox runs those. Default: allow.",
+          "default": "allow"
         },
         "early_require": {
           "enum": [
@@ -1428,14 +1430,16 @@
             "warn",
             "deny"
           ],
-          "description": "Client scripts that require through an indexing style that does not wait for replication. Only the roblox-instance target. Default: warn."
+          "description": "Client scripts that require through an indexing style that does not wait for replication. Only the roblox-instance target. Default: warn.",
+          "default": "warn"
         },
         "entries": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "Extra entry points, as paths relative to the project root. A module in this list is never reported as unused."
+          "description": "Extra entry points, as paths relative to the project root. A module in this list is never reported as unused.",
+          "default": []
         }
       }
     }
