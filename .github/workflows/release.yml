@@ -48,18 +48,12 @@ jobs:
         include:
           # asset is what `self update` looks for, it is larvae-{os}-{arch}
           # spelled exactly as std::env::consts reports them at runtime
-          # The linux builds run inside rust:alpine, where g++ targets musl
-          # natively and no third party toolchain download can fail. The
-          # explicit --target keeps proc macros off crt-static, which is the
-          # documented alpine quirk.
           - asset: larvae-linux-x86_64
             target: x86_64-unknown-linux-musl
             runs-on: ubuntu-latest
-            container: rust:alpine
           - asset: larvae-linux-aarch64
             target: aarch64-unknown-linux-musl
             runs-on: ubuntu-24.04-arm
-            container: rust:alpine
           - asset: larvae-macos-x86_64
             target: x86_64-apple-darwin
             runs-on: macos-latest
@@ -73,13 +67,7 @@ jobs:
             target: aarch64-pc-windows-msvc
             runs-on: windows-latest
     runs-on: ${{ matrix.runs-on }}
-    container: ${{ matrix.container || '' }}
     steps:
-      - name: Alpine build tools
-        if: contains(matrix.target, 'musl')
-        run: |
-          apk add --no-cache g++ make zip
-          rustup target add ${{ matrix.target }} 2>/dev/null || true
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.verify.outputs.tag }}
@@ -91,7 +79,24 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      # The musl build runs inside rust:alpine, where g++ targets musl
+      # natively and no third party toolchain download exists to fail. The
+      # container holds only the build; checkout and upload run on the host,
+      # because JavaScript actions do not run in an Alpine container on an
+      # arm runner. The explicit --target keeps proc macros off crt-static,
+      # which is the documented alpine quirk.
       - name: Build
+        if: contains(matrix.target, 'musl')
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work rust:alpine sh -c '
+            set -eu
+            apk add --no-cache g++ make
+            rustup target add ${{ matrix.target }} >/dev/null 2>&1 || true
+            cargo build --release --locked --target ${{ matrix.target }}
+          '
+
+      - name: Build
+        if: ${{ !contains(matrix.target, 'musl') }}
         run: cargo build --release --locked --target ${{ matrix.target }}
 
       # The archive takes the asset name, the binary inside keeps its own, so
