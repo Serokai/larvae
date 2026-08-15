@@ -152,6 +152,13 @@ pub(super) fn process_file(
     own_requires: bool,
     // True when the caller wants the scanned text back, see FileOutcome.
     keep_source: bool,
+    /*
+    True when the caller reads the require graph.
+
+    Only `check` and `bundle` read it. `process` does not, so the harvest is
+    off there and a plain build pays nothing for the graph.
+    */
+    collect_graph: bool,
     diags: &mut Vec<Diag>,
 ) -> Option<FileOutcome> {
     let slots = worms.slots();
@@ -176,6 +183,7 @@ pub(super) fn process_file(
                 opts,
                 rules_cfg,
                 own_requires,
+                collect_graph,
                 &mut edits,
                 diags,
             );
@@ -248,6 +256,7 @@ fn native_pass(
     opts: &FileOpts,
     rules_cfg: &crate::config::RulesConfig,
     own_requires: bool,
+    collect_graph: bool,
     edits: &mut Edits,
     diags: &mut Vec<Diag>,
 ) -> Option<FileOutcome> {
@@ -312,7 +321,7 @@ fn native_pass(
         let before = ctx.required.borrow().len();
         let rewrite = resolver.resolve(&ctx, spec, src, site.at as usize, diags);
 
-        if let Some(target) = ctx.required.borrow().get(before) {
+        if collect_graph && let Some(target) = ctx.required.borrow().get(before) {
             resolved_sites.push(crate::requires::graph::Site {
                 at: site.at,
                 tok_start: site.tok_start,

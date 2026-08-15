@@ -10,7 +10,7 @@ use crate::pipeline;
 
 pub fn run(root: &Path, config: Option<PathBuf>, profile: Option<String>) -> Result<ExitCode> {
     let config = load_config(root, config, profile.as_deref())?;
-    let mut outcome = pipeline::run(root, &config, false)?;
+    let mut outcome = pipeline::run_analysing(root, &config)?;
 
     /*
     The whole project checks. Each one needs the full graph, so they run

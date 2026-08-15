@@ -79,7 +79,18 @@ impl Outcome {
 }
 
 pub fn run(root: &Path, config: &Config, write: bool) -> Result<Outcome> {
-    run_inner(root, config, write, false)
+    run_inner(root, config, write, false, false)
+}
+
+/*
+Run the pipeline without writes, and build the require graph.
+
+This is the entry for `check`. The graph harvest costs a little on every
+file, so a plain build does not pay it; only the two commands that read the
+graph ask for it.
+*/
+pub fn run_analysing(root: &Path, config: &Config) -> Result<Outcome> {
+    run_inner(root, config, false, false, true)
 }
 
 /*
@@ -90,10 +101,16 @@ off, and the graph and the sources cover every file. See [`Outcome::sources`]
 for why the bundler must not read the files from disk itself.
 */
 pub fn run_keeping_sources(root: &Path, config: &Config) -> Result<Outcome> {
-    run_inner(root, config, false, true)
+    run_inner(root, config, false, true, true)
 }
 
-fn run_inner(root: &Path, config: &Config, write: bool, keep_sources: bool) -> Result<Outcome> {
+fn run_inner(
+    root: &Path,
+    config: &Config,
+    write: bool,
+    keep_sources: bool,
+    collect_graph: bool,
+) -> Result<Outcome> {
     let root = root
         .canonicalize()
         .with_context(|| format!("cannot resolve project root {}", root.display()))?;
@@ -289,6 +306,7 @@ fn run_inner(root: &Path, config: &Config, write: bool, keep_sources: bool) -> R
             &pool,
             owns,
             keep_sources,
+            collect_graph,
             &mut local_diags,
         );
         let mut s = stats.lock().unwrap();
@@ -309,7 +327,7 @@ fn run_inner(root: &Path, config: &Config, write: bool, keep_sources: bool) -> R
         require. An init file keys on its directory, so the edge into a
         directory module meets the edges out of its init file on one node.
         */
-        {
+        if collect_graph {
             let node = crate::requires::graph::node_of(path);
             let mut g = shared_graph.lock().unwrap();
 
