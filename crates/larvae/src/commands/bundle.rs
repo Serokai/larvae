@@ -98,6 +98,17 @@ pub fn run(
         .context("the entry is not in its own plan")?;
 
     let text = bundle::emit::write(&modules, entry_id);
+
+    /*
+    The bundle obeys the generator of the project, so `dense` minifies the
+    one file most projects ship. A generator failure here is an error and
+    not a fallback, because a bundle exists to be shipped as it is.
+    */
+    let text = crate::generate::Generator::from_config(&root, &config)?
+        .apply(&text)
+        .map_err(anyhow::Error::msg)?
+        .into_owned();
+
     let out_path = root.join(&out);
 
     if let Some(parent) = out_path.parent() {

@@ -229,8 +229,10 @@ as a GitHub release, as a crate on crates.io, or as a path during
 development. The [first worm](https://github.com/larvae-luau/luaux) is [LuauX](https://github.com/luau-xml/luaux),
 Luau with JSX syntax.
 
-The next work items are bundling with a documented module init order and
-cross module dead code elimination, then minify.
+Bundling and minification work today too: `larvae bundle` writes the
+project as one tree-shaken file with a documented module init order, and
+`generator = "dense"` minifies what larvae writes, with optional local
+renaming under `[minify]`.
 
 ## License
 

@@ -181,7 +181,7 @@
             "readable"
           ],
           "default": "retain-lines",
-          "description": "Output printer. retain-lines preserves formatting, comments, and line numbers. dense and readable land in M4."
+          "description": "How the output prints. retain-lines: the output keeps the lines of the input, so stack traces map. dense: the minifier, tuned by [minify]. readable: the formatter, with the [fmt] style of the project."
         },
         "quotes": {
           "enum": [
@@ -1380,7 +1380,7 @@
       }
     },
     "minify": {
-      "description": "Options for generator = \"dense\". (M4)",
+      "description": "Tuning for `generator = \"dense\"`. Inert under another generator.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -1388,16 +1388,12 @@
           "type": "integer",
           "minimum": 0,
           "default": 120,
-          "description": "Max line width; 0 = unlimited."
+          "description": "The column where the dense emitter breaks the line. Line numbers in crash reports stay meaningful this way. A token wider than the span stays whole."
         },
         "rename_variables": {
           "type": "boolean",
-          "default": true,
-          "description": "Frequency-based short identifiers."
-        },
-        "trace_map": {
-          "type": "string",
-          "description": "Emit a mapping file for stack-trace deobfuscation."
+          "default": false,
+          "description": "Give every local a short name while minifying. The same rule as [rules] rename_variables, turned on for dense builds only."
         }
       }
     },

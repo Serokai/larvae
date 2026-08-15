@@ -40,7 +40,7 @@ input = "src"                            # or a list: ["src/client", "src/shared
 output = "dist"
 include = ["**/*.luau", "**/*.lua"]      # relative to the project root, picks what is transformed
 # exclude = ["**/*.spec.luau"]           # relative to the project root, skipped entirely
-generator = "retain-lines"               # dense and readable land in M4
+generator = "retain-lines"               # or "dense" (minified, see [minify]), or "readable" (formatted)
 quotes = "preserve"                      # quotes on rewritten require strings
 strip_flags = true                       # drop `-- larvae: allow(...)` comments
 cache = true                             # incremental builds by content hash
@@ -275,6 +275,16 @@ early_require = "warn"                   # roblox-instance only: client requires
 tree_shake = true                        # drop the modules the entry never reaches
 
 
+# --- minify ------------------------------------------------------------------
+# Tuning for generator = "dense". The dense generator re-emits the output
+# tokens with the least whitespace that lexes the same, so comments are gone
+# and the meaning cannot change. Inert under another generator.
+
+[minify]
+column_span = 120                        # break the line near this column, so line numbers stay useful
+rename_variables = false                 # short local names while minifying; same rule as [rules] rename_variables
+
+
 # --- profiles ----------------------------------------------------------------
 # The same keys the root has, merged over it when --profile <name> is passed.
 # Tables merge per key, arrays and scalars are replaced whole.
@@ -295,11 +305,3 @@ column_width = 100
 [profile.release.lint.rules]
 unused_variable = "deny"
 
-
-# --- not implemented yet -----------------------------------------------------
-# This parses and then errors naming its milestone, rather than being ignored,
-# so a config written against it tells you when it will work.
-#
-# [minify]                               # M4, for generator = "dense"
-# column_span = 120
-# rename_variables = true

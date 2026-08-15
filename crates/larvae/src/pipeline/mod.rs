@@ -211,6 +211,24 @@ fn run_inner(
 
     let opts = FileOpts::from_config(&root, config, write)?;
 
+    /*
+    `[minify] rename_variables` is a spelling of the `rename_variables`
+    rule that lives with the other minify settings. It takes effect only
+    under the dense generator, so a profile can carry the whole minify
+    story and the default build stays untouched.
+    */
+    let rules_cfg: std::borrow::Cow<crate::config::RulesConfig> =
+        match config.process.generator == "dense" && config.minify.rename_variables {
+            true => {
+                let mut forced = config.rules.clone();
+                forced.rename_variables = true;
+
+                std::borrow::Cow::Owned(forced)
+            }
+
+            false => std::borrow::Cow::Borrowed(&config.rules),
+        };
+
     // --- Parallel per file processing ---------------------------------------
     let shared_diags = Mutex::new(diags);
     let shared_graph = Mutex::new(crate::requires::graph::Graph::default());
@@ -301,7 +319,7 @@ fn run_inner(
             &output,
             &resolver,
             &opts,
-            &config.rules,
+            &rules_cfg,
             write,
             &pool,
             owns,

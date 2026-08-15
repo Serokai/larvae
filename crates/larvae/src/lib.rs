@@ -7,6 +7,7 @@ pub mod config;
 pub mod diag;
 pub mod flags;
 pub mod fmt;
+pub mod generate;
 pub mod lint;
 pub mod lsp;
 pub mod net;

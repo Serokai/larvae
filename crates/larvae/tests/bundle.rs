@@ -439,3 +439,27 @@ while True:
         );
     }
 }
+
+/// The bundle obeys the generator of the project, so dense ships minified.
+#[test]
+fn a_dense_bundle_still_runs() {
+    let dir = project(
+        &[
+            (
+                "main.luau",
+                "-- a comment\nlocal m = require(\"./lib\")\nreturn m.word\n",
+            ),
+            ("lib.luau", "return { word = \"ok\" }\n"),
+        ],
+        concat!(
+            "[process]\ninput = \"src\"\ngenerator = \"dense\"\n\n",
+            "[requires.mounts]\n\"src\" = \"@game/ReplicatedStorage/app\"\n\n",
+            "[bundle]\nentry = \"src/main.luau\"\noutput = \"out.luau\"\n"
+        ),
+    );
+
+    let text = run_bundle(dir.path(), &[]).unwrap();
+
+    assert!(!text.contains("a comment"), "comments are trivia: {text}");
+    assert_eq!(run_luau(&text).unwrap(), "ok");
+}

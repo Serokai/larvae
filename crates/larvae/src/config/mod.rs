@@ -10,6 +10,7 @@ use serde::Deserialize;
 pub mod bundle;
 pub mod check;
 mod excludes;
+pub mod minify;
 mod overrides;
 mod process;
 mod profile;
@@ -94,13 +95,13 @@ pub struct Config {
     #[serde(default)]
     pub bundle: bundle::BundleConfig,
 
+    /// Tuning for `generator = "dense"`, see [`minify`]
+    #[serde(default)]
+    pub minify: minify::MinifyConfig,
+
     // Parsed so the error can name the new location and not say "unknown key".
     #[serde(default)]
     config: Option<toml::Value>,
-
-    // Parsed but not implemented, so the error can name the milestone.
-    #[serde(default)]
-    minify: Option<toml::Value>,
 }
 
 impl Config {
@@ -197,15 +198,6 @@ impl Config {
             );
         }
 
-        let unimplemented: &[(&str, &Option<toml::Value>, &str)] =
-            &[("[minify]", &self.minify, "M4")];
-
-        for (name, value, milestone) in unimplemented {
-            if value.is_some() {
-                bail!("{name} is not implemented yet (lands in {milestone}); remove it for now");
-            }
-        }
-
         /*
         [rules] belongs only to larvae. The rules of a worm sit under
         [worms.<name>] rules. So a worm rule cannot shadow a builtin, and this
@@ -274,9 +266,12 @@ impl Config {
             }
         }
 
-        if self.process.generator != "retain-lines" {
+        if !matches!(
+            self.process.generator.as_str(),
+            "retain-lines" | "dense" | "readable"
+        ) {
             bail!(
-                "generator = \"{}\" is not implemented yet (dense and readable land in M4); only \"retain-lines\" works today",
+                "generator = \"{}\" is not one larvae has; write \"retain-lines\", \"dense\", or \"readable\"",
                 self.process.generator
             );
         }
@@ -403,12 +398,28 @@ mod tests {
         assert!(err.contains("[worms.xml.config]"), "{err}");
     }
 
+    /// [minify] landed, so a [minify] table is configuration and not an error
     #[test]
-    fn unimplemented_sections_error_with_milestone() {
+    fn a_minify_table_is_read_rather_than_refused() {
         let c: Config = toml::from_str("[minify]\ncolumn_span = 100").unwrap();
+
+        c.validate().unwrap();
+        assert_eq!(c.minify.column_span, 100);
+        assert!(!c.minify.rename_variables);
+    }
+
+    #[test]
+    fn every_generator_is_accepted_and_a_typo_names_the_real_ones() {
+        for name in ["retain-lines", "dense", "readable"] {
+            let c: Config = toml::from_str(&format!("[process]\ngenerator = \"{name}\"")).unwrap();
+
+            c.validate().unwrap();
+        }
+
+        let c: Config = toml::from_str("[process]\ngenerator = \"minified\"").unwrap();
         let err = c.validate().unwrap_err().to_string();
 
-        assert!(err.contains("M4"), "{err}");
+        assert!(err.contains("dense") && err.contains("readable"), "{err}");
     }
 
     /// [check] landed, so a [check] table is configuration and not an error

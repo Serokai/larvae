@@ -35,6 +35,8 @@ pub struct FileOpts {
     defines: std::collections::HashMap<String, crate::rules::defines::Value>,
     /// Target overrides for each path, in the order of the config
     overrides: Vec<crate::config::Override>,
+    /// How the final text prints: retain-lines, dense, or readable
+    generator: crate::generate::Generator,
 }
 
 impl FileOpts {
@@ -104,6 +106,7 @@ impl FileOpts {
 
                 None => Vec::new(),
             },
+            generator: crate::generate::Generator::from_config(root, config)?,
         })
     }
 }
@@ -214,7 +217,22 @@ pub(super) fn process_file(
                 let dest = output.join(dest_rel);
                 let out = crate::rules::splice(&current, &edits, &mut clashes);
 
-                if let Err(e) = write_atomic(&dest, out.as_bytes()) {
+                /*
+                The generator prints the finished text. When it fails, the
+                retain-lines text goes out instead, so the build stays
+                usable while the error names the file.
+                */
+                let printed = match opts.generator.apply(&out) {
+                    Ok(text) => text,
+
+                    Err(msg) => {
+                        diags.push(Diag::error(path, msg));
+
+                        std::borrow::Cow::Borrowed(out.as_str())
+                    }
+                };
+
+                if let Err(e) = write_atomic(&dest, printed.as_bytes()) {
                     diags.push(Diag::error(path, format!("write failed: {e:#}")));
                 }
             } else {

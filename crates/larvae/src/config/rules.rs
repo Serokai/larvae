@@ -12,7 +12,7 @@ Builtin transforms, all off by default. larvae accepts every darklua rule
 name, so a config ports over 1:1. A name that is not implemented gives an
 error that names its milestone; larvae does not ignore it without a message.
 */
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct RulesConfig {
     #[serde(default)]
     pub const_requires: bool,
@@ -370,7 +370,7 @@ pub fn rule_status(name: &str) -> Option<RuleStatus> {
 
         "inject_global_value" => Elsewhere("use [defines] instead"),
 
-        "remove_spaces" => Elsewhere("use process.generator = \"dense\" (lands in M4)"),
+        "remove_spaces" => Elsewhere("use process.generator = \"dense\""),
         _ => return None,
     })
 }

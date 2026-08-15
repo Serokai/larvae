@@ -230,3 +230,31 @@ fn check_keys_match_the_config() {
         "the config has [check] keys the schema does not offer"
     );
 }
+
+/// The same guarantee for [minify]: the schema and the config cannot drift.
+#[test]
+fn minify_keys_match_the_config() {
+    let schema = schema();
+    let documented = keys(&schema["$defs"]["minify"]["properties"]);
+
+    let real: BTreeSet<String> =
+        toml::Value::try_from(larvae::config::minify::MinifyConfig::default())
+            .expect("the config serializes")
+            .as_table()
+            .expect("a table")
+            .keys()
+            .cloned()
+            .collect();
+
+    assert_eq!(
+        documented.difference(&real).collect::<Vec<_>>(),
+        Vec::<&String>::new(),
+        "the schema offers [minify] keys that do not exist"
+    );
+
+    assert_eq!(
+        real.difference(&documented).collect::<Vec<_>>(),
+        Vec::<&String>::new(),
+        "the config has [minify] keys the schema does not offer"
+    );
+}
