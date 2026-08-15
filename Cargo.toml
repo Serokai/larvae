@@ -60,8 +60,6 @@ opt-level = "z"
 opt-level = "z"
 [profile.release.package.toml]
 opt-level = "z"
-[profile.release.package.toml_edit]
-opt-level = "z"
 [profile.release.package.sha2]
 opt-level = "z"
 [profile.release.package.dirs]

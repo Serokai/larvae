@@ -12,10 +12,10 @@
 #                sides. This is the honest head to head
 #
 #   darklua      darklua's own default config, which is its default rule
-#   default      stack plus the dense generator. larvae has no dense
-#                generator yet and no rename_variables, so there is no
-#                speedup printed for this row, it is here so nobody thinks
-#                the other rows are darklua at full stretch
+#   default      stack plus the dense generator. larvae has both now,
+#                generator = "dense" and rename_variables, but this row
+#                still runs darklua alone so the history of the numbers
+#                stays comparable. Making it a head to head is future work
 #
 # Scenarios per size
 #   cold      first build, nothing cached
@@ -254,19 +254,9 @@ if [ "$HAVE_DARKLUA" = 1 ]; then
     echo
     echo "parse only    darklua runs no rules, larvae still rewrites every require"
     echo "same rules    both run ${#MATCHED_RULES[@]} matching rules with retain_lines"
-    echo "darklua default   darklua's default stack plus its dense generator, larvae"
-    echo "                  has neither yet so no speedup is claimed on that row"
+    echo "darklua default   darklua's default stack plus its dense generator, shown"
+    echo "                  alone so the history of the numbers stays comparable"
     echo
     echo "darklua can convert requires with a rojo sourcemap, that is not enabled here"
     echo "because it needs a separate rojo run, so the require work is larvae only"
-fi
-
-if [ -x "$LARVAE" ]; then
-    cl_size=$(stat -c%s "$LARVAE")
-    echo
-    if [ "$HAVE_DARKLUA" = 1 ]; then
-        dl_bin="$(command -v "$DARKLUA")"
-        tmp_dl="$WORK/darklua-stripped"
-        cp "$dl_bin" "$tmp_dl" && strip "$tmp_dl" 2>/dev/null || true
-        dl_size=$(stat -c%s "$tmp_dl")
 fi
