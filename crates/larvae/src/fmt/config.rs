@@ -441,6 +441,8 @@ impl FmtConfig {
         };
 
         for (key, value) in over_table {
+            let key = canonical(key);
+
             match (base_table.get_mut(key), value) {
                 (Some(toml::Value::Table(under)), toml::Value::Table(on_top)) => {
                     for (k, v) in on_top {
@@ -449,12 +451,30 @@ impl FmtConfig {
                 }
 
                 _ => {
-                    base_table.insert(key.clone(), value.clone());
+                    base_table.insert(key.to_string(), value.clone());
                 }
             }
         }
 
         base.try_into().context("[fmt]")
+    }
+}
+
+/*
+Returns the larvae name of an option that another tool spells differently.
+
+A serde alias is not enough on its own. The merge writes the whole config to a
+table first, so that table already holds the larvae name. An alias in the
+config of the user then arrives as a second key for one field, and serde
+refuses the pair as a duplicate field. So the merge renames the key before it
+writes it.
+*/
+fn canonical(key: &str) -> &str {
+    match key {
+        // the editorconfig name
+        "insert_final_newline" => "final_newline",
+
+        other => other,
     }
 }
 

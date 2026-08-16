@@ -1131,12 +1131,34 @@ fn the_final_newline_can_be_turned_off() {
     assert_eq!(fmt_with("local a = 1\n", cfg), "local a = 1");
 }
 
-/// editorconfig's name for it, so that vocabulary works too
+/*
+editorconfig's name for it, so that vocabulary works too.
+
+The test reads the name through `discover`, which is the path a project takes.
+A serde alias alone passes a direct parse and still fails there: the merge
+writes the whole config to a table first, so the alias arrives as a second key
+for one field and serde refuses the pair as a duplicate field.
+*/
 #[test]
 fn insert_final_newline_is_accepted_as_a_name() {
-    let cfg: FmtConfig = toml::from_str("insert_final_newline = false").expect("parses");
+    let dir = tempfile::tempdir().unwrap();
+    let over = toml::from_str::<toml::Value>("insert_final_newline = false").unwrap();
+    let cfg = FmtConfig::discover(dir.path(), Some(&over)).expect("parses");
 
     assert!(!cfg.final_newline);
+}
+
+/// Both names at once must not read as two fields
+#[test]
+fn the_two_names_for_the_final_newline_do_not_collide() {
+    let dir = tempfile::tempdir().unwrap();
+    let over = toml::from_str::<toml::Value>(
+        "final_newline = true
+insert_final_newline = false",
+    )
+    .unwrap();
+
+    assert!(FmtConfig::discover(dir.path(), Some(&over)).is_ok());
 }
 
 /*
