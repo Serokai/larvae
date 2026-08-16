@@ -79,14 +79,59 @@ fn install() -> Result<ExitCode> {
     } else {
         std::fs::create_dir_all(&bin_dir)
             .with_context(|| format!("failed to create {}", bin_dir.display()))?;
-        std::fs::copy(&me, &target)
-            .with_context(|| format!("failed to copy to {}", target.display()))?;
+        replace_exe(&me, &target)
+            .with_context(|| format!("failed to install to {}", target.display()))?;
         ui::print_success(&format!("Installed larvae to {}", target.display()));
     }
 
     add_to_path(&bin_dir);
 
     Ok(ExitCode::SUCCESS)
+}
+
+/*
+Puts the bytes of `from` at `to`, even while something is running `to`.
+
+`fs::copy` opens the destination for writing, and no process can open an
+executable that way while another process runs it. Linux answers with ETXTBSY,
+"text file busy". That is reachable in ordinary use now that `larvae lsp` runs
+from the installed path: an editor holds the binary open, and `self install`
+fails for as long as the editor is up.
+
+A rename does not open the destination. It swaps a directory entry, and a
+process that already runs the old inode keeps it until it exits. So the new
+bytes go to a temporary file beside the target and then take its place in one
+step. That is also atomic, so no window exists where the target is half
+written and unrunnable.
+
+Windows refuses to rename onto a running image, so the old image moves aside
+first. Windows cannot delete it while it runs either, so the leftover goes on
+the next install.
+*/
+fn replace_exe(from: &Path, to: &Path) -> Result<()> {
+    let dir = to.parent().unwrap_or(Path::new("."));
+    let name = to.file_name().unwrap_or_default().to_string_lossy();
+    let staged = dir.join(format!(".{name}.new"));
+    let stale = dir.join(format!(".{name}.old"));
+
+    // a leftover from a previous install on Windows, gone now that nothing runs it
+    let _ = std::fs::remove_file(&stale);
+
+    std::fs::copy(from, &staged)
+        .with_context(|| format!("failed to write {}", staged.display()))?;
+
+    if cfg!(windows) && to.exists() {
+        std::fs::rename(to, &stale)
+            .with_context(|| format!("failed to move {} aside", to.display()))?;
+    }
+
+    if let Err(e) = std::fs::rename(&staged, to) {
+        let _ = std::fs::remove_file(&staged);
+
+        return Err(e).with_context(|| format!("failed to move into place at {}", to.display()));
+    }
+
+    Ok(())
 }
 
 fn update(force: bool) -> Result<ExitCode> {
