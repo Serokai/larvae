@@ -155,6 +155,50 @@ pub struct LintReply {
     pub luau: Option<String>,
 }
 
+/*
+The start of the Luau after a `;` that opens the span, when one does.
+
+Only spaces and tabs may sit between the `;` and the Luau. The result never
+goes below `floor`, which is the end of the span before this one.
+*/
+fn semicolon_before(src: &str, start: u32, floor: u32) -> Option<u32> {
+    let bytes = src.as_bytes();
+
+    if start < floor || bytes.get(start as usize) != Some(&b';') {
+        return None;
+    }
+
+    let mut i = start as usize + 1;
+
+    while matches!(bytes.get(i), Some(b' ' | b'\t')) {
+        i += 1;
+    }
+
+    Some(i as u32)
+}
+
+/*
+The end of a `;` that follows `end`, when one does before `limit`.
+
+Only spaces and tabs may sit between. A newline ends the search, because a `;`
+on the next line belongs to whatever the worm put there and not to the span
+that came before.
+*/
+fn semicolon_after(src: &str, end: u32, limit: u32) -> Option<u32> {
+    let bytes = src.as_bytes();
+    let mut i = end as usize;
+
+    while i < limit as usize && matches!(bytes.get(i), Some(b' ' | b'\t')) {
+        i += 1;
+    }
+
+    match bytes.get(i) {
+        Some(b';') if (i as u32) < limit => Some(i as u32 + 1),
+
+        _ => None,
+    }
+}
+
 /// Render the format reply of a worm with the style of the project
 pub fn render_format(src: &str, reply: &FormatReply, cfg: &FmtConfig) -> Result<String> {
     if reply.doc != DOC_VERSION {
@@ -201,6 +245,47 @@ fn from_spans<'a>(src: &'a str, spans: &[(u32, u32)], cfg: &FmtConfig) -> Result
 
     let mut sorted = spans.to_vec();
     sorted.sort_unstable();
+
+    /*
+    Take a `;` that sits just after a span into that span.
+
+    A `;` that follows Luau is Luau: it terminates the statement before it. But
+    a worm draws its spans from its own parse, and a worm that ends a span at
+    the last token of a statement leaves the terminator outside. Larvae then
+    keeps that byte as written, and `semicolons` appears to work on some
+    statements of the file and not others.
+
+    Larvae takes the byte instead. The alternative is a contract that needs
+    byte exact boundaries from every worm, and one wrong boundary gives output
+    in two styles.
+    */
+    for i in 0..sorted.len() {
+        let limit = sorted.get(i + 1).map_or(src.len() as u32, |next| next.0);
+        let floor = match i {
+            0 => 0,
+
+            _ => sorted[i - 1].1,
+        };
+
+        let (start, end) = sorted[i];
+
+        /*
+        Leave a `;` that opens a span outside it.
+
+        Larvae formats each span as a chunk of its own, so it cannot see the
+        text before the span. A leading `;` reads as a stray statement there
+        and goes, but for the line above it is the separator that stops
+        `(b)()` from continuing that line as a call. Larvae keeps the byte as
+        written instead, and the meaning holds.
+        */
+        if let Some(shrunk) = semicolon_before(src, start, floor) {
+            sorted[i].0 = shrunk;
+        }
+
+        if let Some(grown) = semicolon_after(src, end, limit) {
+            sorted[i].1 = grown;
+        }
+    }
 
     let mut parts = Vec::new();
     let mut at = 0u32;
@@ -558,5 +643,102 @@ mod tests {
         let reply: RulesReply = serde_json::from_str("{}").unwrap();
 
         assert!(reply.edits.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod semicolon_after_a_span {
+    use super::*;
+
+    fn rendered(src: &str, spans: Vec<(u32, u32)>, cfg: &FmtConfig) -> String {
+        let reply = FormatReply {
+            doc: DOC_VERSION,
+            document: None,
+            spans,
+            comments: Vec::new(),
+        };
+
+        render_format(src, &reply, cfg).unwrap()
+    }
+
+    /*
+    A worm that ends a span at the last token of a statement leaves the `;`
+    outside it. Larvae takes that byte, or `semicolons` works on some
+    statements of a file and not others.
+    */
+    #[test]
+    fn a_semicolon_just_past_the_span_is_still_dropped() {
+        let src = "<F>\nconst T = {\n\ta = 1,\n};\n</F>\n";
+        let start = src.find("const").unwrap() as u32;
+        let end = src.find(";\n</F>").unwrap() as u32;
+
+        assert_eq!(
+            rendered(src, vec![(start, end)], &FmtConfig::default()),
+            "<F>\nconst T = {\n\ta = 1,\n}\n</F>\n"
+        );
+    }
+
+    #[test]
+    fn a_span_that_already_holds_the_semicolon_is_unchanged() {
+        let src = "<F>\nconst T = {\n\ta = 1,\n};\n</F>\n";
+        let start = src.find("const").unwrap() as u32;
+        let end = src.find("\n</F>").unwrap() as u32;
+
+        assert_eq!(
+            rendered(src, vec![(start, end)], &FmtConfig::default()),
+            "<F>\nconst T = {\n\ta = 1,\n}\n</F>\n"
+        );
+    }
+
+    #[test]
+    fn spaces_between_the_span_and_the_semicolon_are_taken_too() {
+        let src = "<F>\nlocal x = 1  ;\n</F>\n";
+        let start = src.find("local").unwrap() as u32;
+        let end = src.find("  ;").unwrap() as u32;
+
+        assert_eq!(
+            rendered(src, vec![(start, end)], &FmtConfig::default()),
+            "<F>\nlocal x = 1\n</F>\n"
+        );
+    }
+
+    /// A `;` on the next line belongs to whatever the worm put there
+    #[test]
+    fn a_semicolon_on_a_later_line_is_left_to_the_worm() {
+        let src = "<F>\nlocal x = 1\n;\n</F>\n";
+        let start = src.find("local").unwrap() as u32;
+        let end = src.find("\n;").unwrap() as u32;
+
+        assert!(rendered(src, vec![(start, end)], &FmtConfig::default()).contains("\n;\n"));
+    }
+
+    /// The byte must never be taken from the span that follows
+    #[test]
+    fn a_semicolon_belonging_to_the_next_span_is_not_taken() {
+        let src = "local a = 1\n;(b)()\n";
+        let first = (0u32, src.find('\n').unwrap() as u32);
+        let second = (first.1 + 1, src.len() as u32 - 1);
+
+        // the second span starts at the `;`, so the first must not reach it
+        let out = rendered(src, vec![first, second], &FmtConfig::default());
+
+        assert!(out.contains(";(b)()"), "{out}");
+    }
+
+    #[test]
+    fn semicolons_always_still_puts_one_back() {
+        let cfg = FmtConfig {
+            semicolons: crate::fmt::config::Semicolons::Always,
+            ..Default::default()
+        };
+
+        let src = "<F>\nlocal x = 1;\n</F>\n";
+        let start = src.find("local").unwrap() as u32;
+        let end = src.find(";\n</F>").unwrap() as u32;
+
+        assert_eq!(
+            rendered(src, vec![(start, end)], &cfg),
+            "<F>\nlocal x = 1;\n</F>\n"
+        );
     }
 }
