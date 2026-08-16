@@ -8,6 +8,7 @@ lint between these files changes nothing that a project can see.
 
 pub mod configured;
 pub mod correctness;
+pub mod luau;
 pub mod names;
 pub mod original;
 pub mod roblox;
@@ -34,9 +35,24 @@ pub static ALL: &[&dyn Lint] = &[
     &correctness::SuspiciousReverseLoop,
     &correctness::TypeCheckInsideCall,
     &correctness::UnbalancedAssignments,
+    &luau::ZeroStepLoop,
     &configured::BadStringEscape,
     &configured::MismatchedArgCount,
     &configured::MustUse,
+    // The lints that Luau's own compiler has.
+    &luau::BadCommentDirective,
+    &luau::BuiltinGlobalWrite,
+    &luau::ComparisonPrecedence,
+    &luau::DuplicateFunction,
+    &luau::DuplicateLocal,
+    &luau::FormatString,
+    &luau::ImplicitReturn,
+    &luau::MisleadingAndOr,
+    &luau::NumberLiteralOverflow,
+    &luau::PlaceholderRead,
+    &luau::TableOperations,
+    &luau::UninitializedLocal,
+    &luau::UnknownType,
     // Names.
     &names::UndefinedVariable,
     &names::UnscopedVariables,

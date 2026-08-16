@@ -1245,3 +1245,539 @@ fn a_shadowed_require_says_nothing_about_modules() {
         "local require = myLoader\nlocal S = require(\"x\")\nreturn S\n"
     ));
 }
+
+// --- the lints that Luau's own compiler has --------------------------------
+
+#[test]
+fn builtin_global_write_catches_replacing_the_standard_library() {
+    assert!(fires("builtin_global_write", "table = {}\n"));
+    assert!(fires("builtin_global_write", "function print() end\n"));
+}
+
+/// A local of the same name is the author's own table, and shadows nothing
+/// outside this file.
+#[test]
+fn a_local_named_after_a_builtin_is_not_a_write_to_it() {
+    assert!(!fires(
+        "builtin_global_write",
+        "local string = {}\nstring.x = 1\nreturn string\n"
+    ));
+    assert!(!fires("builtin_global_write", "myOwnGlobal = 1\n"));
+}
+
+#[test]
+fn placeholder_read_catches_a_discard_that_is_read_later() {
+    assert!(fires("placeholder_read", "local _ = f()\nprint(_)\n"));
+    assert!(fires(
+        "placeholder_read",
+        "for _, v in pairs(t) do print(_, v) end\n"
+    ));
+}
+
+#[test]
+fn a_placeholder_that_stays_discarded_is_the_whole_point() {
+    assert!(!fires("placeholder_read", "local _ = f()\nprint(1)\n"));
+    assert!(!fires(
+        "placeholder_read",
+        "for _, v in pairs(t) do print(v) end\n"
+    ));
+    assert!(!fires("placeholder_read", "local _x = f()\nprint(_x)\n"));
+}
+
+#[test]
+fn unknown_type_catches_a_misspelled_type_name() {
+    assert!(fires("unknown_type", "if type(x) == 'numbr' then end\n"));
+    assert!(fires("unknown_type", "if 'tabel' ~= type(x) then end\n"));
+    assert!(fires(
+        "unknown_type",
+        "if typeof(x) == 'vector3' then end\n"
+    ));
+}
+
+#[test]
+fn every_name_that_type_returns_is_accepted() {
+    for name in [
+        "nil", "boolean", "number", "string", "table", "function", "thread", "userdata", "vector",
+        "buffer",
+    ] {
+        let src = format!("if type(x) == '{name}' then end\n");
+
+        assert!(!fires("unknown_type", &src), "{name}");
+    }
+}
+
+/*
+Under Roblox, `typeof` also returns the name of a data type, and larvae does
+not ship that list. Thus a capitalised name is not something it can judge.
+*/
+#[test]
+fn a_roblox_data_type_name_is_not_guessed_at() {
+    assert!(!fires(
+        "unknown_type",
+        "if typeof(x) == 'Vector3' then end\n"
+    ));
+    assert!(!fires(
+        "unknown_type",
+        "if typeof(x) == 'CFrame' then end\n"
+    ));
+}
+
+/// A local named type is not the function that returns a type name.
+#[test]
+fn a_shadowed_type_function_says_nothing() {
+    assert!(!fires(
+        "unknown_type",
+        "local type = myOwn\nif type(x) == 'numbr' then end\n"
+    ));
+}
+
+fn returns(src: &str) -> bool {
+    fired(src, &with("implicit_return", Level::Warn))
+        .iter()
+        .any(|n| n == "implicit_return")
+}
+
+/// The lint is off by default, because the shape it reports is idiomatic.
+#[test]
+fn implicit_return_is_off_until_a_project_asks() {
+    let src = "local function f(a)\n\tif a then\n\t\treturn 1\n\tend\nend\nreturn f\n";
+
+    assert!(!fires("implicit_return", src));
+    assert!(returns(src));
+}
+
+#[test]
+fn a_function_that_returns_on_every_path_is_quiet() {
+    assert!(!returns(
+        "local function f(a)\n\tif a then\n\t\treturn 1\n\telse\n\t\treturn 2\n\tend\nend\nreturn f\n"
+    ));
+    assert!(!returns(
+        "local function f(a)\n\tif a then\n\t\treturn 1\n\tend\n\treturn 0\nend\nreturn f\n"
+    ));
+}
+
+/// `error` does not come back, so the end of the body is not a path.
+#[test]
+fn a_body_that_ends_in_error_has_no_falling_path() {
+    assert!(!returns(
+        "local function f(a)\n\tif a then\n\t\treturn 1\n\tend\n\terror('no')\nend\nreturn f\n"
+    ));
+}
+
+/// A function that returns nothing anywhere has nothing to be inconsistent
+/// with.
+#[test]
+fn a_function_with_no_value_returns_is_not_reported() {
+    assert!(!returns(
+        "local function f(a)\n\tif a then\n\t\treturn\n\tend\n\tprint(a)\nend\nreturn f\n"
+    ));
+}
+
+#[test]
+fn duplicate_local_catches_a_name_declared_twice_at_once() {
+    assert!(fires("duplicate_local", "local x, x = 1, 2\nprint(x)\n"));
+    assert!(fires(
+        "duplicate_local",
+        "local function f(a, a)\n\treturn a\nend\nreturn f\n"
+    ));
+}
+
+#[test]
+fn distinct_names_in_one_declaration_are_fine() {
+    assert!(!fires(
+        "duplicate_local",
+        "local x, y = 1, 2\nprint(x, y)\n"
+    ));
+    assert!(!fires(
+        "duplicate_local",
+        "local function f(a, b)\n\treturn a + b\nend\nreturn f\n"
+    ));
+}
+
+/// Two discards say that two values are thrown away, which is what the name
+/// is for.
+#[test]
+fn the_discard_name_may_repeat() {
+    assert!(!fires("duplicate_local", "local _, _ = f()\n"));
+    assert!(!fires(
+        "duplicate_local",
+        "local function f(_, _)\n\treturn 1\nend\nreturn f\n"
+    ));
+}
+
+/// A name declared again in an inner scope is shadowing, not this.
+#[test]
+fn a_redeclaration_in_a_new_scope_is_not_a_duplicate() {
+    assert!(!fires(
+        "duplicate_local",
+        "local x = 1\nprint(x)\ndo\n\tlocal x = 2\n\tprint(x)\nend\n"
+    ));
+}
+
+#[test]
+fn format_string_catches_what_the_runtime_would_reject() {
+    assert!(fires(
+        "format_string",
+        "local s = string.format('%y', 1)\nprint(s)\n"
+    ));
+    assert!(fires(
+        "format_string",
+        "local s = string.format('100%')\nprint(s)\n"
+    ));
+    assert!(fires(
+        "format_string",
+        "local s = ('%q %h'):format(1, 2)\nprint(s)\n"
+    ));
+}
+
+#[test]
+fn every_conversion_the_runtime_defines_is_accepted() {
+    let src = "local s = string.format('%d %i %u %o %x %X %e %E %f %g %G %q %s %c %% %-5s %05.2f %.3s', 1)\nprint(s)\n";
+
+    assert!(!fires("format_string", src), "{:?}", names(src));
+}
+
+#[test]
+fn format_string_checks_os_date_too() {
+    assert!(fires(
+        "format_string",
+        "local d = os.date('%Q')\nprint(d)\n"
+    ));
+    assert!(fires("format_string", "local d = os.date('%')\nprint(d)\n"));
+}
+
+#[test]
+fn the_date_specifiers_and_the_table_form_are_accepted() {
+    assert!(!fires(
+        "format_string",
+        "local d = os.date('!%Y-%m-%dT%H:%M:%SZ')\nprint(d)\n"
+    ));
+    assert!(!fires(
+        "format_string",
+        "local d = os.date('*t')\nprint(d)\n"
+    ));
+    assert!(!fires(
+        "format_string",
+        "local d = os.date('!*t')\nprint(d)\n"
+    ));
+}
+
+/// A format built at runtime is the caller's business, and a local named
+/// string is not the standard one.
+#[test]
+fn a_format_larvae_cannot_read_is_left_alone() {
+    assert!(!fires(
+        "format_string",
+        "local s = string.format(pattern, 1)\nprint(s)\n"
+    ));
+    assert!(!fires(
+        "format_string",
+        "local string = myOwn\nlocal s = string.format('%y', 1)\nprint(s)\n"
+    ));
+}
+
+#[test]
+fn uninitialized_local_catches_a_name_nothing_ever_sets() {
+    assert!(fires("uninitialized_local", "local total\nprint(total)\n"));
+}
+
+#[test]
+fn a_local_that_something_assigns_is_fine() {
+    assert!(!fires(
+        "uninitialized_local",
+        "local total\ntotal = 0\nprint(total)\n"
+    ));
+    assert!(!fires(
+        "uninitialized_local",
+        "local total = nil\nprint(total)\n"
+    ));
+    assert!(!fires(
+        "uninitialized_local",
+        "local conn\nconn = signal:Connect(function()\n\tconn:Disconnect()\nend)\n"
+    ));
+}
+
+/// A declaration that nothing reads is unused_variable's finding, not this
+/// one.
+#[test]
+fn a_declaration_nobody_reads_is_a_different_lint() {
+    assert!(!fires("uninitialized_local", "local total\n"));
+}
+
+#[test]
+fn duplicate_function_catches_a_name_defined_twice_in_one_scope() {
+    assert!(fires(
+        "duplicate_function",
+        "local function f() end\nlocal function f() end\nreturn f\n"
+    ));
+    assert!(fires(
+        "duplicate_function",
+        "local m = {}\nfunction m.go() end\nfunction m.go() end\nreturn m\n"
+    ));
+}
+
+#[test]
+fn two_different_names_are_two_functions() {
+    assert!(!fires(
+        "duplicate_function",
+        "local function f() end\nlocal function g() end\nreturn f, g\n"
+    ));
+    assert!(!fires(
+        "duplicate_function",
+        "local m = {}\nfunction m.go() end\nfunction m.stop() end\nreturn m\n"
+    ));
+}
+
+/// One definition per branch is the shape that picks an implementation.
+#[test]
+fn a_definition_in_each_branch_is_not_a_duplicate() {
+    assert!(!fires(
+        "duplicate_function",
+        "if fast then\n\tfunction run() end\nelse\n\tfunction run() print(1) end\nend\n"
+    ));
+}
+
+#[test]
+fn table_operations_catches_the_index_that_insert_already_uses() {
+    assert!(fires(
+        "table_operations",
+        "local t = {}\ntable.insert(t, #t + 1, 5)\nreturn t\n"
+    ));
+    assert!(fires(
+        "table_operations",
+        "local t = {}\ntable.insert(t, 1 + #t, 5)\nreturn t\n"
+    ));
+}
+
+#[test]
+fn table_operations_catches_index_zero_and_a_wrong_count() {
+    assert!(fires(
+        "table_operations",
+        "local t = {}\ntable.insert(t, 0, 5)\nreturn t\n"
+    ));
+    assert!(fires(
+        "table_operations",
+        "local t = {}\ntable.remove(t, 0)\nreturn t\n"
+    ));
+    assert!(fires("table_operations", "local t = {}\ntable.insert(t)\n"));
+    assert!(fires(
+        "table_operations",
+        "local t = {}\ntable.insert(t, 1, 2, 3)\n"
+    ));
+}
+
+#[test]
+fn the_right_shapes_of_insert_and_remove_are_quiet() {
+    let src = "local t = {}\ntable.insert(t, 5)\ntable.insert(t, 1, 5)\ntable.remove(t)\ntable.remove(t, 2)\ntable.remove(t, #t)\nreturn t\n";
+
+    assert!(!fires("table_operations", src), "{:?}", names(src));
+}
+
+/// The length of another table is a real position, not the append position.
+#[test]
+fn an_index_from_a_different_table_is_not_the_append_position() {
+    assert!(!fires(
+        "table_operations",
+        "local t = {}\nlocal other = {}\ntable.insert(t, #other + 1, 5)\nreturn t, other\n"
+    ));
+}
+
+/// A local named table has whatever insert its author gave it.
+#[test]
+fn a_shadowed_table_library_is_not_the_standard_one() {
+    assert!(!fires(
+        "table_operations",
+        "local table = myOwn\nlocal t = {}\ntable.insert(t)\n"
+    ));
+}
+
+/// A call in the last position can supply the missing arguments.
+#[test]
+fn a_spread_argument_excuses_the_count() {
+    assert!(!fires(
+        "table_operations",
+        "local t = {}\ntable.insert(f())\n"
+    ));
+}
+
+#[test]
+fn misleading_and_or_catches_a_middle_that_is_never_truthy() {
+    assert!(fires(
+        "misleading_and_or",
+        "local x = cond and false or other\nprint(x)\n"
+    ));
+    assert!(fires(
+        "misleading_and_or",
+        "local x = cond and nil or other\nprint(x)\n"
+    ));
+}
+
+#[test]
+fn an_and_or_with_a_truthy_middle_works_as_written() {
+    assert!(!fires(
+        "misleading_and_or",
+        "local x = cond and 'on' or 'off'\nprint(x)\n"
+    ));
+    assert!(!fires(
+        "misleading_and_or",
+        "local x = cond and 0 or other\nprint(x)\n"
+    ));
+}
+
+#[test]
+fn bad_comment_directive_catches_a_misspelling() {
+    assert!(fires("bad_comment_directive", "--!strct\nlocal x = 1\n"));
+    assert!(fires("bad_comment_directive", "--!nolintt\nlocal x = 1\n"));
+}
+
+/// Luau reads the directives in the header, so one below the code does
+/// nothing.
+#[test]
+fn a_directive_below_the_first_token_is_reported_as_ignored() {
+    assert!(fires(
+        "bad_comment_directive",
+        "local x = 1\n--!strict\nprint(x)\n"
+    ));
+}
+
+#[test]
+fn every_directive_luau_reads_is_accepted() {
+    for line in [
+        "--!strict",
+        "--!nonstrict",
+        "--!nocheck",
+        "--!native",
+        "--!optimize 2",
+        "--!nolint LocalShadow",
+        "--! strict",
+        "-- a plain comment",
+    ] {
+        let src = format!("{line}\nlocal x = 1\nprint(x)\n");
+
+        assert!(!fires("bad_comment_directive", &src), "{line}");
+    }
+}
+
+#[test]
+fn number_literal_overflow_catches_a_literal_wider_than_64_bits() {
+    assert!(fires(
+        "number_literal_overflow",
+        "local x = 0x1FFFFFFFFFFFFFFFF\nprint(x)\n"
+    ));
+    assert!(fires(
+        "number_literal_overflow",
+        "local x = 0b11111111111111111111111111111111111111111111111111111111111111111\nprint(x)\n"
+    ));
+}
+
+/// Sixteen hexadecimal digits are sixty-four bits exactly.
+#[test]
+fn a_literal_that_fits_in_64_bits_is_fine() {
+    assert!(!fires(
+        "number_literal_overflow",
+        "local x = 0xFFFFFFFFFFFFFFFF\nprint(x)\n"
+    ));
+    assert!(!fires(
+        "number_literal_overflow",
+        "local x = 0x0000_0000_0000_00FF\nprint(x)\n"
+    ));
+    assert!(!fires(
+        "number_literal_overflow",
+        "local x = 0b1010\nprint(x)\n"
+    ));
+    assert!(!fires(
+        "number_literal_overflow",
+        "local x = 99999999999999999999\nprint(x)\n"
+    ));
+}
+
+#[test]
+fn comparison_precedence_catches_not_before_a_comparison() {
+    assert!(fires("comparison_precedence", "if not a == b then end\n"));
+    assert!(fires("comparison_precedence", "if not a ~= b then end\n"));
+}
+
+#[test]
+fn comparison_precedence_catches_a_chain() {
+    assert!(fires("comparison_precedence", "if a < b < c then end\n"));
+    assert!(fires("comparison_precedence", "if a == b == c then end\n"));
+}
+
+/// A parenthesis states the grouping, so there is nothing left to guess.
+#[test]
+fn a_grouped_comparison_is_left_alone() {
+    assert!(!fires(
+        "comparison_precedence",
+        "if not (a == b) then end\n"
+    ));
+    assert!(!fires(
+        "comparison_precedence",
+        "if (not a) == b then end\n"
+    ));
+    assert!(!fires("comparison_precedence", "if (a < b) < c then end\n"));
+}
+
+#[test]
+fn an_ordinary_comparison_is_fine() {
+    assert!(!fires("comparison_precedence", "if a ~= b then end\n"));
+    assert!(!fires(
+        "comparison_precedence",
+        "if a < b and b < c then end\n"
+    ));
+    assert!(!fires("comparison_precedence", "if #a == #b then end\n"));
+    assert!(!fires("comparison_precedence", "if -a == b then end\n"));
+}
+
+#[test]
+fn zero_step_loop_catches_a_counter_that_cannot_move() {
+    assert!(fires(
+        "zero_step_loop",
+        "for i = 1, 10, 0 do print(i) end\n"
+    ));
+}
+
+#[test]
+fn a_loop_with_a_step_that_moves_is_fine() {
+    assert!(!fires(
+        "zero_step_loop",
+        "for i = 1, 10, 2 do print(i) end\n"
+    ));
+    assert!(!fires(
+        "zero_step_loop",
+        "for i = 10, 1, -1 do print(i) end\n"
+    ));
+    assert!(!fires("zero_step_loop", "for i = 1, 10 do print(i) end\n"));
+    assert!(!fires(
+        "zero_step_loop",
+        "local step = 0\nfor i = 1, 10, step do print(i) end\n"
+    ));
+}
+
+/// A walk back over an array is the same mistake as `for i = 10, 1`.
+#[test]
+fn suspicious_reverse_loop_also_catches_a_walk_from_a_length() {
+    assert!(fires(
+        "suspicious_reverse_loop",
+        "local t = {}\nfor i = #t, 1 do print(i) end\n"
+    ));
+    assert!(fires(
+        "suspicious_reverse_loop",
+        "local t = {}\nfor i = #t, 0 do print(i) end\n"
+    ));
+}
+
+#[test]
+fn the_correct_walk_back_over_an_array_is_quiet() {
+    assert!(!fires(
+        "suspicious_reverse_loop",
+        "local t = {}\nfor i = #t, 1, -1 do print(i) end\n"
+    ));
+    assert!(!fires(
+        "suspicious_reverse_loop",
+        "local t = {}\nfor i = 1, #t do print(i) end\n"
+    ));
+    assert!(!fires(
+        "suspicious_reverse_loop",
+        "local t = {}\nfor i = #t, 2 do print(i) end\n"
+    ));
+}

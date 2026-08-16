@@ -240,7 +240,7 @@ The global root matters. A local named `string` is the author's own table. A
 report about `string.format` on it would be a guess about code that larvae
 cannot see.
 */
-fn global_path(ctx: &LintCtx<'_>, e: &Expr) -> Option<String> {
+pub(super) fn global_path(ctx: &LintCtx<'_>, e: &Expr) -> Option<String> {
     match e {
         Expr::Name(span) => {
             // A name that nothing bound is a global, and these tables are globals.

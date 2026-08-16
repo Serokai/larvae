@@ -988,6 +988,14 @@
           ],
           "description": "More names than values, or more values than names. Default: warn."
         },
+        "zero_step_loop": {
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
+          "description": "A numeric for whose step is zero, so the counter never moves. Default: warn."
+        },
         "bad_string_escape": {
           "enum": [
             "allow",
@@ -1011,6 +1019,110 @@
             "deny"
           ],
           "description": "Calling a pure function and discarding what it returned. Default: warn."
+        },
+        "bad_comment_directive": {
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
+          "description": "A --! directive that Luau does not know, or one that comes after the code it should govern. Default: warn."
+        },
+        "builtin_global_write": {
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
+          "description": "An assignment over a standard global, which every later script sees. Default: warn."
+        },
+        "comparison_precedence": {
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
+          "description": "not a == b, or a chain like a < b < c, which does not group the way it reads. Default: warn."
+        },
+        "duplicate_function": {
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
+          "description": "Two functions of the same name in one scope, where the first is discarded. Default: warn."
+        },
+        "duplicate_local": {
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
+          "description": "One local statement or parameter list that declares the same name twice. Default: warn."
+        },
+        "format_string": {
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
+          "description": "A format string that string.format or os.date rejects at runtime. Default: warn."
+        },
+        "implicit_return": {
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
+          "description": "A function that returns a value on one path and falls off the end on another. The lint is off by default, because a lookup that returns nil when it finds nothing is idiomatic Luau. Default: allow."
+        },
+        "misleading_and_or": {
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
+          "description": "cond and false or b, which always gives b because the middle is never truthy. Default: warn."
+        },
+        "number_literal_overflow": {
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
+          "description": "A hexadecimal or binary literal wider than 64 bits, which is truncated. Default: warn."
+        },
+        "placeholder_read": {
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
+          "description": "Reading _, the name that says a value is discarded. Default: warn."
+        },
+        "table_operations": {
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
+          "description": "A table.insert or table.remove whose index or argument count is wrong. Default: warn."
+        },
+        "uninitialized_local": {
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
+          "description": "A local declared with no value and never assigned, so every read is nil. Default: warn."
+        },
+        "unknown_type": {
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
+          "description": "Comparing type(x) against a string that type() never returns. Default: warn."
         },
         "undefined_variable": {
           "enum": [

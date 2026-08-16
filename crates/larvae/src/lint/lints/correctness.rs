@@ -355,11 +355,18 @@ impl IfSameThenElse {
 
 impl SuspiciousReverseLoop {
     /*
-    `for i = 10, 1 do`.
+    `for i = 10, 1 do`, and `for i = #t, 1 do`.
 
     A numeric for steps by one unless the author sets a step. Thus a count
     from a higher number to a lower number runs zero times. The author
     meant to write `-1` as the step.
+
+    A walk back over an array is the same mistake with the length in place
+    of the literal. `for i = #t, 1 do` runs once when the table holds one
+    element and never otherwise, which is not a loop that anybody writes on
+    purpose. The lint accepts a length only against a limit of 1 or 0,
+    because those are the two ends of an array and nothing else is a
+    countdown that larvae can prove.
     */
     fn check(ctx: &LintCtx<'_>, out: &mut Vec<Finding>) {
         each_stmt(ctx, out, |ctx, s, out| {
@@ -367,11 +374,16 @@ impl SuspiciousReverseLoop {
                 return;
             };
 
-            let (Some(start), Some(limit)) = (number(ctx, &n.start), number(ctx, &n.limit)) else {
-                return;
+            let counts_down = match (number(ctx, &n.start), number(ctx, &n.limit)) {
+                (Some(start), Some(limit)) => start > limit,
+
+                // `#t` is at least zero, and the limit is the start of the array.
+                (None, Some(limit)) => limit <= 1.0 && is_length(ctx, &n.start),
+
+                _ => false,
             };
 
-            if start <= limit {
+            if !counts_down {
                 return;
             }
 
@@ -522,7 +534,7 @@ fn spreads(e: Option<&Expr>) -> bool {
 
 // --- shared ----------------------------------------------------------------
 
-fn unwrap_parens(e: &Expr) -> &Expr {
+pub(super) fn unwrap_parens(e: &Expr) -> &Expr {
     match e {
         Expr::Paren { inner, .. } => unwrap_parens(inner),
 
@@ -530,7 +542,7 @@ fn unwrap_parens(e: &Expr) -> &Expr {
     }
 }
 
-fn number(ctx: &LintCtx<'_>, e: &Expr) -> Option<f64> {
+pub(super) fn number(ctx: &LintCtx<'_>, e: &Expr) -> Option<f64> {
     match unwrap_parens(e) {
         Expr::Number(s) => ctx.text(*s).parse().ok(),
 
@@ -543,6 +555,11 @@ fn number(ctx: &LintCtx<'_>, e: &Expr) -> Option<f64> {
 
 fn is_zero(ctx: &LintCtx<'_>, e: &Expr) -> bool {
     number(ctx, e) == Some(0.0)
+}
+
+/// `#t`, the length of something.
+fn is_length(ctx: &LintCtx<'_>, e: &Expr) -> bool {
+    matches!(unwrap_parens(e), Expr::Unary { op, .. } if ctx.text(*op) == "#")
 }
 
 /*
