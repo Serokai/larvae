@@ -4,9 +4,39 @@ Notable changes land here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow
 [semver](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.2.0 - 2026-08-16
 
 ### Added
+
+- `[fmt] semicolons`, which takes `always` or `never`. Luau needs a
+  semicolon in one place only, before a statement that opens with `(`, and
+  larvae writes that one whatever the setting says. So `never` and
+  `as-needed` name the same output, and both spellings are accepted
+- `[fmt] final_newline`, on by default. It covers the newline at the end of
+  the file only: larvae removes whitespace at the end of every line whatever
+  the setting says. editorconfig calls it `insert_final_newline`, and that
+  name works too
+- `[fmt] call_parentheses = "as-needed"`, the name Biome and Prettier use for
+  what stylua spells `none`. The two select the same output. Luau accepts the
+  bare call for one string or one table and nothing else, so `h(a)` keeps its
+  parentheses
+- Fourteen lints, which are the lints of the Luau compiler that larvae did
+  not have: `builtin_global_write`, `placeholder_read`, `unknown_type`,
+  `implicit_return`, `duplicate_local`, `format_string`,
+  `uninitialized_local`, `duplicate_function`, `table_operations`,
+  `misleading_and_or`, `bad_comment_directive`, `number_literal_overflow`,
+  `comparison_precedence`, and `zero_step_loop`. Larvae now covers all 28
+  lints of the Luau compiler, and the registry holds 49
+- `non_const_require`, which reports `local X = require(...)` where `const X`
+  says more. It is off by default, and it skips a name that the file
+  reassigns, because `const` would then be a syntax error
+- `larvae init` writes `"lint": { "*": false }` into `.luaurc`, so one linter
+  reports. The edit is textual and keeps every other byte, comments included.
+  The command changes nothing when the file already sets `lint`, and creates
+  no `.luaurc` when the project has none
+- Each option in `[fmt]` carries a link to its own anchor on the docs site.
+  Even Better TOML renders a description as Markdown, so the link is what a
+  reader clicks in the hover card
 
 - Minification: `generator = "dense"` re-emits the output tokens with the
   least whitespace that lexes the same, so the program cannot change
@@ -28,6 +58,24 @@ Notable changes land here. Format follows
 
 ### Changed
 
+- `implicit_return` and `multiple_statements` report by default. Both are
+  lints that the Luau compiler reports, and a project that turns Luau's
+  linter off must lose no report. `multiple_statements` was off because it
+  appeared to report `if x then return end`; that was a defect in the lint,
+  which compared every statement in the file instead of siblings
+- The parser refuses the ambiguous call that Luau refuses. A `(` that opens a
+  line after a complete expression reads as a call of the line above and as a
+  new statement, and Luau asks for a `;`. Larvae read it as a call, so
+  `larvae check` passed a file that the compiler rejects and `larvae fmt`
+  joined the two lines into a reading the author never chose
+- `larvae init` proposes one input root. It folds sibling mounts into the
+  directory that holds them, so a Rojo project with `src/client`,
+  `src/server` and `src/shared` gets `input = "src"`. It also stops
+  proposing an alias that `.luaurc` already defines
+- `larvae self code` writes the generated schema again whenever one is on
+  disk, and not only when the project has worms. It then says to run
+  "Developer: Reload Window", because the editor holds the schema in memory
+
 - `[process] include` and `[process] exclude` match relative to the project
   root now, like every other list, and the exclude follows the same
   directory-name rule. Patterns written against `input` need respelling
@@ -35,6 +83,31 @@ Notable changes land here. Format follows
   as a comment; the docs and the schema hold the full lists
 - Smaller dependency tables behind the same behavior: URL parsing keeps the
   compact unicode backend, and the TOML parser dropped its edit layer
+
+### Fixed
+
+- `larvae self install` works while something runs the installed binary. The
+  copy opened the destination for writing, which no process can do to a
+  running executable, so an editor that ran `larvae lsp` from the installed
+  path failed the install with "Text file busy". The bytes now rename into
+  place
+- A semicolon at the edge of a Luau span that a worm named. A worm draws its
+  spans from its own parse and can end one at the last token of a statement,
+  which left the `;` outside and made `semicolons` work on some statements of
+  a file and not others. The other edge was worse: a `;` that opened a span
+  read as a stray statement and went, and the result was the ambiguous call
+  above, so larvae wrote a file that larvae cannot read again
+- `larvae init` treats `packages/roblox` as a package tree. The check read
+  the last component of the path only, found `roblox`, and proposed
+  processing the dependencies of the project
+- `[fmt] insert_final_newline` is accepted. The merge writes the config to a
+  table first, so the alias arrived as a second key for one field and serde
+  refused the pair as a duplicate field
+- A non-ASCII byte outside a string no longer ends the run. The lexer made a
+  one byte token of it, which cut the character in half, and the next slice
+  of that span panicked
+- An unterminated `[[` reports. The lexer read it to the end of the file, so
+  it reported nothing and returned content two bytes short of its own
 
 ## 0.1.1 - 2026-08-14
 
