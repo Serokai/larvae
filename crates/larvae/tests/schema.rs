@@ -258,3 +258,50 @@ fn minify_keys_match_the_config() {
         "the config has [minify] keys the schema does not offer"
     );
 }
+
+/*
+Every formatter option carries a link to its own anchor on the docs site.
+
+Even Better TOML renders a description as Markdown, so the link is what a
+reader clicks in the hover card. The anchor comes from the option name with
+each `_` written as `-`, so a renamed option that keeps its old anchor points
+at a heading that no longer exists. This test compares the two.
+*/
+#[test]
+fn every_fmt_option_links_to_its_own_anchor() {
+    const BASE: &str = "https://larvae-luau.github.io/docs/reference/formatting";
+
+    let schema = schema();
+    let fmt = &schema["$defs"]["fmt"];
+
+    assert!(
+        fmt["description"].as_str().unwrap().contains(BASE),
+        "the [fmt] table needs a link to the reference page"
+    );
+
+    for (key, prop) in fmt["properties"].as_object().unwrap() {
+        let want = format!("{BASE}#{}", key.replace('_', "-"));
+        let description = prop["description"].as_str().unwrap_or_default();
+
+        assert!(
+            description.contains(&want),
+            "[fmt] {key} needs a link to {want}"
+        );
+
+        let Some(nested) = prop.get("properties").and_then(|p| p.as_object()) else {
+            continue;
+        };
+
+        for (sub, subprop) in nested {
+            let want = format!("{BASE}#{}-{}", key.replace('_', "-"), sub.replace('_', "-"));
+
+            assert!(
+                subprop["description"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains(&want),
+                "[fmt.{key}] {sub} needs a link to {want}"
+            );
+        }
+    }
+}
