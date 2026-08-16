@@ -48,7 +48,18 @@ pub fn run(root: &Path) -> Result<ExitCode> {
         Some(editor) => {
             eprintln!("Found Even Better TOML in {}", editor.name);
 
-            associate(&editor.settings)
+            let code = associate(&editor.settings)?;
+
+            /*
+            The editor holds the schema in memory. A new settings file or a new
+            schema file does not change what the editor already parsed, so the
+            completions stay at the old version until the window reads them
+            again. Larvae cannot make the editor do this, because the editor
+            command line runs no editor command. So larvae says what to do.
+            */
+            eprintln!("Run \"Developer: Reload Window\" to load the new schema.");
+
+            Ok(code)
         }
 
         None => {
@@ -168,8 +179,21 @@ fn project_schema(root: &Path) -> Result<()> {
             crate::schema::write(&root.join(&config.process.cache_dir), &worms)?;
         }
 
-        // a project with no worms wants the schema that larvae hosts
-        Ok(_) => return Ok(()),
+        /*
+        A project with no worms wants the schema that larvae hosts. But a
+        generated file can still be on disk, from an older larvae or from a
+        worm that the project has since removed. The editor settings can still
+        point at that file. So larvae writes it again and does not leave the
+        editor with a schema of a version that no longer exists.
+        */
+        Ok(worms) => {
+            if generated.exists() {
+                crate::schema::write(&root.join(&config.process.cache_dir), &worms)?;
+                eprintln!("Refreshed {}", ui::rel(&generated));
+            }
+
+            return Ok(());
+        }
 
         /*
         A worm that larvae cannot load is a problem for a build to report.
