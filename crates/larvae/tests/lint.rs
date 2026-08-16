@@ -404,15 +404,8 @@ fn parentheses_that_group_something_are_left_alone() {
 }
 
 #[test]
-fn multiple_statements_is_off_until_a_project_asks() {
-    let src = "local a = 1 local b = 2\n";
-
-    assert!(!fires("multiple_statements", src));
-    assert!(
-        fired(src, &with("multiple_statements", Level::Warn))
-            .iter()
-            .any(|n| n == "multiple_statements")
-    );
+fn multiple_statements_reports_by_default_as_luau_does() {
+    assert!(fires("multiple_statements", "local a = 1 local b = 2\n"));
 }
 
 /// The lint must not report this pattern, even when the lint is on.
@@ -1339,11 +1332,10 @@ fn returns(src: &str) -> bool {
 
 /// The lint is off by default, because the shape it reports is idiomatic.
 #[test]
-fn implicit_return_is_off_until_a_project_asks() {
+fn implicit_return_reports_by_default_as_luau_does() {
     let src = "local function f(a)\n\tif a then\n\t\treturn 1\n\tend\nend\nreturn f\n";
 
-    assert!(!fires("implicit_return", src));
-    assert!(returns(src));
+    assert!(fires("implicit_return", src));
 }
 
 #[test]

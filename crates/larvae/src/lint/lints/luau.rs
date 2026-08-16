@@ -38,7 +38,7 @@ lints! {
         "one local statement or parameter list that declares the same name twice";
     FormatString => "format_string", Warn,
         "a format string that string.format or os.date rejects at runtime";
-    ImplicitReturn => "implicit_return", Allow,
+    ImplicitReturn => "implicit_return", Warn,
         "a function that returns a value on one path and falls off the end on another";
     MisleadingAndOr => "misleading_and_or", Warn,
         "cond and false or b, which always gives b because the middle is never truthy";

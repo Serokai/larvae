@@ -1074,7 +1074,7 @@
             "warn",
             "deny"
           ],
-          "description": "A function that returns a value on one path and falls off the end on another. The lint is off by default, because a lookup that returns nil when it finds nothing is idiomatic Luau. Default: allow."
+          "description": "A function that returns a value on one path and falls off the end on another. The lint is off by default, because a lookup that returns nil when it finds nothing is idiomatic Luau. Default: warn."
         },
         "misleading_and_or": {
           "enum": [
@@ -1290,7 +1290,7 @@
             "warn",
             "deny"
           ],
-          "description": "More than one statement on a line. Default: allow."
+          "description": "More than one statement on a line. Default: warn."
         },
         "parenthese_conditions": {
           "enum": [

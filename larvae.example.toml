@@ -198,15 +198,21 @@ std = "roblox"                           # or "luau", "none", or a selene name l
 globals = ["shared", "_TESTING"]         # names the project defines itself
 exclude = ["Packages", "**/*.spec.luau"] # relative to the project root
 
-# A lint keeps its own default until it is named here. Thirty four of them;
+# A lint keeps its own default until it is named here. Forty nine of them;
 # `larvae lint --explain <name>` describes one. These are the defaults.
+#
+# Larvae covers all 28 lints of the Luau compiler, and `larvae init` turns
+# Luau's own off in .luaurc. Each one keeps the level that Luau gives it, so
+# the change of linter changes no report.
 [lint.rules]
 undefined_variable = "deny"
-high_cyclomatic_complexity = "allow"
-multiple_statements = "allow"
+high_cyclomatic_complexity = "allow"     # a branch count is not a defect on its own
+non_const_require = "allow"              # const is newer than most codebases
 unused_variable = "warn"
 shadowing = "warn"
 mixed_table = "warn"
+multiple_statements = "warn"             # Luau reports this one too
+implicit_return = "warn"                 # and this one
 # ... every other lint warns
 
 # Per lint settings. `config` is selene's name for this table, and works too,

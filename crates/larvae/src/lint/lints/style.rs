@@ -20,7 +20,7 @@ lints! {
         "a loop body with nothing in it";
     MixedTable => "mixed_table", Warn,
         "a table with both array entries and named keys";
-    MultipleStatements => "multiple_statements", Allow,
+    MultipleStatements => "multiple_statements", Warn,
         "more than one statement on a line";
     ParentheseConditions => "parenthese_conditions", Warn,
         "parentheses around a condition, which Luau does not need";
@@ -133,12 +133,14 @@ impl MixedTable {
 
 impl MultipleStatements {
     /*
-    This lint is off by default, unlike the rest.
+    This is Luau's SameLineStatement, and Luau reports it by default.
 
-    `if x then return end` on one line is normal Luau, and this lint would
-    report every such line. Thus a project must turn the lint on. The lint
-    exists for a project that decided on one statement per line. For that
-    project, the check is worth more than the noise.
+    An earlier larvae kept the lint off, because `if x then return end` on
+    one line is normal Luau and the lint appeared to report every such line.
+    That was a defect in the lint and not a reason to disable it: the lint
+    compared every statement in the file, and the `return` there sits in its
+    own block. The lint now compares siblings, Luau agrees with the result,
+    and the lint is on.
     */
     fn check(ctx: &LintCtx<'_>, out: &mut Vec<Finding>) {
         /*
