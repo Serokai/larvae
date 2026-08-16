@@ -67,8 +67,66 @@ pub fn run(root: &Path) -> Result<ExitCode> {
     report(&found);
     report_existing(root);
     ensure_gitignore(root)?;
+    hand_over_linting(root);
 
     Ok(ExitCode::SUCCESS)
+}
+
+/*
+Turn Luau's own lints off in `.luaurc`, so one linter reports.
+
+Luau's compiler ships twenty eight lints and larvae covers them, so leaving
+both on means every finding twice: once from luau-lsp in the editor and once
+from `larvae lint` in CI, under two names, with two ways to silence one. The
+`.luaurc` key that settles it is `lint`, and `"*": false` covers every rule
+including ones a later Luau adds.
+
+The edit is textual rather than a parse and a re-serialise, because `.luaurc`
+is another tool's file: it holds the project's aliases, it allows comments, and
+larvae has no business reformatting it. Inserting after the opening brace keeps
+every other byte, comments included.
+
+Nothing happens when the file already sets `lint`. That is the project having
+an opinion, and this is not the command to overrule it.
+*/
+fn hand_over_linting(root: &Path) {
+    let path = root.join(".luaurc");
+
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        // no .luaurc to take over, and creating one only for this is overreach
+        return;
+    };
+
+    let already = json5::from_str::<serde_json::Value>(&text)
+        .ok()
+        .is_some_and(|v| v.get("lint").is_some());
+
+    if already {
+        eprintln!("  .luaurc already sets lint, leaving it alone");
+
+        return;
+    }
+
+    let Some(open) = text.find('{') else {
+        eprintln!("  could not read .luaurc, add \"lint\": {{ \"*\": false }} to it yourself");
+
+        return;
+    };
+
+    // an empty object takes no comma, anything else needs one
+    let rest = text[open + 1..].trim_start();
+    let comma = if rest.starts_with('}') { "" } else { "," };
+
+    let mut out = String::with_capacity(text.len() + 32);
+    out.push_str(&text[..=open]);
+    out.push_str(&format!("\n  \"lint\": {{ \"*\": false }}{comma}"));
+    out.push_str(&text[open + 1..]);
+
+    match std::fs::write(&path, out) {
+        Ok(()) => eprintln!("  turned Luau's own lints off in .luaurc, larvae reports them now"),
+
+        Err(e) => eprintln!("  could not write .luaurc, {e}"),
+    }
 }
 
 /// The formatter and linter configs that another tool can leave; larvae reads them unchanged
@@ -245,6 +303,88 @@ fn ignores(content: &str, entry: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- .luaurc, handing linting over -------------------------------------
+
+    fn luaurc(body: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".luaurc");
+        std::fs::write(&path, body).unwrap();
+
+        (dir, path)
+    }
+
+    /*
+    Luau's compiler ships lints that larvae covers. With both on, every finding
+    arrives twice under two names, with two ways to silence one.
+    */
+    #[test]
+    fn luau_lints_are_turned_off_and_the_aliases_survive() {
+        let (dir, path) = luaurc(r#"{ "aliases": { "pkg": "p" } }"#);
+        hand_over_linting(dir.path());
+
+        let out = std::fs::read_to_string(&path).unwrap();
+
+        assert!(out.contains(r#""lint""#), "{out}");
+        assert!(out.contains(r#""*": false"#), "{out}");
+        assert!(out.contains(r#""pkg""#), "the aliases must survive: {out}");
+    }
+
+    /// The result has to be something Luau still reads
+    #[test]
+    fn the_rewritten_file_is_still_valid() {
+        let (dir, path) = luaurc("{\n  // our packages\n  \"aliases\": { \"pkg\": \"p\" }\n}");
+        hand_over_linting(dir.path());
+
+        let out = std::fs::read_to_string(&path).unwrap();
+        let parsed: serde_json::Value = json5::from_str(&out).expect("still parses");
+
+        assert_eq!(parsed["lint"]["*"], serde_json::json!(false));
+        assert_eq!(parsed["aliases"]["pkg"], serde_json::json!("p"));
+    }
+
+    /// `.luaurc` belongs to another tool, so the edit keeps every other byte
+    #[test]
+    fn a_comment_is_not_lost() {
+        let (dir, path) = luaurc("{\n  // our packages\n  \"aliases\": {}\n}");
+        hand_over_linting(dir.path());
+
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("// our packages"),
+            "the comment was dropped"
+        );
+    }
+
+    #[test]
+    fn an_empty_object_is_handled_without_a_stray_comma() {
+        let (dir, path) = luaurc("{}");
+        hand_over_linting(dir.path());
+
+        let out = std::fs::read_to_string(&path).unwrap();
+        let parsed: serde_json::Value = json5::from_str(&out).expect("still parses");
+
+        assert_eq!(parsed["lint"]["*"], serde_json::json!(false));
+    }
+
+    /// A project with an opinion about lints keeps it
+    #[test]
+    fn a_file_that_already_sets_lint_is_left_alone() {
+        let body = r#"{ "lint": { "LocalUnused": false } }"#;
+        let (dir, path) = luaurc(body);
+        hand_over_linting(dir.path());
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), body);
+    }
+
+    #[test]
+    fn no_luaurc_means_none_is_created() {
+        let dir = tempfile::tempdir().unwrap();
+        hand_over_linting(dir.path());
+
+        assert!(!dir.path().join(".luaurc").exists());
+    }
 
     /// The defaults that init writes must equal the defaults of larvae. If not,
     /// the first run after `larvae init` formats differently than the run before it.
