@@ -687,8 +687,8 @@ fn nested_unary_minus_keeps_its_space() {
 /// A statement that starts with `(` continues the line above as a call.
 #[test]
 fn a_dropped_semicolon_is_put_back_where_it_is_load_bearing() {
-    assert_eq!(fmt("local a = b\n;(c)()\n"), "local a = b\n;(c)()\n");
-    assert_eq!(fmt("local x = a;\n(f)()\n"), "local x = a\n;(f)()\n");
+    assert_eq!(fmt("local a = b\n;(c)()\n"), "local a = b;\n(c)()\n");
+    assert_eq!(fmt("local x = a;\n(f)()\n"), "local x = a;\n(f)()\n");
 }
 
 /// A `[` directly before a `[[ ]]` string opens a long string instead.
@@ -1012,4 +1012,104 @@ fn converting_the_binding_is_idempotent() {
     let once = fmt_with("local S = require(\"@pkg/s\")\nreturn S\n", cfg.clone());
 
     assert_eq!(fmt_with(&once, cfg), once);
+}
+
+// --- semicolons ------------------------------------------------------------
+
+fn semis(mode: larvae::fmt::config::Semicolons) -> FmtConfig {
+    FmtConfig {
+        semicolons: mode,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn semicolons_are_absent_by_default() {
+    assert_eq!(
+        fmt("local a = 1\nlocal b = 2\nreturn b\n"),
+        "local a = 1\nlocal b = 2\nreturn b\n"
+    );
+}
+
+#[test]
+fn always_terminates_every_statement() {
+    assert_eq!(
+        fmt_with(
+            "local a = 1\nlocal b = 2\nreturn b\n",
+            semis(larvae::fmt::config::Semicolons::Always)
+        ),
+        "local a = 1;\nlocal b = 2;\nreturn b;\n"
+    );
+}
+
+/*
+Luau needs a semicolon before a statement that opens with `(`, or the line
+above swallows it as a call. larvae drops the author's semicolons like any
+other trivia, so it has to put this one back whatever the setting says.
+*/
+#[test]
+fn the_one_semicolon_luau_requires_survives_every_setting() {
+    for mode in [
+        larvae::fmt::config::Semicolons::Never,
+        larvae::fmt::config::Semicolons::Always,
+    ] {
+        let out = fmt_with("local a = b\n;(c)()\nreturn a\n", semis(mode));
+
+        assert!(out.contains("local a = b;"), "{out}");
+    }
+}
+
+/// `as-needed` is the other name for `never`, since Luau's one case is never optional
+#[test]
+fn as_needed_is_accepted_as_a_name_for_never() {
+    let cfg: FmtConfig = toml::from_str("semicolons = \"as-needed\"").expect("parses");
+
+    assert_eq!(cfg.semicolons, larvae::fmt::config::Semicolons::Never);
+}
+
+#[test]
+fn a_semicolon_lands_before_a_trailing_comment_not_after_it() {
+    assert_eq!(
+        fmt_with(
+            "local a = 1 -- note\nreturn a\n",
+            semis(larvae::fmt::config::Semicolons::Always)
+        ),
+        "local a = 1; -- note\nreturn a;\n"
+    );
+}
+
+#[test]
+fn terminating_every_statement_is_idempotent() {
+    let cfg = semis(larvae::fmt::config::Semicolons::Always);
+    let once = fmt_with("local a = 1\nif a then\n\treturn a\nend\n", cfg.clone());
+
+    assert_eq!(fmt_with(&once, cfg), once);
+}
+
+/// The clearer name for what stylua spells `none`
+#[test]
+fn as_needed_is_accepted_for_call_parentheses() {
+    let cfg: FmtConfig = toml::from_str("call_parentheses = \"as-needed\"").expect("parses");
+
+    assert_eq!(cfg.call_parentheses, larvae::fmt::config::CallParens::None);
+}
+
+/*
+The bare call form takes one string or one table and nothing else, so a single
+identifier keeps its parentheses. `h a` is a syntax error, not terser Luau.
+*/
+#[test]
+fn as_needed_drops_parens_only_where_luau_allows_the_bare_form() {
+    let cfg = FmtConfig {
+        call_parentheses: larvae::fmt::config::CallParens::None,
+        ..Default::default()
+    };
+
+    assert_eq!(fmt_with("f(\"s\")\n", cfg.clone()), "f \"s\"\n");
+    assert_eq!(fmt_with("g({ t = 1 })\n", cfg.clone()), "g { t = 1 }\n");
+    assert_eq!(
+        fmt_with("h(a)\n", cfg),
+        "h(a)\n",
+        "a single name keeps them"
+    );
 }

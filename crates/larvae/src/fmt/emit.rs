@@ -21,6 +21,7 @@ use crate::syntax::lexer::{Tok, TokKind};
 
 use super::config::{
     BlockNewlineGaps, CallParens, CollapseSimpleStatement, FmtConfig, QuoteStyle, RequireGrouping,
+    Semicolons,
 };
 use super::doc::Doc;
 use super::trivia::{Attached, Comment, Trivia};
@@ -191,6 +192,37 @@ impl<'a> Emitter<'a> {
         self.tok(stmt.span().start) == "("
     }
 
+    /*
+    The semicolon that follows a statement, if any.
+
+    Two rules meet here, and the second one outranks the first. `semicolons`
+    says what the project wants. Luau says what the next statement needs: one
+    that opens with `(` continues this line as a call, so `local a = b`
+    followed by `(c)()` reads as `local a = b(c)()`. The emitter drops the
+    author's semicolons like any other trivia, so it has to put that one back
+    whatever the setting is.
+
+    Reading it from the *next* statement rather than prefixing it to that
+    statement is what lets one function answer both questions, and it is also
+    where the separator belongs: it terminates the statement before it.
+    */
+    fn terminator(&self, stmt: &Stmt, next: Option<&Stmt>) -> Doc<'a> {
+        if self.cfg.semicolons == Semicolons::Always {
+            return Doc::text(";");
+        }
+
+        // `return` ends a block, so nothing can follow it to need separating
+        if matches!(stmt, Stmt::Return(_)) {
+            return Doc::Nil;
+        }
+
+        match next.is_some_and(|n| self.starts_with_paren(n)) {
+            true => Doc::text(";"),
+
+            false => Doc::Nil,
+        }
+    }
+
     /// Reports if this expression prints with a `[` first. A `[` cannot touch another `[`.
     fn starts_with_bracket(&self, e: &Expr) -> bool {
         self.tok(e.span().start).starts_with('[')
@@ -296,18 +328,8 @@ impl<'a> Emitter<'a> {
                 parts.push(Doc::Hard);
             }
 
-            /*
-            A statement that opens with `(` continues the line above as a
-            call. This is the oldest ambiguity of Lua. The emitter drops the
-            `;` of the author like any other `;`. So the emitter puts one back
-            where it is necessary. Without it, `local a = b` followed by
-            `(c)()` reads as `local a = b(c)()`.
-            */
-            if i > 0 && self.starts_with_paren(piece.stmt) {
-                parts.push(Doc::text(";"));
-            }
-
             parts.push(self.stmt(piece.stmt));
+            parts.push(self.terminator(piece.stmt, pieces.get(i + 1).map(|p| p.stmt)));
         }
 
         if let Some(last) = pieces.last() {

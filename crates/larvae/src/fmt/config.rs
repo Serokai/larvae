@@ -44,6 +44,18 @@ pub enum CallParens {
     Always,
     NoSingleString,
     NoSingleTable,
+    /*
+    Drops the parentheses wherever Luau allows the bare form, and keeps them
+    everywhere else. `as-needed` is the same setting under the name that Biome
+    and Prettier use for this shape; `none` is the name that stylua uses, and a
+    pasted `stylua.toml` keeps working.
+
+    Worth knowing what "wherever Luau allows" covers, because it is narrower
+    than it sounds. The bare form takes one string or one table and nothing
+    else, so `f "s"` and `g { x = 1 }` lose their parentheses while `h(a)`
+    keeps them. `h a` is not terser Luau, it is a syntax error.
+    */
+    #[serde(alias = "as-needed")]
     None,
     /// Keep the form that the author wrote. This does not enforce consistency.
     Input,
@@ -119,6 +131,31 @@ pub enum RequireBinding {
     Local,
 }
 
+/*
+Selects whether a statement ends with a semicolon.
+
+Luau needs one in exactly one place: before a statement that opens with `(`,
+which would otherwise continue the line above as a call. Larvae emits that one
+whatever this option says, because the alternative is output that does not mean
+what the input meant.
+
+That is also why `never` and `as-needed` name the same setting. In a language
+where the separator is optional everywhere except one spot where it is never
+optional, "omit the ones that are not needed" and "omit all of them" describe
+the same output. Larvae accepts both names, because which one a project reaches
+for depends on the formatter it came from.
+*/
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Semicolons {
+    /// Only where Luau requires one.
+    #[default]
+    #[serde(alias = "as-needed")]
+    Never,
+    /// After every statement.
+    Always,
+}
+
 /// Selects how `sort_requires` groups the requires it sorts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -177,6 +214,10 @@ pub struct FmtConfig {
     /// Selects which keyword binds a required module.
     #[serde(default)]
     pub require_binding: RequireBinding,
+
+    /// Selects whether a statement ends with a semicolon.
+    #[serde(default)]
+    pub semicolons: Semicolons,
 
     /*
     A trailing comma that the author left in a table means "keep this table

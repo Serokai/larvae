@@ -711,10 +711,11 @@
             "no-single-string",
             "no-single-table",
             "none",
-            "input"
+            "input",
+            "as-needed"
           ],
           "default": "always",
-          "description": "Whether a call with one string or table argument keeps its parentheses. \"input\" keeps whatever the author wrote."
+          "description": "Whether a call with one string or table argument keeps its parentheses. \"input\" keeps whatever the author wrote. \"as-needed\" is the same setting as \"none\" under the name Biome and Prettier use. Both drop the parentheses only where Luau allows the bare form, which is one string or one table; a single identifier keeps them, because `h a` is a syntax error."
         },
         "space_after_function_names": {
           "enum": [
@@ -771,6 +772,15 @@
           ],
           "default": "preserve",
           "description": "Selects which keyword binds a required module. Luau enforces \"const\", so a name that the file reassigns keeps \"local\" and does not become a syntax error. \"preserve\" keeps each declaration as written."
+        },
+        "semicolons": {
+          "enum": [
+            "never",
+            "as-needed",
+            "always"
+          ],
+          "default": "never",
+          "description": "Whether a statement ends with a semicolon. Luau requires one only before a statement opening with \"(\", and larvae emits that one whatever this says. \"never\" and \"as-needed\" therefore name the same output; both are accepted."
         },
         "magic_trailing_comma": {
           "type": "boolean",
