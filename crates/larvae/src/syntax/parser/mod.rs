@@ -142,6 +142,20 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Reports if a newline sits between the previous token and the current one
+    fn newline_before_pos(&self) -> bool {
+        let (Some(prev), Some(here)) = (
+            self.pos.checked_sub(1).and_then(|i| self.toks.get(i)),
+            self.toks.get(self.pos),
+        ) else {
+            return false;
+        };
+
+        let (lo, hi) = (prev.end as usize, here.start as usize);
+
+        lo < hi && self.src[lo..hi].contains('\n')
+    }
+
     fn err(&self, message: &str) -> ParseError {
         let offset = match self.toks.get(self.pos) {
             Some(t) => t.start as usize,

@@ -238,6 +238,27 @@ impl<'a> Parser<'a> {
                 }
 
                 "(" | "{" => {
+                    /*
+                    A `(` on a line of its own after a complete expression is
+                    the oldest ambiguity in Lua: it reads as a call of the line
+                    above, and it reads equally well as a new statement that
+                    opens with a parenthesis. Luau refuses to guess and asks
+                    for a semicolon, so larvae refuses too.
+
+                    Matching Luau matters more than being permissive here.
+                    Accepting it would mean `larvae check` passes a file the
+                    real compiler rejects, and `larvae fmt` would join the two
+                    lines into the reading larvae picked, which is a choice the
+                    author never made.
+                    */
+                    if self.text() == "(" && self.newline_before_pos() {
+                        return Err(self.err(
+                            "ambiguous syntax: this looks like the argument list of a call \
+                             on the line above, and also like the start of a new statement, \
+                             separate them with a `;`",
+                        ));
+                    }
+
                     let args = self.call_args()?;
                     e = Expr::Call {
                         func: Box::new(e),
