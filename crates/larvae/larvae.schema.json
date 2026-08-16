@@ -782,6 +782,11 @@
           "default": "never",
           "description": "Whether a statement ends with a semicolon. Luau requires one only before a statement opening with \"(\", and larvae emits that one whatever this says. \"never\" and \"as-needed\" therefore name the same output; both are accepted."
         },
+        "final_newline": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the file ends with a newline. On by default. POSIX defines a line as text up to a newline, so a file without a final one ends in something that is not a line. This covers the single trailing newline only. Larvae removes whitespace at the end of every line whatever this says."
+        },
         "magic_trailing_comma": {
           "type": "boolean",
           "default": true,

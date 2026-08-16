@@ -1113,3 +1113,92 @@ fn as_needed_drops_parens_only_where_luau_allows_the_bare_form() {
         "a single name keeps them"
     );
 }
+
+// --- final_newline ---------------------------------------------------------
+
+#[test]
+fn a_file_ends_with_a_newline_by_default() {
+    assert_eq!(fmt("local a = 1"), "local a = 1\n");
+}
+
+#[test]
+fn the_final_newline_can_be_turned_off() {
+    let cfg = FmtConfig {
+        final_newline: false,
+        ..Default::default()
+    };
+
+    assert_eq!(fmt_with("local a = 1\n", cfg), "local a = 1");
+}
+
+/// editorconfig's name for it, so that vocabulary works too
+#[test]
+fn insert_final_newline_is_accepted_as_a_name() {
+    let cfg: FmtConfig = toml::from_str("insert_final_newline = false").expect("parses");
+
+    assert!(!cfg.final_newline);
+}
+
+/*
+The setting is the one trailing newline only. Whitespace at the end of a line
+is invisible and has no reading in which it was intended, so it goes either
+way.
+*/
+#[test]
+fn turning_it_off_does_not_bring_back_trailing_whitespace() {
+    let cfg = FmtConfig {
+        final_newline: false,
+        ..Default::default()
+    };
+
+    let out = fmt_with("local a = 1   \nlocal b = 2   \n", cfg);
+
+    for line in out.lines() {
+        assert_eq!(line, line.trim_end(), "trailing whitespace on {line:?}");
+    }
+}
+
+#[test]
+fn dropping_the_final_newline_is_idempotent() {
+    let cfg = FmtConfig {
+        final_newline: false,
+        ..Default::default()
+    };
+
+    let once = fmt_with("local a = 1\n", cfg.clone());
+
+    assert_eq!(fmt_with(&once, cfg), once);
+}
+
+/*
+Luau refuses to guess when a `(` opens a line after a complete expression:
+it reads as a call of the line above and as a new statement equally well.
+larvae matches it, so `check` cannot pass a file the real compiler rejects.
+*/
+#[test]
+fn an_ambiguous_call_across_lines_is_refused() {
+    let src = "local f = print\nprint(1)\n(f)()\n";
+    let err = format(src, &FmtConfig::default()).expect_err("Luau rejects this");
+
+    assert!(format!("{err:#}").contains("ambiguous"), "{err:#}");
+}
+
+#[test]
+fn a_semicolon_resolves_the_ambiguity() {
+    let src = "local f = print\nprint(1);\n(f)()\n";
+
+    assert!(format(src, &FmtConfig::default()).is_ok());
+}
+
+/// The `(` is on the callee's line, so nothing is ambiguous
+#[test]
+fn a_call_whose_arguments_wrap_is_not_ambiguous() {
+    assert_eq!(fmt("print(\n\t1,\n\t2\n)\n"), "print(1, 2)\n");
+}
+
+#[test]
+fn a_chained_call_on_the_next_line_is_not_ambiguous() {
+    let out = fmt("local t = {}\nlocal x = t.f(1)\n\t.g(2)\nreturn x\n");
+
+    assert!(out.contains("t.f(1).g(2)"), "{out}");
+}

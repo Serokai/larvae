@@ -220,6 +220,23 @@ pub struct FmtConfig {
     pub semicolons: Semicolons,
 
     /*
+    Whether the file ends with a newline.
+
+    On by default, and worth keeping on. POSIX defines a line as text up to a
+    newline, so a file without a final one ends in something that is not a
+    line: `wc -l` undercounts it, `cat` runs it into the next prompt, and git
+    reports "\ No newline at end of file" on every diff that touches the last
+    line. Off is here for a project whose tooling wants the bytes to stop where
+    the code does.
+
+    This is the single trailing newline only. Larvae removes whitespace at the
+    end of every line whatever this says, because trailing spaces are invisible
+    and have no reading in which they were intended.
+    */
+    #[serde(default = "default_true", alias = "insert_final_newline")]
+    pub final_newline: bool,
+
+    /*
     A trailing comma that the author left in a table means "keep this table
     expanded".
 

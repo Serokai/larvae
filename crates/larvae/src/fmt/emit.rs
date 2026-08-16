@@ -56,7 +56,11 @@ impl<'a> Emitter<'a> {
         let body = self.block_body(&chunk.block);
 
         // Exactly one newline ends the file. The renderer does not add it.
-        Doc::concat([body, Doc::Hard])
+        match self.cfg.final_newline {
+            true => Doc::concat([body, Doc::Hard]),
+
+            false => body,
+        }
     }
 
     // --- tokens ------------------------------------------------------------
