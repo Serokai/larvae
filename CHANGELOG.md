@@ -4,7 +4,7 @@ Notable changes land here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow
 [semver](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.3.0 - 2026-08-17
 
 ### Added
 
@@ -30,8 +30,6 @@ Notable changes land here. Format follows
   waits for `width` in every mode, because `always` at each level gives a
   stair of keywords for an expression that reads well on one line
 
-### Added
-
 - Differential tests against the real Luau parser. `luau-lsp` carries that
   parser and reports a syntax error apart from a type error, so it serves as
   an oracle. The verdicts are recorded under
@@ -42,6 +40,10 @@ Notable changes land here. Format follows
 
 ### Fixed
 
+- A string continuation reads over CRLF line endings. A Windows checkout
+  turns LF into CRLF, and the `\` before the end of the line is then three
+  bytes. The lexer took two, which left a bare LF inside the literal, and
+  larvae refused a file that Luau accepts
 - A comment keeps the blank line below it. The formatter gave a leading
   comment a plain line break, so a note that an author had separated from the
   code below it came back joined to that code
