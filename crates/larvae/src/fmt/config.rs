@@ -176,6 +176,124 @@ pub struct SortRequires {
     pub grouping: RequireGrouping,
 }
 
+/// Selects when the formatter opens an `if ... then ... else ...` expression over several lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum IfExpansion {
+    /// Keep the expression on one line where it fits. This is the layout larvae always had.
+    #[default]
+    Never,
+    /// Open every expression, whatever its width.
+    Always,
+    /// Open an expression that is wider than `width`.
+    WhenLarge,
+}
+
+/*
+Selects the shape of an opened `if` expression.
+
+Both shapes put one clause on a line. They differ on which side of the
+keyword the line breaks, and so on where the reader's eye finds the keyword.
+*/
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum IfStyle {
+    /*
+    The value goes below its keyword, in the shape of an `if` statement.
+
+    ```
+    local a = if bar then
+        "baz"
+    else
+        "foo"
+    ```
+    */
+    #[default]
+    Block,
+    /*
+    The keyword starts the line and takes its value.
+
+    ```
+    local a = if bar
+        then "baz"
+        else "foo"
+    ```
+
+    This is the position the formatter already gives the operator of a long
+    binary chain. The reader finds the keyword at one column instead of at
+    the uneven right edge.
+    */
+    Leading,
+}
+
+/// Selects where the `if` sits when the formatter opens the expression.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum IfPlacement {
+    /// `local a = if cond then`. The `if` stays on the line of the binding.
+    #[default]
+    SameLine,
+    /// `local a =`, and the `if` starts the line below.
+    NextLine,
+}
+
+/*
+How the formatter lays out an `if` expression.
+
+Luau has an `if` expression, and stylua has no option for it, so a long one
+runs off to the right. The options here open it over several lines instead.
+*/
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct IfExpression {
+    #[serde(default)]
+    pub expand: IfExpansion,
+    /*
+    The width at which `when-large` opens an expression.
+
+    This width also governs a nested expression, in every mode. An `if`
+    inside an `if` that opens with its parent gives a stair of keywords for
+    an expression that reads well on one line. So the inner one waits until
+    it earns the room on its own.
+    */
+    #[serde(default = "default_if_width")]
+    pub width: usize,
+    #[serde(default)]
+    pub style: IfStyle,
+    #[serde(default)]
+    pub placement: IfPlacement,
+    /// The indent levels that a continuation line of the expression takes.
+    #[serde(default = "default_if_indent")]
+    pub indent: usize,
+}
+
+impl Default for IfExpression {
+    fn default() -> Self {
+        Self {
+            expand: IfExpansion::default(),
+            width: default_if_width(),
+            style: IfStyle::default(),
+            placement: IfPlacement::default(),
+            indent: default_if_indent(),
+        }
+    }
+}
+
+/*
+Half of the default `column_width`.
+
+An `if` expression is one value inside a statement, and it is rarely the
+whole line. A value that takes more than half the budget is the one that
+makes the line hard to read.
+*/
+fn default_if_width() -> usize {
+    60
+}
+
+fn default_if_indent() -> usize {
+    1
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct FmtConfig {
@@ -218,6 +336,10 @@ pub struct FmtConfig {
     /// Selects whether a statement ends with a semicolon.
     #[serde(default)]
     pub semicolons: Semicolons,
+
+    /// Selects how an `if` expression opens over several lines.
+    #[serde(default)]
+    pub if_expression: IfExpression,
 
     /*
     Whether the file ends with a newline.

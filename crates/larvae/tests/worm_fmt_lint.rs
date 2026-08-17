@@ -238,6 +238,129 @@ fn an_allow_comment_suppresses_a_worm_finding() {
     );
 }
 
+/*
+A `lint off` region holds the findings of a worm too.
+
+Where `allow(...)` names one lint, the region holds every finding on those
+lines. A reader who switches the linter off does not care which tool found
+one.
+*/
+#[test]
+fn a_lint_off_region_suppresses_a_worm_finding() {
+    let root = project(true);
+    write(
+        root.path(),
+        "src/app.luaux",
+        "-- larvae: lint off\nlocal bad = 1\n-- larvae: lint on\n",
+    );
+
+    let (ok, text) = run(root.path(), &["lint"]);
+
+    assert!(ok, "{text}");
+    assert!(
+        !text.contains("markup.bad_word"),
+        "the region must hold it: {text}"
+    );
+}
+
+/*
+The count form holds a worm finding too.
+
+A finding of a worm carries a source span, and the three forms of the marker
+all arrive as a range of the source. So the count needs nothing of its own
+here, and this test says so.
+*/
+#[test]
+fn a_lint_count_suppresses_a_worm_finding_on_those_lines() {
+    let root = project(true);
+    write(
+        root.path(),
+        "src/app.luaux",
+        "-- larvae: lint off(1)\nlocal bad = 1\n",
+    );
+
+    let (ok, text) = run(root.path(), &["lint"]);
+
+    assert!(ok, "{text}");
+    assert!(
+        !text.contains("markup.bad_word"),
+        "the count must hold it: {text}"
+    );
+}
+
+/// A count that runs out leaves the lines below it alone.
+#[test]
+fn a_lint_count_stops_where_it_says() {
+    let root = project(true);
+    write(
+        root.path(),
+        "src/app.luaux",
+        "-- larvae: lint off(1)\nlocal fine = 1\nlocal bad = 2\n",
+    );
+
+    let (_, text) = run(root.path(), &["lint"]);
+
+    assert!(
+        text.contains("markup.bad_word"),
+        "the line past the count still reports: {text}"
+    );
+}
+
+/// A file held off in full reports nothing from the worm.
+#[test]
+fn a_claimed_file_can_hold_the_linter_off_in_full() {
+    let root = project(true);
+    write(
+        root.path(),
+        "src/app.luaux",
+        "-- larvae: lint off\nlocal bad = 1\n",
+    );
+
+    let (ok, text) = run(root.path(), &["lint"]);
+
+    assert!(ok, "{text}");
+    assert!(!text.contains("markup.bad_word"), "{text}");
+}
+
+/*
+The generated schema names every worm, so its two tables close.
+
+Each table held an open `additionalProperties` beside its `properties`, to
+describe a worm that the shipped schema cannot know. A project schema knows
+them all. Taplo reads both branches for one key, so with both present every
+option of a described worm reached the completion list two times.
+*/
+#[test]
+fn the_project_schema_closes_the_tables_it_filled() {
+    let root = project(true);
+    write(root.path(), "src/app.luaux", "local x = 1\n");
+
+    let (ok, text) = run(root.path(), &["lint"]);
+    assert!(ok, "{text}");
+
+    let path = root.path().join(".larvae").join("larvae.schema.json");
+    let raw = std::fs::read_to_string(&path).expect("the schema is generated");
+    let schema: serde_json::Value = serde_json::from_str(&raw).expect("it is JSON");
+
+    for table in ["fmt", "lint_rules"] {
+        assert_eq!(
+            schema["$defs"][table]["additionalProperties"],
+            serde_json::json!(false),
+            "[{table}] must offer one branch per key"
+        );
+    }
+
+    // the worm is named in both, so closing them refuses nothing it should allow
+    assert!(
+        schema["$defs"]["lint_rules"]["properties"]["markup"].is_object(),
+        "the lints of the worm are missing"
+    );
+    assert!(
+        schema["$defs"]["fmt"]["properties"]["markup"].is_object(),
+        "the format table of the worm is missing"
+    );
+}
+
 #[test]
 fn worm_run_fmt_is_the_dev_loop() {
     let root = project(true);

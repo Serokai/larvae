@@ -32,9 +32,27 @@ pub fn format(src: &str, cfg: &FmtConfig) -> Result<String> {
         .map_err(|e| anyhow::anyhow!("{}", e.message))
         .context("cannot format a file that does not parse")?;
 
+    let ignored = crate::flags::off_ranges(src, &lexed.comments, crate::flags::Subject::Fmt);
+
+    /*
+    A file held off in full comes back byte for byte.
+
+    The general path re-emits an ignored statement from its own source, which
+    keeps that statement exact. It does not promise the same for the space
+    between two statements, and a reader who switches the formatter off for a
+    whole file means the file. So the whole-file case returns early and
+    promises the stronger thing.
+    */
+    if ignored
+        .iter()
+        .any(|&(a, b)| a == 0 && b >= src.len() as u32)
+    {
+        return Ok(src.to_string());
+    }
+
     let trivia = trivia::Trivia::new(src, &lexed.comments);
     let rebindings = rebind::plan(src, &lexed.toks, &chunk, cfg.require_binding);
-    let emitter = emit::Emitter::new(src, &lexed.toks, &trivia, cfg, rebindings);
+    let emitter = emit::Emitter::new(src, &lexed.toks, &trivia, cfg, rebindings).ignoring(ignored);
     let document = emitter.chunk(&chunk);
     let out = doc::render(&document, cfg.style());
 
@@ -55,6 +73,19 @@ stack frame. This conversion copies data, so `format` does not call these
 functions.
 */
 pub(crate) fn doc_of(src: &str, cfg: &FmtConfig) -> Result<doc::Doc<'static>> {
+    doc_of_holding(src, cfg, true)
+}
+
+/*
+The same, and `holds` says whether a marker inside the slice takes effect.
+
+A worm that sends a whole document gets its regions held by the caller, over
+the rendered text, because the layout of the markup around the Luau is the
+worm's and not larvae's. That pass covers the Luau in the region as well. So
+the caller turns this one off, and the region is written back one time rather
+than two.
+*/
+pub(crate) fn doc_of_holding(src: &str, cfg: &FmtConfig, holds: bool) -> Result<doc::Doc<'static>> {
     let lexed = lexer::lex(src)
         .map_err(|e| anyhow::anyhow!("syntax error at byte {}, {}", e.offset, e.message))?;
 
@@ -67,6 +98,22 @@ pub(crate) fn doc_of(src: &str, cfg: &FmtConfig) -> Result<doc::Doc<'static>> {
     conversion compiles here. The empty plan changes no keyword.
     */
     let emitter = emit::Emitter::new(src, &lexed.toks, &trivia, cfg, rebind::Rebindings::new());
+
+    /*
+    A `fmt off` inside the slice holds here too.
+
+    The flags are read from the comments of this slice, so they carry the
+    offsets of the slice and need no rebase. A file that a worm claims reaches
+    the formatter only through this function, so without this a marker in such
+    a file would do nothing.
+    */
+    let ignored = match holds {
+        true => crate::flags::off_ranges(src, &lexed.comments, crate::flags::Subject::Fmt),
+
+        false => Vec::new(),
+    };
+
+    let emitter = emitter.ignoring(ignored);
 
     Ok(emitter.block_body(&chunk.block).into_owned())
 }

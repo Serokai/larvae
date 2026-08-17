@@ -20,8 +20,8 @@ use crate::syntax::ast::*;
 use crate::syntax::lexer::{Tok, TokKind};
 
 use super::config::{
-    BlockNewlineGaps, CallParens, CollapseSimpleStatement, FmtConfig, QuoteStyle, RequireGrouping,
-    Semicolons,
+    BlockNewlineGaps, CallParens, CollapseSimpleStatement, FmtConfig, IfExpansion, IfPlacement,
+    IfStyle, QuoteStyle, RequireGrouping, Semicolons,
 };
 use super::doc::Doc;
 use super::trivia::{Attached, Comment, Trivia};
@@ -33,6 +33,18 @@ pub struct Emitter<'a> {
     cfg: &'a FmtConfig,
     /// The keywords that `require_binding` decided to change, by their token index
     rebindings: super::rebind::Rebindings,
+    /// Byte ranges that a `fmt off` flag holds the formatter out of
+    ignored: Vec<(u32, u32)>,
+    /*
+    The count of `if` expressions that enclose the one the emitter is on.
+
+    An `if` expression inside another one follows a rule of its own, so the
+    emitter has to know which it has. The whole emitter runs behind `&self`,
+    because a document borrows the source. A counter is the one piece of
+    state the walk carries, so it sits in a `Cell` rather than turn every
+    method into `&mut self`.
+    */
+    if_depth: std::cell::Cell<usize>,
 }
 
 impl<'a> Emitter<'a> {
@@ -49,7 +61,41 @@ impl<'a> Emitter<'a> {
             trivia,
             cfg,
             rebindings,
+            ignored: Vec::new(),
+            if_depth: std::cell::Cell::new(0),
         }
+    }
+
+    /// Holds the emitter out of these byte ranges
+    pub fn ignoring(mut self, ranges: Vec<(u32, u32)>) -> Self {
+        self.ignored = ranges;
+
+        self
+    }
+
+    /*
+    The source of a statement that a `fmt off` flag covers, or None.
+
+    The emitter writes those bytes instead of a rebuild. The first line loses
+    its indentation, because the document supplies that, and every later line
+    keeps the indentation the author gave it. The renderer treats a text with
+    newlines in it as written, so the shape of the block survives.
+    */
+    fn verbatim_stmt(&self, stmt: &Stmt) -> Option<&'a str> {
+        let (lo, hi) = self.byte_span(stmt.span());
+
+        if !crate::flags::within(&self.ignored, lo) {
+            return None;
+        }
+
+        // take whole lines, so a trailing comment on the last line comes too
+        let hi = match self.src[hi as usize..].find('\n') {
+            Some(n) => hi + n as u32,
+
+            None => self.src.len() as u32,
+        };
+
+        Some(self.src[lo as usize..hi as usize].trim_end_matches([' ', '\t']))
     }
 
     pub fn chunk(&self, chunk: &Chunk) -> Doc<'a> {
@@ -311,8 +357,7 @@ impl<'a> Emitter<'a> {
         let mut parts: Vec<Doc<'a>> = Vec::with_capacity(pieces.len() * 3 + 2);
 
         for c in &prologue {
-            parts.push(self.comment_doc(*c));
-            parts.push(Doc::Hard);
+            parts.push(self.comment_line(*c));
         }
 
         for (i, piece) in pieces.iter().enumerate() {
@@ -328,12 +373,17 @@ impl<'a> Emitter<'a> {
             }
 
             for c in &piece.leading {
-                parts.push(self.comment_doc(*c));
-                parts.push(Doc::Hard);
+                parts.push(self.comment_line(*c));
             }
 
-            parts.push(self.stmt(piece.stmt));
-            parts.push(self.terminator(piece.stmt, pieces.get(i + 1).map(|p| p.stmt)));
+            match self.verbatim_stmt(piece.stmt) {
+                Some(raw) => parts.push(Doc::text(raw)),
+
+                None => {
+                    parts.push(self.stmt(piece.stmt));
+                    parts.push(self.terminator(piece.stmt, pieces.get(i + 1).map(|p| p.stmt)));
+                }
+            }
         }
 
         if let Some(last) = pieces.last() {
@@ -350,9 +400,14 @@ impl<'a> Emitter<'a> {
                 });
             }
 
+            /*
+            The break comes before the comment here, and not after it. The
+            closer of the block follows the last comment, and the caller
+            supplies the break above that closer.
+            */
             for (i, c) in tail.leading.iter().enumerate() {
                 if i > 0 {
-                    parts.push(Doc::Hard);
+                    parts.push(self.break_after(tail.leading[i - 1]));
                 }
 
                 parts.push(self.comment_doc(*c));
@@ -447,6 +502,27 @@ impl<'a> Emitter<'a> {
         };
 
         (prologue, pieces, tail)
+    }
+
+    /// A comment on its own line, with the break that the author put below it.
+    fn comment_line(&self, c: Comment) -> Doc<'a> {
+        Doc::concat([self.comment_doc(c), self.break_after(c)])
+    }
+
+    /*
+    The break that goes below this comment.
+
+    A leading comment took a plain hard break before, so a blank line below a
+    comment was lost. The gap above the comment survived, because the piece
+    carries it. That made a comment behave as one more line of the code below
+    it, and an author who separated a note from the code got the two joined.
+    */
+    fn break_after(&self, c: Comment) -> Doc<'a> {
+        match self.trivia.blank_after(c) {
+            true => Doc::Blank,
+
+            false => Doc::Hard,
+        }
     }
 
     fn trailing_doc(&self, comment: Option<Comment>) -> Doc<'a> {
@@ -778,6 +854,24 @@ impl<'a> Emitter<'a> {
         deserves its own lines.
         */
         if values.len() == 1 {
+            /*
+            An `if` expression that opens is the one exception, and only when
+            the user asks for it.
+
+            The test is the document and not the option, because the option
+            says `next-line` for an expression that stays on one line as
+            well. A document that cannot go flat is one that `if_else`
+            settled on opening. So the break after the `=` follows the
+            expression, and the two never disagree.
+            */
+            let next_line = self.cfg.if_expression.placement == IfPlacement::NextLine
+                && matches!(values[0], Expr::IfElse { .. })
+                && list.flat_width().is_none();
+
+            if next_line {
+                return self.indented(vec![Doc::Hard, list]);
+            }
+
             return Doc::concat([Doc::text(" "), list]);
         }
 
@@ -1025,7 +1119,32 @@ impl<'a> Emitter<'a> {
             }
 
             Expr::Paren { inner, .. } => {
-                Doc::concat([Doc::text("("), self.expr(inner), Doc::text(")")])
+                let doc = self.expr(inner);
+
+                /*
+                A parenthesised `if` expression that opens takes the shape of
+                the parentheses with it.
+
+                Without this the `(` sits against the `if` and the `)` sits
+                against the last value, and the reader has to find where the
+                expression starts and stops inside a line that is already
+                broken over four of them. A table and a function body already
+                read this way.
+
+                Only an `if` that opened is treated so. One that stays on a
+                line keeps its parentheses against it, which is what every
+                other parenthesised expression does.
+                */
+                if matches!(**inner, Expr::IfElse { .. }) && doc.flat_width().is_none() {
+                    return Doc::concat([
+                        Doc::text("("),
+                        Doc::indent(Doc::concat([Doc::Hard, doc])),
+                        Doc::Hard,
+                        Doc::text(")"),
+                    ]);
+                }
+
+                Doc::concat([Doc::text("("), doc, Doc::text(")")])
             }
 
             Expr::Index { object, key, .. } => match key {
@@ -1059,22 +1178,7 @@ impl<'a> Emitter<'a> {
                 branches,
                 else_value,
                 ..
-            } => {
-                let mut parts = Vec::with_capacity(branches.len() * 4 + 2);
-
-                for (i, (cond, value)) in branches.iter().enumerate() {
-                    parts.push(Doc::text(if i == 0 { "if " } else { "elseif " }));
-                    parts.push(self.expr(cond));
-                    parts.push(Doc::text(" then "));
-                    parts.push(self.expr(value));
-                    parts.push(Doc::Line);
-                }
-
-                parts.push(Doc::text("else "));
-                parts.push(self.expr(else_value));
-
-                Doc::group(Doc::indent(Doc::concat(parts)))
-            }
+            } => self.if_else(branches, else_value),
 
             Expr::TypeAssert { expr, ty, .. } => Doc::concat([
                 self.expr(expr),
@@ -1082,6 +1186,178 @@ impl<'a> Emitter<'a> {
                 Doc::text(self.verbatim(*ty)),
             ]),
         }
+    }
+
+    /*
+    Emits `if c then a else b`, the expression and not the statement.
+
+    Two layouts exist. The flat one is what larvae always wrote, and it is
+    still the default. The open one puts each keyword at the start of a line
+    and each value below its keyword:
+
+    ```
+    if cond then
+        first
+    else
+        second
+    ```
+
+    `if_expression.expand` selects between them. The open layout uses a hard
+    break, so the choice happens here and not in the renderer. The renderer
+    decides by width alone, and it cannot know that a user asked for the open
+    layout at every width.
+    */
+    fn if_else(&self, branches: &[(Expr, Expr)], else_value: &Expr) -> Doc<'a> {
+        let cfg = &self.cfg.if_expression;
+
+        let nested = self.if_depth.get() > 0;
+        self.if_depth.set(self.if_depth.get() + 1);
+
+        /*
+        The old layout stays byte for byte where the option is off.
+
+        It indents the whole expression and breaks once, before the `else`.
+        That shape is not the shape below, so a rewrite of it would move the
+        output of every project that never asked for this option.
+        */
+        if cfg.expand == IfExpansion::Never {
+            let mut parts = Vec::with_capacity(branches.len() * 5 + 2);
+
+            for (i, (cond, value)) in branches.iter().enumerate() {
+                parts.push(Doc::text(if i == 0 { "if " } else { "elseif " }));
+                parts.push(self.expr(cond));
+                parts.push(Doc::text(" then "));
+                parts.push(self.expr(value));
+                parts.push(Doc::Line);
+            }
+
+            parts.push(Doc::text("else "));
+            parts.push(self.expr(else_value));
+
+            self.if_depth.set(self.if_depth.get() - 1);
+
+            return Doc::group(Doc::indent(Doc::concat(parts)));
+        }
+
+        /*
+        The children are emitted once, and the width comes from them.
+
+        The choice needs the flat width, and the flat width is the width of
+        the children plus the keywords around them. Measuring the children
+        alone lets the emitter build the document one time, with the break it
+        settled on. An assemble, measure, and re-assemble would cost one more
+        build for every level of nesting.
+        */
+        let parts: Vec<(Doc<'a>, Doc<'a>)> = branches
+            .iter()
+            .map(|(cond, value)| (self.expr(cond), self.expr(value)))
+            .collect();
+
+        let other = self.expr(else_value);
+
+        self.if_depth.set(self.if_depth.get() - 1);
+
+        // `if ` + cond + ` then ` + value per branch, and ` else ` + the last value
+        let mut flat = other.flat_width().map(|w| w + " else ".len());
+
+        for (i, (cond, value)) in parts.iter().enumerate() {
+            let keyword = match i {
+                0 => "if ".len(),
+
+                _ => " elseif ".len(),
+            };
+
+            flat = match (flat, cond.flat_width(), value.flat_width()) {
+                (Some(sum), Some(c), Some(v)) => Some(sum + keyword + c + " then ".len() + v),
+
+                _ => None,
+            };
+        }
+
+        /*
+        A nested expression waits for the width, whatever the mode says.
+
+        `always` at every level gives a stair of keywords for an expression
+        that reads well on one line. The width is the measure of whether the
+        inner one has earned its own lines.
+        */
+        let wide = flat.is_none_or(|w| w > cfg.width);
+        let open = match cfg.expand {
+            IfExpansion::Never => false,
+
+            IfExpansion::Always => !nested || wide,
+
+            IfExpansion::WhenLarge => wide,
+        };
+
+        // The open layout is a request, so it breaks at every width.
+        let split = || match open {
+            true => Doc::Hard,
+
+            false => Doc::Line,
+        };
+
+        let mut out: Vec<Doc<'a>> = Vec::with_capacity(parts.len() * 4 + 3);
+
+        /*
+        The two shapes break on the two sides of the keyword.
+
+        `block` ends a line after `then`, so the value sits below it. `leading`
+        ends a line before `then`, so the keyword starts the line and takes
+        its value. Flat, the two produce the same characters, because the
+        break is one space either way.
+        */
+        for (i, (cond, value)) in parts.into_iter().enumerate() {
+            let keyword = Doc::text(if i == 0 { "if " } else { "elseif " });
+
+            match self.cfg.if_expression.style {
+                IfStyle::Block => {
+                    if i > 0 {
+                        out.push(split());
+                    }
+
+                    out.push(keyword);
+                    out.push(cond);
+                    out.push(Doc::text(" then"));
+                    out.push(self.indented(vec![split(), value]));
+                }
+
+                IfStyle::Leading => {
+                    match i {
+                        0 => out.push(keyword),
+
+                        _ => out.push(self.indented(vec![split(), keyword])),
+                    }
+
+                    out.push(cond);
+                    out.push(self.indented(vec![split(), Doc::text("then "), value]));
+                }
+            }
+        }
+
+        match self.cfg.if_expression.style {
+            IfStyle::Block => {
+                out.push(split());
+                out.push(Doc::text("else"));
+                out.push(self.indented(vec![split(), other]));
+            }
+
+            IfStyle::Leading => {
+                out.push(self.indented(vec![split(), Doc::text("else "), other]));
+            }
+        }
+
+        Doc::group(Doc::concat(out))
+    }
+
+    /*
+    Wraps parts in the indent levels that `if_expression.indent` asks for.
+
+    Zero levels is a valid answer, and it means the value sits at the column
+    of its keyword.
+    */
+    fn indented(&self, parts: Vec<Doc<'a>>) -> Doc<'a> {
+        (0..self.cfg.if_expression.indent).fold(Doc::concat(parts), |doc, _| Doc::indent(doc))
     }
 
     /*
@@ -1099,22 +1375,40 @@ impl<'a> Emitter<'a> {
 
         let prec = precedence(self.one(*op));
         let mut ops: Vec<&'a str> = Vec::new();
-        let mut operands: Vec<Doc<'a>> = Vec::new();
+        let mut operands: Vec<(Doc<'a>, bool)> = Vec::new();
 
         self.flatten_binary(e, prec, &mut ops, &mut operands);
 
+        let count = ops.len();
         let mut operands = operands.into_iter();
-        let first = operands.next().expect("a chain has a left operand");
-        let mut rest = Vec::with_capacity(ops.len() * 3);
+        let (first, _) = operands.next().expect("a chain has a left operand");
+        let mut rest = Vec::with_capacity(count * 3);
+        let mut tail = Doc::Nil;
 
-        for (op, operand) in ops.into_iter().zip(operands) {
+        for (i, (op, (operand, hangs))) in ops.into_iter().zip(operands).enumerate() {
+            /*
+            The last operand hangs off the operator instead of moving below
+            it.
+
+            `a .. (if c then x else y)` with the `if` opened reads as one
+            thing that starts at the `(`. A break before the `..` would put
+            the operator on a line of its own above a block that already has
+            its own lines. A table argument hangs off a `=` for the same
+            reason.
+            */
+            if i + 1 == count && hangs {
+                tail = Doc::concat([Doc::text(" "), Doc::text(op), Doc::text(" "), operand]);
+
+                break;
+            }
+
             rest.push(Doc::Line);
             rest.push(Doc::text(op));
             rest.push(Doc::text(" "));
             rest.push(operand);
         }
 
-        Doc::group(Doc::concat([first, Doc::indent(Doc::concat(rest))]))
+        Doc::group(Doc::concat([first, Doc::indent(Doc::concat(rest)), tail]))
     }
 
     fn flatten_binary(
@@ -1122,7 +1416,7 @@ impl<'a> Emitter<'a> {
         e: &Expr,
         prec: u8,
         ops: &mut Vec<&'a str>,
-        operands: &mut Vec<Doc<'a>>,
+        operands: &mut Vec<(Doc<'a>, bool)>,
     ) {
         match e {
             Expr::Binary { op, lhs, rhs, .. } if precedence(self.one(*op)) == prec => {
@@ -1131,7 +1425,22 @@ impl<'a> Emitter<'a> {
                 self.flatten_binary(rhs, prec, ops, operands);
             }
 
-            _ => operands.push(self.expr(e)),
+            _ => {
+                let doc = self.expr(e);
+
+                /*
+                Only a parenthesised `if` that opened hangs here.
+
+                A table and a function already reach this point on a line of
+                their own, through paths that predate the `if` option, and
+                widening the rule to them would move the output of every
+                project that never asked for it.
+                */
+                let hangs = matches!(e, Expr::Paren { inner, .. } if matches!(**inner, Expr::IfElse { .. }))
+                    && doc.flat_width().is_none();
+
+                operands.push((doc, hangs));
+            }
         }
     }
 

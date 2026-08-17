@@ -4,6 +4,65 @@ Notable changes land here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow
 [semver](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- Flag comments that hold a tool off over a span of lines. `-- larvae: fmt
+  off` runs to the matching `-- larvae: fmt on`, or to the end of the file
+  when no `on` follows, so one marker at the top of a file holds the whole
+  file. `fmt off(5)` holds the marker line and five lines below it. `lint`
+  reads the same way, and a `lint` marker holds every lint where `allow(...)`
+  names the lints it holds
+- stylua's `ignore start` and `ignore end` are read as `fmt off` and `fmt on`,
+  so a project that comes from stylua keeps the markers already in its files
+- A file that a worm claims reads the markers too. The comments come from the
+  reply of the worm, because larvae does not read such a file as Luau and so
+  finds no comment in it itself
+- `format` is read as a name for the formatter beside `fmt`, in each of the
+  three forms, because an author reaches for either one
+- `[fmt] if_expression`, which lays out Luau's `if` expression. `expand`
+  takes `never`, `always`, or `when-large`; `width` gives the boundary that
+  `when-large` measures against; `style` takes `block` or `leading`;
+  `placement` selects whether the `if` stays on the line of the binding;
+  `indent` gives the levels a continuation line takes. `expand` is `never` by
+  default, and that layout is what larvae always wrote. A nested expression
+  waits for `width` in every mode, because `always` at each level gives a
+  stair of keywords for an expression that reads well on one line
+
+### Added
+
+- Differential tests against the real Luau parser. `luau-lsp` carries that
+  parser and reports a syntax error apart from a type error, so it serves as
+  an oracle. The verdicts are recorded under
+  `crates/larvae/tests/fixtures/parser`, so CI needs no Luau, and
+  `scripts/parser_oracle.sh` makes the recording and sweeps a corpus of your
+  own
+- `scripts/bench_selene.sh`, which measures the linter against selene
+
+### Fixed
+
+- A comment keeps the blank line below it. The formatter gave a leading
+  comment a plain line break, so a note that an author had separated from the
+  code below it came back joined to that code
+- Three constructs that Luau parses and larvae refused. The `\z` escape, which
+  takes the whitespace that follows it and is how a long string is written
+  over several lines. A leading `|` or `&` in a function return type,
+  `() -> | string | number`. And a variadic type holding a union,
+  `(..."hit" | "miss") -> ()`. A file using any of them was refused by every
+  command
+- The editor no longer offers one value two times. A boolean carried a type
+  and a default and no list of values, and Taplo adds the default to a list it
+  built from the type, so a boolean that defaults to false offered false two
+  times. And the `[fmt]` and `[lint.rules]` tables each held an open
+  `additionalProperties` beside their `properties`, so Taplo read both
+  branches for a worm and offered every lint of that worm two times
+- Every marker form now holds in a file that a worm claims. A worm sends the
+  layout for the whole file, so a marker held the Luau of a region and not
+  the markup around it: with `attribute_per_line` on, the attributes of an
+  element inside `fmt off` still moved. Larvae writes the source back over
+  each held region after it renders what the worm sent
+
 ## 0.2.0 - 2026-08-16
 
 ### Added

@@ -9,8 +9,8 @@ whitespace, and every comment must stay.
 */
 
 use larvae::fmt::config::{
-    CallParens, CollapseSimpleStatement, IndentType, LineEndings, QuoteStyle,
-    SpaceAfterFunctionNames,
+    CallParens, CollapseSimpleStatement, IfExpansion, IfExpression, IfPlacement, IfStyle,
+    IndentType, LineEndings, QuoteStyle, SpaceAfterFunctionNames,
 };
 use larvae::fmt::{FmtConfig, format};
 
@@ -274,6 +274,73 @@ fn a_leading_comment_keeps_its_own_line_and_its_gap() {
     let out = fmt("local a = 1\n\n-- section\nlocal b = 2\n");
 
     assert_eq!(out, "local a = 1\n\n-- section\nlocal b = 2\n");
+}
+
+/*
+A comment is a paragraph of its own, and the gap below one is the author's.
+
+The formatter used to give a leading comment a plain line break below it, so
+`-- note` and the code below it became one paragraph, whatever the author
+wrote. The gap above the comment survived, which made the loss look like a
+rule about comments and code rather than a defect.
+*/
+#[test]
+fn a_gap_below_a_comment_is_kept() {
+    assert_eq!(
+        fmt("local a = 1\n-- section\n\nlocal b = 2\n"),
+        "local a = 1\n-- section\n\nlocal b = 2\n"
+    );
+}
+
+#[test]
+fn no_gap_below_a_comment_stays_no_gap() {
+    assert_eq!(
+        fmt("local a = 1\n-- attached\nlocal b = 2\n"),
+        "local a = 1\n-- attached\nlocal b = 2\n"
+    );
+}
+
+#[test]
+fn a_gap_between_two_comments_is_kept() {
+    assert_eq!(
+        fmt("-- one\n\n-- two\nlocal a = 1\n"),
+        "-- one\n\n-- two\nlocal a = 1\n"
+    );
+}
+
+/// A directive belongs to the file, and the gap below it separates it from the code
+#[test]
+fn a_gap_below_a_directive_is_kept() {
+    assert_eq!(
+        fmt("--!strict\n\nlocal a = 1\n"),
+        "--!strict\n\nlocal a = 1\n"
+    );
+}
+
+#[test]
+fn a_gap_below_a_comment_is_kept_inside_a_block() {
+    assert_eq!(
+        fmt("if x then\n\t-- why\n\n\tfoo()\nend\n"),
+        "if x then\n\t-- why\n\n\tfoo()\nend\n"
+    );
+}
+
+/// Two comments close a block, and the gap between them is the author's too
+#[test]
+fn a_gap_between_two_comments_that_close_a_block_is_kept() {
+    assert_eq!(
+        fmt("do\n\tx()\n\t-- one\n\n\t-- two\nend\n"),
+        "do\n\tx()\n\t-- one\n\n\t-- two\nend\n"
+    );
+}
+
+/// One blank line is the separator. More than one says nothing more.
+#[test]
+fn several_gaps_below_a_comment_become_one() {
+    assert_eq!(
+        fmt("local a = 1\n-- note\n\n\n\nlocal b = 2\n"),
+        "local a = 1\n-- note\n\nlocal b = 2\n"
+    );
 }
 
 #[test]
@@ -1223,4 +1290,526 @@ fn a_chained_call_on_the_next_line_is_not_ambiguous() {
     let out = fmt("local t = {}\nlocal x = t.f(1)\n\t.g(2)\nreturn x\n");
 
     assert!(out.contains("t.f(1).g(2)"), "{out}");
+}
+
+// --- fmt off ---------------------------------------------------------------
+
+/// A file held off in full comes back byte for byte, spacing included.
+#[test]
+fn a_file_held_off_in_full_is_untouched() {
+    let src = "-- larvae: fmt off\nlocal  matrix = {\n\t1,0,0,\n\t0,1,0,\n}\n";
+
+    assert_eq!(fmt(src), src);
+}
+
+#[test]
+fn a_region_between_two_markers_is_untouched() {
+    let src = "local  a   =  1\n-- larvae: fmt off\nlocal  m = {\n\t1,0,\n\t0,1,\n}\n-- larvae: fmt on\nlocal  b   =  2\n";
+
+    assert_eq!(
+        fmt(src),
+        "local a = 1\n-- larvae: fmt off\nlocal  m = {\n\t1,0,\n\t0,1,\n}\n-- larvae: fmt on\nlocal b = 2\n"
+    );
+}
+
+#[test]
+fn a_count_holds_that_many_lines_below_the_marker() {
+    let src = "local  a  = 1\n-- larvae: fmt off(2)\nlocal  x  = 1\nlocal  y  = 2\nlocal  c  = 3\n";
+
+    assert_eq!(
+        fmt(src),
+        "local a = 1\n-- larvae: fmt off(2)\nlocal  x  = 1\nlocal  y  = 2\nlocal c = 3\n"
+    );
+}
+
+/// `format` says the same as `fmt`, because an author reaches for either one
+#[test]
+fn the_format_spelling_holds_a_region_too() {
+    let src = "local  a  = 1\n-- larvae: format off\nlocal  m = {1,0}\n-- larvae: format on\nlocal  b  = 2\n";
+
+    assert_eq!(
+        fmt(src),
+        "local a = 1\n-- larvae: format off\nlocal  m = {1,0}\n-- larvae: format on\nlocal b = 2\n"
+    );
+}
+
+/// A marker is a comment, so the gap an author leaves below one is theirs
+#[test]
+fn a_gap_below_an_on_marker_is_kept() {
+    let src = "-- larvae: format off\nlocal  m = {1,0}\n-- larvae: format on\n\nlocal b = 2\n";
+
+    assert_eq!(fmt(src), src);
+}
+
+/// A project that comes from stylua keeps the markers already in its files.
+#[test]
+fn styluas_markers_work_too() {
+    let src = "local  a  = 1\n-- stylua: ignore start\nlocal  m = {1,0,\n0,1}\n-- stylua: ignore end\nlocal  b  = 2\n";
+    let out = fmt(src);
+
+    assert!(out.contains("local  m = {1,0,\n0,1}"), "{out}");
+    assert!(out.contains("local a = 1"), "{out}");
+}
+
+/// The lines of a held region keep the indentation the author gave them.
+#[test]
+fn a_region_inside_a_block_keeps_its_own_shape() {
+    let src = "local function f()\n\t-- larvae: fmt off\n\tlocal  m = {\n\t\t1,0,\n\t}\n\t-- larvae: fmt on\nend\nreturn f\n";
+
+    assert_eq!(fmt(src), src);
+}
+
+#[test]
+fn holding_the_formatter_off_is_idempotent() {
+    let src =
+        "local  a  = 1\n-- larvae: fmt off\nlocal  m = {1,0}\n-- larvae: fmt on\nlocal  b  = 2\n";
+    let once = fmt(src);
+
+    assert_eq!(fmt(&once), once);
+}
+
+/*
+A count that larvae cannot read is an ordinary comment. Were it a flag, it
+would hold the formatter off to the end of the file and say nothing.
+*/
+#[test]
+fn a_marker_larvae_cannot_read_formats_as_usual() {
+    assert_eq!(
+        fmt("local  a  = 1\n-- larvae: fmt off(five)\nlocal  b  = 2\n"),
+        "local a = 1\n-- larvae: fmt off(five)\nlocal b = 2\n"
+    );
+}
+
+/// A lint marker is not a formatter marker.
+#[test]
+fn a_lint_marker_does_not_hold_the_formatter() {
+    assert_eq!(
+        fmt("-- larvae: lint off\nlocal  a  = 1\n"),
+        "-- larvae: lint off\nlocal a = 1\n"
+    );
+}
+
+// --- if expressions ---------------------------------------------------------
+
+fn if_cfg(expand: IfExpansion) -> FmtConfig {
+    FmtConfig {
+        if_expression: IfExpression {
+            expand,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+/// The option is off by default, so no project moves until it asks.
+#[test]
+fn an_if_expression_stays_on_one_line_by_default() {
+    assert_eq!(
+        fmt("local a = if bar then 'baz' else 'foo'"),
+        "local a = if bar then \"baz\" else \"foo\"\n"
+    );
+}
+
+#[test]
+fn always_opens_an_if_expression_at_every_width() {
+    assert_eq!(
+        fmt_with(
+            "local a = if bar then 'baz' else 'foo'",
+            if_cfg(IfExpansion::Always)
+        ),
+        "local a = if bar then\n\t\"baz\"\nelse\n\t\"foo\"\n"
+    );
+}
+
+#[test]
+fn always_opens_each_arm_of_an_elseif_chain() {
+    assert_eq!(
+        fmt_with(
+            "local a = if x then 1 elseif y then 2 else 3",
+            if_cfg(IfExpansion::Always)
+        ),
+        "local a = if x then\n\t1\nelseif y then\n\t2\nelse\n\t3\n"
+    );
+}
+
+#[test]
+fn when_large_keeps_a_short_expression_on_one_line() {
+    assert_eq!(
+        fmt_with(
+            "local a = if bar then 'baz' else 'foo'",
+            if_cfg(IfExpansion::WhenLarge)
+        ),
+        "local a = if bar then \"baz\" else \"foo\"\n"
+    );
+}
+
+#[test]
+fn when_large_opens_an_expression_over_the_width() {
+    let out = fmt_with(
+        "local a = if someCondition then 'a rather long branch value' else 'another long branch value'",
+        if_cfg(IfExpansion::WhenLarge),
+    );
+
+    assert_eq!(
+        out,
+        "local a = if someCondition then\n\t\"a rather long branch value\"\nelse\n\t\"another long branch value\"\n"
+    );
+}
+
+/// The width is the boundary, so a project can move it where it wants.
+#[test]
+fn the_width_decides_where_when_large_opens() {
+    let src = "local a = if bar then 'baz' else 'foo'";
+
+    let wide = FmtConfig {
+        if_expression: IfExpression {
+            expand: IfExpansion::WhenLarge,
+            width: 4,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    assert!(fmt_with(src, wide).contains("if bar then\n"));
+}
+
+/*
+A nested expression waits for the width, whatever the mode says.
+
+`always` at every level gives a stair of keywords for an expression that
+reads well on one line.
+*/
+#[test]
+fn a_short_nested_expression_stays_on_one_line_under_always() {
+    assert_eq!(
+        fmt_with(
+            "local a = if x then (if y then 1 else 2) else 3",
+            if_cfg(IfExpansion::Always)
+        ),
+        "local a = if x then\n\t(if y then 1 else 2)\nelse\n\t3\n"
+    );
+}
+
+#[test]
+fn a_nested_expression_over_the_width_opens_as_well() {
+    let out = fmt_with(
+        "local a = if x then (if someLongCondition then 'a long inner branch' else 'another long inner') else 3",
+        if_cfg(IfExpansion::Always),
+    );
+
+    // the parentheses take their own lines, so the reader sees where it starts
+    assert!(
+        out.contains("\t(\n\t\tif someLongCondition then\n"),
+        "{out}"
+    );
+    assert!(out.contains("\t\t\t\"a long inner branch\"\n"), "{out}");
+    assert!(out.contains("\n\t)\n"), "{out}");
+}
+
+/// A small width reaches the inner expression too.
+#[test]
+fn the_width_reaches_a_nested_expression() {
+    let cfg = FmtConfig {
+        if_expression: IfExpression {
+            expand: IfExpansion::Always,
+            width: 10,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let out = fmt_with("local a = if x then (if y then 1 else 2) else 3", cfg);
+
+    assert!(out.contains("(\n\t\tif y then\n"), "{out}");
+}
+
+#[test]
+fn next_line_starts_the_if_below_the_equals() {
+    let cfg = FmtConfig {
+        if_expression: IfExpression {
+            expand: IfExpansion::Always,
+            placement: IfPlacement::NextLine,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    assert_eq!(
+        fmt_with("local a = if bar then 'baz' else 'foo'", cfg),
+        "local a =\n\tif bar then\n\t\t\"baz\"\n\telse\n\t\t\"foo\"\n"
+    );
+}
+
+/// `next-line` names a layout for an opened expression, not for every one.
+#[test]
+fn next_line_leaves_an_expression_that_stays_flat_where_it_is() {
+    let cfg = FmtConfig {
+        if_expression: IfExpression {
+            expand: IfExpansion::WhenLarge,
+            placement: IfPlacement::NextLine,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    assert_eq!(
+        fmt_with("local a = if bar then 'baz' else 'foo'", cfg),
+        "local a = if bar then \"baz\" else \"foo\"\n"
+    );
+}
+
+#[test]
+fn the_indent_levels_are_the_projects_to_choose() {
+    let cfg = |indent| FmtConfig {
+        if_expression: IfExpression {
+            expand: IfExpansion::Always,
+            indent,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let src = "local a = if bar then 'baz' else 'foo'";
+
+    assert_eq!(
+        fmt_with(src, cfg(2)),
+        "local a = if bar then\n\t\t\"baz\"\nelse\n\t\t\"foo\"\n"
+    );
+
+    // Zero levels puts the value at the column of its keyword.
+    assert_eq!(
+        fmt_with(src, cfg(0)),
+        "local a = if bar then\n\"baz\"\nelse\n\"foo\"\n"
+    );
+}
+
+fn leading(expand: IfExpansion) -> FmtConfig {
+    FmtConfig {
+        if_expression: IfExpression {
+            expand,
+            style: IfStyle::Leading,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+/// The keyword starts the line and takes its value.
+#[test]
+fn the_leading_style_puts_the_keyword_first() {
+    assert_eq!(
+        fmt_with(
+            "local a = if bar then 'baz' else 'foo'",
+            leading(IfExpansion::Always)
+        ),
+        "local a = if bar\n\tthen \"baz\"\n\telse \"foo\"\n"
+    );
+}
+
+#[test]
+fn the_leading_style_gives_each_clause_of_a_chain_a_line() {
+    assert_eq!(
+        fmt_with(
+            "local a = if x then 1 elseif y then 2 else 3",
+            leading(IfExpansion::Always)
+        ),
+        "local a = if x\n\tthen 1\n\telseif y\n\tthen 2\n\telse 3\n"
+    );
+}
+
+/// Flat, the two styles write the same characters.
+#[test]
+fn the_leading_style_is_the_same_on_one_line() {
+    assert_eq!(
+        fmt_with(
+            "local a = if bar then 'baz' else 'foo'",
+            leading(IfExpansion::WhenLarge)
+        ),
+        "local a = if bar then \"baz\" else \"foo\"\n"
+    );
+}
+
+#[test]
+fn the_leading_style_takes_next_line_too() {
+    let cfg = FmtConfig {
+        if_expression: IfExpression {
+            expand: IfExpansion::Always,
+            style: IfStyle::Leading,
+            placement: IfPlacement::NextLine,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    assert_eq!(
+        fmt_with("local a = if bar then 'baz' else 'foo'", cfg),
+        "local a =\n\tif bar\n\t\tthen \"baz\"\n\t\telse \"foo\"\n"
+    );
+}
+
+fn next_line(width: usize) -> FmtConfig {
+    FmtConfig {
+        column_width: width,
+        indent_type: IndentType::Spaces,
+        indent_width: 4,
+        if_expression: IfExpression {
+            expand: IfExpansion::Always,
+            style: IfStyle::Block,
+            placement: IfPlacement::NextLine,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+/*
+A real case, from a terminal UI that builds a line out of colour codes.
+
+The nested expression is an operand of `..` and it sits in parentheses. Two
+rules meet here. The parentheses take their own lines, so the reader sees
+where the inner expression starts and stops. And the `..` stays on the line
+above rather than moving below, because the operand it joins already has
+lines of its own.
+*/
+#[test]
+fn a_parenthesised_nested_expression_hangs_off_the_operator() {
+    let src = concat!(
+        "local option_line =\n",
+        "    if option_index == selected then\n",
+        "        `{\" \" .. colors.bold.green(\">\")} {index_for_display} {colors.style.underline(option)}` .. (\n",
+        "            if submit_on_click then\n",
+        "                string.rep(\" \", 4) .. GREEN_BACKGROUND_WITH_WHITE_TEXT .. \" Click again to confirm \" .. colors.codes.RESET\n",
+        "            else\n",
+        "                \"\"\n",
+        "        )\n",
+        "    else\n",
+        "        `   {index_for_display} {option}`\n",
+    );
+
+    // 140 columns, because the inner concat runs to 122 and a narrower
+    // budget would break it and say nothing about the shape under test
+    assert_eq!(fmt_with(src, next_line(140)), src);
+}
+
+/// The same shape holds when the width forces the inner chain to break.
+#[test]
+fn the_parentheses_keep_their_lines_when_the_inner_chain_breaks() {
+    let src = concat!(
+        "local option_line =\n",
+        "    if selected then\n",
+        "        `a` .. (\n",
+        "            if submit then\n",
+        "                string.rep(\" \", 4) .. GREEN_BACKGROUND .. \" Click again to confirm \" .. colors.codes.RESET\n",
+        "            else\n",
+        "                \"\"\n",
+        "        )\n",
+        "    else\n",
+        "        `b`\n",
+    );
+
+    let out = fmt_with(src, next_line(80));
+
+    assert!(
+        out.contains("`a` .. (\n"),
+        "the operator stays on the line: {out}"
+    );
+    assert!(
+        out.contains("\n        )\n"),
+        "the closer takes its own line: {out}"
+    );
+    assert!(
+        out.contains("string.rep(\" \", 4)\n"),
+        "the inner chain breaks at this width: {out}"
+    );
+    assert_eq!(fmt_with(&out, next_line(80)), out, "and it is stable");
+}
+
+/// An `elseif` arm reads the same way as the first one.
+#[test]
+fn an_elseif_chain_opens_below_the_equals() {
+    let src = concat!(
+        "local scroller_message =\n",
+        "    if current_size.x > 60 then\n",
+        "        `Scroll up or down to see more options ({options_window.x}-{options_window.y} of {#options} visible)`\n",
+        "    elseif current_size.x > 20 then\n",
+        "        `({options_window.x}-{options_window.y}/{#options} visible)`\n",
+        "    else\n",
+        "        \"pls widen\"\n",
+    );
+
+    assert_eq!(fmt_with(src, next_line(120)), src);
+}
+
+/// A parenthesised expression that stays on one line keeps its parentheses against it.
+#[test]
+fn parentheses_that_did_not_open_are_left_alone() {
+    assert_eq!(
+        fmt_with(
+            "local a = if x then (if y then 1 else 2) else 3",
+            if_cfg(IfExpansion::Always)
+        ),
+        "local a = if x then\n\t(if y then 1 else 2)\nelse\n\t3\n"
+    );
+}
+
+/// An opened expression must still reparse and must still be stable.
+#[test]
+fn every_if_layout_is_idempotent_and_parses() {
+    let sources = [
+        "local a = if bar then 'baz' else 'foo'",
+        "local a = if x then 1 elseif y then 2 else 3",
+        "return if x then 1 else 2",
+        "f(if x then 1 else 2)",
+        "local t = { a = if x then 1 else 2, b = 3 }",
+        "local a = if x then (if y then 1 else 2) else 3",
+        "local a = (if x then 1 else 2) + 5",
+        "x = if x then 1 else 2",
+    ];
+
+    let configs = [
+        if_cfg(IfExpansion::Never),
+        if_cfg(IfExpansion::Always),
+        if_cfg(IfExpansion::WhenLarge),
+        FmtConfig {
+            if_expression: IfExpression {
+                expand: IfExpansion::Always,
+                placement: IfPlacement::NextLine,
+                style: IfStyle::Block,
+                width: 5,
+                indent: 2,
+            },
+            ..Default::default()
+        },
+        leading(IfExpansion::Always),
+        leading(IfExpansion::WhenLarge),
+        FmtConfig {
+            if_expression: IfExpression {
+                expand: IfExpansion::Always,
+                placement: IfPlacement::NextLine,
+                style: IfStyle::Leading,
+                width: 5,
+                indent: 2,
+            },
+            ..Default::default()
+        },
+    ];
+
+    for src in sources {
+        for cfg in &configs {
+            let once = fmt_with(src, cfg.clone());
+            let twice = fmt_with(&once, cfg.clone());
+
+            assert_eq!(once, twice, "unstable for {src:?}");
+
+            let lexed = larvae::syntax::lexer::lex(&once)
+                .unwrap_or_else(|e| panic!("{src:?} gave unlexable output, {}", e.message));
+
+            larvae::syntax::parser::parse(&once, &lexed.toks)
+                .unwrap_or_else(|e| panic!("{src:?} gave unparsable output, {}", e.message));
+
+            for line in once.lines() {
+                assert_eq!(line, line.trim_end(), "trailing whitespace from {src:?}");
+            }
+        }
+    }
 }
