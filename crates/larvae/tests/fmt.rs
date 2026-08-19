@@ -2202,6 +2202,72 @@ fn the_indent_levels_of_a_call_are_the_projects_to_choose() {
     assert_eq!(fmt_with("f(a)", cfg), "f(\n\t\ta\n)\n");
 }
 
+/*
+`never` and `magic_trailing_comma` govern different things, so they agree.
+
+`never` holds the argument list on one line. The trailing comma holds the
+table open. Neither one asks the other for permission, and the result is the
+table open inside a list that stayed flat.
+*/
+#[test]
+fn never_and_a_magic_trailing_comma_do_not_fight() {
+    let cfg = FmtConfig {
+        function_call: FunctionCall {
+            expand: ListExpansion::Never,
+            style: CallStyle::OnePerLine,
+            indent: 1,
+        },
+        magic_trailing_comma: true,
+        ..Default::default()
+    };
+
+    assert_eq!(
+        fmt_with("f(a, b, { x = 1, })", cfg.clone()),
+        "f(a, b, {\n\tx = 1,\n})\n"
+    );
+
+    /*
+    A table that is not the last argument opens where it stands, and the
+    arguments after it carry on from the closing brace. This is the shape the
+    option asks for: the list does not break, so there is nowhere else for
+    them to go.
+    */
+    assert_eq!(
+        fmt_with("f(a, { x = 1, }, b)", cfg),
+        "f(a, {\n\tx = 1,\n}, b)\n"
+    );
+}
+
+/*
+Where the table is the last argument, `never` writes what `hug-last` writes.
+
+The two reach it by different routes, and they part company as soon as the
+table is not last: `hug-last` has no block at the end to hold the shape, so it
+opens one per line, while `never` keeps the list flat whatever sits where.
+*/
+#[test]
+fn never_and_hug_last_agree_on_a_trailing_table_and_not_on_a_middle_one() {
+    let never = FmtConfig {
+        function_call: FunctionCall {
+            expand: ListExpansion::Never,
+            style: CallStyle::OnePerLine,
+            indent: 1,
+        },
+        ..Default::default()
+    };
+
+    let hug = calls(ListExpansion::WhenNeeded, CallStyle::HugLast);
+
+    let trailing = "f(a, b, { x = 1, })";
+    assert_eq!(
+        fmt_with(trailing, never.clone()),
+        fmt_with(trailing, hug.clone())
+    );
+
+    let middle = "f(a, { x = 1, }, b)";
+    assert_ne!(fmt_with(middle, never), fmt_with(middle, hug));
+}
+
 /// Every layout must reparse and must be stable.
 #[test]
 fn every_list_layout_is_idempotent_and_parses() {
