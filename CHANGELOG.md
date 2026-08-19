@@ -6,6 +6,39 @@ Notable changes land here. Format follows
 
 ## Unreleased
 
+### Added
+
+- A code action for `unused_variable` and `unused_function`: prefix the name
+  with an underscore, which is the fix those lints already print in their
+  help. It renames the declaration and every write of the name, because
+  prefixing the declaration alone would leave an assignment pointing at a name
+  nothing declares, which is a global and a worse bug than the warning
+
+### Fixed
+
+- A global `function f() end` that no line reads now reports
+  `unused_function`. It is dead code, a global belongs to the script that runs
+  it, and both selene and the Luau compiler report it. Larvae reported nothing
+  once the `unscoped_variables` fix below stopped it reporting the wrong thing
+- `function f() end` no longer reports `unscoped_variables`. The statement
+  creates a global the same way `f = 1` does, and the two do not read the
+  same way: neither selene nor the Luau compiler reports the declaration, and
+  a Roblox script defines its callbacks with it. On a 400 file corpus this
+  removed 10 of 29 reports. The name a global function declares is still
+  defined for the file, so `undefined_variable` stays quiet where it is called
+
+### Changed
+
+- An unused `local function` reports `unused_function` and not
+  `unused_variable`. The Luau compiler separates the two, and it separates
+  them by the declaring form and not the value, so `local f = function() end`
+  is still `unused_variable`. Each name carries its own level, so a project
+  that keeps unused helpers while still wanting unused locals reported can now
+  say so. Both read `[lint.options.unused_variable]`. On the same corpus, 44
+  of 206 reports moved to the new name and none were lost
+
+## Unreleased
+
 ### Fixed
 
 - A native worm loads on Windows. A worm is built one time and released for

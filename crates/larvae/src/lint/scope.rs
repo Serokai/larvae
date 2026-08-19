@@ -94,6 +94,24 @@ pub struct Names<'a> {
     undefined_set: std::collections::HashSet<u32>,
     /// The token indexes of writes that create a global and do not set a local.
     pub global_writes: Vec<u32>,
+    /*
+    The global writes that a `function f()` statement made.
+
+    They stay in `global_writes`, because the file still defines those names
+    and `undefined_variable` reads that list to know it. They are separate
+    here because `unscoped_variables` must not report them: neither selene nor
+    the Luau compiler calls a global function declaration an unscoped
+    variable, and a codebase of Roblox scripts is written that way.
+    */
+    pub global_functions: std::collections::HashSet<u32>,
+    /*
+    The names of file defined globals that the file also reads.
+
+    A global is not a binding, so it collects no reads while the walk runs.
+    `unused_function` needs them: a global `function f() end` that nothing
+    calls is dead code, and the Luau compiler reports it.
+    */
+    pub global_reads: std::collections::HashSet<&'a str>,
     /// The binding index for each declaration token, for a lint that holds a token.
     pub by_token: HashMap<u32, usize>,
     /// The binding index for each read token, so a call site can find its callee.
@@ -127,6 +145,18 @@ pub fn resolve<'a>(src: &'a str, toks: &'a [Tok], chunk: &'a Chunk) -> Names<'a>
         .global_writes
         .iter()
         .map(|&t| toks[t as usize].text(src))
+        .collect();
+
+    /*
+    A read of one of those names is in `undefined` right now, and the retain
+    below is about to drop it. So the names are taken first.
+    */
+    binder.out.global_reads = binder
+        .out
+        .undefined
+        .iter()
+        .map(|&t| toks[t as usize].text(src))
+        .filter(|name| defined.contains(name))
         .collect();
 
     if !defined.is_empty() {
@@ -232,6 +262,25 @@ impl<'a> Binder<'a> {
             Some(i) => self.out.bindings[i].writes.push(span.start),
 
             None => self.out.global_writes.push(span.start),
+        }
+    }
+
+    /*
+    Record the name of a `function f()` statement.
+
+    The name becomes a global exactly as a bare assignment does, so the write
+    goes through the same path. What differs is how it reads: an author who
+    writes `function f()` said what they meant, where `f = 1` is the form that
+    loses a `local` by accident. So the token is remembered, and
+    `unscoped_variables` passes over it.
+    */
+    fn write_function(&mut self, span: TokSpan) {
+        let before = self.out.global_writes.len();
+
+        self.write(span);
+
+        if self.out.global_writes.len() > before {
+            self.out.global_functions.insert(span.start);
         }
     }
 
@@ -364,7 +413,7 @@ impl<'a> Binder<'a> {
             Stmt::Function(n) => {
                 if let Some(first) = n.path.first() {
                     if n.path.len() == 1 && !n.is_method {
-                        self.write(*first);
+                        self.write_function(*first);
                     } else {
                         self.read(*first);
                     }
