@@ -4,6 +4,21 @@ Notable changes land here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow
 [semver](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- A native worm loads on Windows. A worm is built one time and released for
+  every platform, so its manifest names `luaux-worm` while the Windows zip
+  holds `luaux-worm.exe`. Larvae knew that rule in the place that runs a worm
+  and not in the two places that read its bytes, so loading stopped at
+  "The system cannot find the file specified" before the rule ever ran. Every
+  reader now resolves the entry through one function
+- A worm installed from cargo keeps the `.exe` that cargo built. It was copied
+  to the bare name the manifest gives, which left Windows a file it does not
+  run, and it disagreed with the release channel, which ships the extension.
+  The write side and the read side now spell the file the same way
+
 ## 0.4.0 - 2026-08-18
 
 ### Fixed

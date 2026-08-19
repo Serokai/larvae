@@ -141,6 +141,51 @@ fn project(worms: bool) -> tempfile::TempDir {
     root
 }
 
+/*
+The layout a Windows release leaves behind, end to end.
+
+A worm is built once and released for every platform, so its manifest names
+`worm.py` while the Windows zip holds `worm.py.exe`. Larvae read the name as
+written and failed at the read, before the resolution that knows about `.exe`
+ever ran, so the whole toolchain stopped with "The system cannot find the file
+specified".
+
+The case is built here rather than left to Windows CI. The resolution asks
+nothing about the platform, so this runs on every machine that runs the tests,
+which is what the defect needed and did not have.
+*/
+#[test]
+fn a_worm_whose_artifact_carries_exe_still_loads() {
+    let root = tempfile::tempdir().unwrap();
+
+    write(
+        root.path(),
+        "larvae.toml",
+        "[process]\ninput = \"src\"\n\n[worms.markup]\npath = \"mywormdir\"\n",
+    );
+
+    install_worm(root.path());
+
+    // what the Windows zip holds: the entry with the extension the platform needs
+    let dir = root.path().join("mywormdir");
+    std::fs::rename(dir.join("worm.py"), dir.join("worm.py.exe")).unwrap();
+    assert!(
+        !dir.join("worm.py").exists(),
+        "the bare name has to be gone"
+    );
+
+    write(root.path(), "src/app.luaux", "local  x   =    1\n");
+
+    let (ok, text) = run(root.path(), &["fmt"]);
+
+    assert!(ok, "the worm has to load from the .exe: {text}");
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("src/app.luaux")).unwrap(),
+        "local x = 1\n",
+        "and it has to format the file it claims"
+    );
+}
+
 #[test]
 fn fmt_formats_a_claimed_file_through_its_worm() {
     let root = project(true);

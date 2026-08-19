@@ -293,7 +293,7 @@ pub fn adopt(bin: &Path, dir: &Path, name: &str) -> Result<PathBuf> {
         )
     })?;
 
-    let entry = dir.join(&manifest.entry);
+    let entry = adopted_entry(dir, &manifest.entry, binary);
 
     if let Some(parent) = entry.parent() {
         std::fs::create_dir_all(parent).ok();
@@ -305,6 +305,33 @@ pub fn adopt(bin: &Path, dir: &Path, name: &str) -> Result<PathBuf> {
     make_runnable(dir)?;
 
     Ok(dir.to_path_buf())
+}
+
+/*
+Where the binary of a cargo built worm goes.
+
+Cargo names its output for the platform, `demo-worm.exe` on Windows, and a
+manifest is written one time for every platform without an extension. Copying
+to the bare name there leaves Windows a file it does not run, so the `.exe` of
+the built binary carries over when the manifest names no extension of its own.
+
+This is the write side of the rule that [`super::entry_path`] reads. The two
+have to agree: a release zip ships `demo-worm.exe` and cargo builds
+`demo-worm.exe`, so the file on disk is spelled the same way whichever channel
+put it there.
+*/
+fn adopted_entry(dir: &Path, entry: &str, built: &Path) -> PathBuf {
+    let named = dir.join(entry);
+
+    let carries_exe = built
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"));
+
+    match named.extension().is_none() && carries_exe {
+        true => named.with_extension("exe"),
+
+        false => named,
+    }
 }
 
 /*
@@ -367,7 +394,7 @@ pub fn make_runnable(dir: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let entry = dir.join(&manifest.entry);
+    let entry = super::entry_path(dir, &manifest.entry);
     let mut mode = std::fs::metadata(&entry)?.permissions();
 
     mode.set_mode(mode.mode() | 0o755);
@@ -561,5 +588,64 @@ mod tests {
 
         assert!(err.to_string().contains("escapes"), "{err}");
         assert!(!dir.path().parent().unwrap().join("escaped.txt").exists());
+    }
+}
+
+#[cfg(test)]
+mod adopted_entry_tests {
+    use super::*;
+
+    /*
+    Cargo builds `demo-worm.exe` on Windows and the manifest says `demo-worm`.
+
+    The bare name there leaves Windows a file it does not run, and it also
+    disagrees with the release channel, which ships the `.exe` inside its zip.
+    Both channels have to put the same spelling on disk, because one reader
+    looks for it.
+    */
+    #[test]
+    fn a_windows_build_keeps_its_extension() {
+        let dir = Path::new("/worms/demo");
+        let built = Path::new("/build/bin/demo-worm.exe");
+
+        assert_eq!(
+            adopted_entry(dir, "demo-worm", built),
+            dir.join("demo-worm.exe")
+        );
+    }
+
+    #[test]
+    fn a_unix_build_stays_bare() {
+        let dir = Path::new("/worms/demo");
+        let built = Path::new("/build/bin/demo-worm");
+
+        assert_eq!(
+            adopted_entry(dir, "demo-worm", built),
+            dir.join("demo-worm")
+        );
+    }
+
+    /// A manifest that names an extension already decides for itself.
+    #[test]
+    fn a_named_extension_wins() {
+        let dir = Path::new("/worms/demo");
+        let built = Path::new("/build/bin/demo-worm.exe");
+
+        assert_eq!(
+            adopted_entry(dir, "bin/demo.bin", built),
+            dir.join("bin/demo.bin")
+        );
+    }
+
+    /// The reader looks for `.exe`, so no other extension may carry over.
+    #[test]
+    fn only_exe_carries_over() {
+        let dir = Path::new("/worms/demo");
+        let built = Path::new("/build/bin/demo-worm.wasm");
+
+        assert_eq!(
+            adopted_entry(dir, "demo-worm", built),
+            dir.join("demo-worm")
+        );
     }
 }
