@@ -8,6 +8,13 @@ Notable changes land here. Format follows
 
 ### Added
 
+- A worm can offer code actions and supply Luau type definitions, through the
+  two LSP paths, in all three forms. A native worm answers the `actions` and
+  `definitions` ops, a wasm worm exports `larvae_actions` and
+  `larvae_definitions`, and a Luau worm puts `actions` and `definitions` on
+  its `frontend` table. All three are optional: a worm with nothing to offer
+  answers with nothing and not an error, because the editor asks on a
+  keystroke
 - `larvae worm add <spec>` writes a worm into `[worms]`. It takes a short name
   larvae knows, `luaux`, or `owner/repo`, either with `@version`. `--cargo`
   takes a crate instead. It writes the config and stops, because an edit is
@@ -34,6 +41,15 @@ Notable changes land here. Format follows
 
 ### Fixed
 
+- A file a worm claims can be required. `require("@app/widget")` where the
+  project holds `widget.luaux` found no module and warned about a require that
+  is correct, because the resolver looked only for `.luau` and `.lua`. A
+  claimed file is a module: the pipeline turns it into Luau in the output, so
+  the require resolves at runtime. A claimed file beside a `.luau` of the same
+  name is ambiguous, as two `.luau` files would be
+- No command downloads a worm any more. `larvae process` still did, and it
+  passed the version through unresolved, so a worm pinned at `^` asked GitHub
+  for a release tagged `v^`
 - `larvae worm remove` no longer fails with "Directory not empty". NTFS
   through FUSE reports a directory as not empty right after its last file was
   unlinked, so the tree comes apart from the bottom and the last step retries
