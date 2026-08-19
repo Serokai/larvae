@@ -9,8 +9,9 @@ whitespace, and every comment must stay.
 */
 
 use larvae::fmt::config::{
-    CallParens, CollapseSimpleStatement, IfExpansion, IfExpression, IfPlacement, IfStyle,
-    IndentType, LineEndings, QuoteStyle, SpaceAfterFunctionNames, TableTypes, TypeSeparator,
+    CallParens, CallStyle, CollapseSimpleStatement, FunctionCall, FunctionDeclaration, IfExpansion,
+    IfExpression, IfPlacement, IfStyle, IndentType, LineEndings, ListExpansion, QuoteStyle,
+    SpaceAfterFunctionNames, TableTypes, TypeSeparator,
 };
 use larvae::fmt::{FmtConfig, format};
 
@@ -2038,5 +2039,205 @@ fn export_by_value_prints_as_written() {
         "export function init()\nend\n",
     ] {
         assert_eq!(fmt(src), src);
+    }
+}
+
+// --- function calls and declarations ----------------------------------------
+
+fn calls(expand: ListExpansion, style: CallStyle) -> FmtConfig {
+    FmtConfig {
+        function_call: FunctionCall {
+            expand,
+            style,
+            indent: 1,
+        },
+        ..Default::default()
+    }
+}
+
+fn decls(expand: ListExpansion) -> FmtConfig {
+    FmtConfig {
+        function_declaration: FunctionDeclaration { expand, indent: 1 },
+        ..Default::default()
+    }
+}
+
+const HUG_SOURCE: &str = "Colors:Apply(frame, \"Rarity\", rarity, { Children = { stroke, } })";
+
+/// The options are off by default, so no project moves until it asks.
+#[test]
+fn a_call_keeps_its_layout_by_default() {
+    assert_eq!(fmt("f(a, b, c)"), "f(a, b, c)\n");
+    assert_eq!(fmt("function f(a, b) end"), "function f(a, b)\nend\n");
+}
+
+/*
+The last argument holds the shape, and the ones before it stay put.
+
+A trailing comma inside the table keeps it open, and an open table opens the
+call around it. One-per-line answers that by giving every argument a line.
+hug-last answers it by leaving them where they are.
+*/
+#[test]
+fn hug_last_keeps_the_arguments_on_the_line_of_the_call() {
+    let out = fmt_with(
+        HUG_SOURCE,
+        calls(ListExpansion::WhenNeeded, CallStyle::HugLast),
+    );
+
+    assert_eq!(
+        out,
+        "Colors:Apply(frame, \"Rarity\", rarity, {\n\tChildren = {\n\t\tstroke,\n\t},\n})\n"
+    );
+}
+
+#[test]
+fn one_per_line_gives_every_argument_a_line() {
+    let out = fmt_with(
+        HUG_SOURCE,
+        calls(ListExpansion::WhenNeeded, CallStyle::OnePerLine),
+    );
+
+    assert!(out.starts_with("Colors:Apply(\n\tframe,\n"), "{out}");
+}
+
+/*
+Only a value that reads as a block earns the style.
+
+A call of plain arguments has nothing there to hold the shape, so hugging the
+last one would leave a list that runs off the right with no block to show for
+it.
+*/
+#[test]
+fn hug_last_falls_back_where_the_last_argument_is_not_a_block() {
+    let src = "someFunction(argumentNumberOne, argumentNumberTwo, argumentNumberThree, argumentNumberFour, argumentNumberFive, argumentSix)";
+    let out = fmt_with(src, calls(ListExpansion::WhenNeeded, CallStyle::HugLast));
+
+    assert!(out.contains("(\n\targumentNumberOne,\n"), "{out}");
+}
+
+#[test]
+fn always_opens_a_call_at_every_width() {
+    assert_eq!(
+        fmt_with(
+            "f(a, b)",
+            calls(ListExpansion::Always, CallStyle::OnePerLine)
+        ),
+        "f(\n\ta,\n\tb\n)\n"
+    );
+}
+
+/// `always` decides the list, so there is nothing left for a style to hug.
+#[test]
+fn always_wins_over_hug_last() {
+    let out = fmt_with(HUG_SOURCE, calls(ListExpansion::Always, CallStyle::HugLast));
+
+    assert!(out.starts_with("Colors:Apply(\n\tframe,\n"), "{out}");
+}
+
+/// `never` holds the list on one line, whatever the width says.
+#[test]
+fn never_keeps_a_long_call_on_one_line() {
+    let src = "someFunction(argumentNumberOne, argumentNumberTwo, argumentNumberThree, argumentNumberFour, argumentNumberFive, argumentSix)";
+    let out = fmt_with(src, calls(ListExpansion::Never, CallStyle::OnePerLine));
+
+    assert_eq!(out.lines().count(), 1, "{out}");
+    assert!(
+        out.len() > 120,
+        "the line is meant to run past the width: {out}"
+    );
+}
+
+/// A value inside a list that never opens can still open on its own.
+#[test]
+fn never_still_opens_a_table_inside_the_list() {
+    let out = fmt_with(
+        HUG_SOURCE,
+        calls(ListExpansion::Never, CallStyle::OnePerLine),
+    );
+
+    assert!(out.contains("{\n\tChildren"), "{out}");
+    assert!(
+        out.starts_with("Colors:Apply(frame,"),
+        "the list stayed flat: {out}"
+    );
+}
+
+#[test]
+fn a_declaration_opens_when_it_is_told_to() {
+    let out = fmt_with(
+        "function Component(t: { foo: number }, t1: number, t2: string): number\n\treturn 2\nend",
+        decls(ListExpansion::Always),
+    );
+
+    assert_eq!(
+        out,
+        "function Component(\n\tt: { foo: number },\n\tt1: number,\n\tt2: string\n): number\n\treturn 2\nend\n"
+    );
+}
+
+/// The two tables are separate, so one does not move the other.
+#[test]
+fn declarations_and_calls_are_decided_apart() {
+    let out = fmt_with(
+        "f(a, b)\nfunction g(c, d) end\n",
+        decls(ListExpansion::Always),
+    );
+
+    assert!(out.starts_with("f(a, b)\n"), "the call is untouched: {out}");
+    assert!(out.contains("function g(\n\tc,\n\td\n)"), "{out}");
+}
+
+#[test]
+fn the_indent_levels_of_a_call_are_the_projects_to_choose() {
+    let cfg = FmtConfig {
+        function_call: FunctionCall {
+            expand: ListExpansion::Always,
+            style: CallStyle::OnePerLine,
+            indent: 2,
+        },
+        ..Default::default()
+    };
+
+    assert_eq!(fmt_with("f(a)", cfg), "f(\n\t\ta\n)\n");
+}
+
+/// Every layout must reparse and must be stable.
+#[test]
+fn every_list_layout_is_idempotent_and_parses() {
+    let sources = [
+        HUG_SOURCE,
+        "f(a, b, c)",
+        "f()",
+        "f(function() return 1 end)",
+        "function g(a: number, b: string): boolean\n\treturn true\nend",
+        "obj:method(1, { x = 2 })",
+    ];
+
+    let configs = [
+        calls(ListExpansion::WhenNeeded, CallStyle::HugLast),
+        calls(ListExpansion::Always, CallStyle::OnePerLine),
+        calls(ListExpansion::Never, CallStyle::OnePerLine),
+        decls(ListExpansion::Always),
+        decls(ListExpansion::Never),
+    ];
+
+    for src in sources {
+        for cfg in &configs {
+            let once = fmt_with(src, cfg.clone());
+            let twice = fmt_with(&once, cfg.clone());
+
+            assert_eq!(once, twice, "unstable for {src:?}");
+
+            let lexed = larvae::syntax::lexer::lex(&once)
+                .unwrap_or_else(|e| panic!("{src:?} gave unlexable output, {}", e.message));
+
+            larvae::syntax::parser::parse(&once, &lexed.toks)
+                .unwrap_or_else(|e| panic!("{src:?} gave unparsable output, {}", e.message));
+
+            for line in once.lines() {
+                assert_eq!(line, line.trim_end(), "trailing whitespace from {src:?}");
+            }
+        }
     }
 }

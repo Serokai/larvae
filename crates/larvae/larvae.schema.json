@@ -979,6 +979,58 @@
             }
           }
         },
+        "function_call": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "How the argument list of a call is laid out.\n\n[function_call \u2192](https://larvae-luau.github.io/docs/reference/formatting#function-call)",
+          "properties": {
+            "expand": {
+              "enum": [
+                "when-needed",
+                "always",
+                "never"
+              ],
+              "default": "when-needed",
+              "description": "When the argument list is opened over several lines. \"when-needed\" opens it only where the line does not fit, which is what larvae has always done. \"always\" opens every one. \"never\" holds it on one line, where a value inside it can still open and the line can run past \"column_width\".\n\n[function_call.expand \u2192](https://larvae-luau.github.io/docs/reference/formatting#function-call-expand)"
+            },
+            "style": {
+              "enum": [
+                "one-per-line",
+                "hug-last"
+              ],
+              "default": "one-per-line",
+              "description": "The shape of an opened argument list. \"one-per-line\" gives every argument a line of its own. \"hug-last\" keeps the arguments on the line of the call and opens the last one, which applies where that argument is a table, a function, or a string carrying its own newlines. The arguments before it do not break, so a long list of them runs past \"column_width\".\n\n[function_call.style \u2192](https://larvae-luau.github.io/docs/reference/formatting#function-call-style)"
+            },
+            "indent": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 1,
+              "description": "The indent levels an opened argument takes. 0 puts it at the column of the bracket.\n\n[function_call.indent \u2192](https://larvae-luau.github.io/docs/reference/formatting#function-call-indent)"
+            }
+          }
+        },
+        "function_declaration": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "How the parameter list of a declaration is laid out.\n\n[function_declaration \u2192](https://larvae-luau.github.io/docs/reference/formatting#function-declaration)",
+          "properties": {
+            "expand": {
+              "enum": [
+                "when-needed",
+                "always",
+                "never"
+              ],
+              "default": "when-needed",
+              "description": "When the parameter list is opened over several lines. \"when-needed\" opens it only where the line does not fit, which is what larvae has always done. \"always\" opens every one. \"never\" holds it on one line, where a value inside it can still open and the line can run past \"column_width\".\n\n[function_declaration.expand \u2192](https://larvae-luau.github.io/docs/reference/formatting#function-declaration-expand)"
+            },
+            "indent": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 1,
+              "description": "The indent levels an opened parameter takes. 0 puts it at the column of the bracket.\n\n[function_declaration.indent \u2192](https://larvae-luau.github.io/docs/reference/formatting#function-declaration-indent)"
+            }
+          }
+        },
         "table_types": {
           "type": "object",
           "additionalProperties": false,

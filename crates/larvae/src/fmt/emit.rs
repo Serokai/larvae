@@ -20,8 +20,8 @@ use crate::syntax::ast::*;
 use crate::syntax::lexer::{Tok, TokKind};
 
 use super::config::{
-    BlockNewlineGaps, CallParens, CollapseSimpleStatement, FmtConfig, IfExpansion, IfPlacement,
-    IfStyle, QuoteStyle, RequireGrouping, Semicolons,
+    BlockNewlineGaps, CallParens, CallStyle, CollapseSimpleStatement, FmtConfig, IfExpansion,
+    IfPlacement, IfStyle, ListExpansion, QuoteStyle, RequireGrouping, Semicolons,
 };
 use super::doc::Doc;
 use super::trivia::{Attached, Comment, Trivia};
@@ -1313,12 +1313,9 @@ impl<'a> Emitter<'a> {
             None => Doc::text(self.one(p.name)),
         });
 
-        self.bracketed(
-            "(",
-            ")",
-            Doc::join(Doc::concat([Doc::text(","), Doc::Line]), each),
-            false,
-        )
+        let cfg = &self.cfg.function_declaration;
+
+        self.listed("(", ")", each.collect(), false, cfg.expand, cfg.indent)
     }
 
     fn ret(&self, n: &Return) -> Doc<'a> {
@@ -1826,12 +1823,48 @@ impl<'a> Emitter<'a> {
             return Doc::concat([Doc::text("("), self.expr(&list[0]), Doc::text(")")]);
         }
 
-        let inner = Doc::join(
-            Doc::concat([Doc::text(","), Doc::Line]),
-            list.iter().map(|e| self.expr(e)),
-        );
+        let cfg = &self.cfg.function_call;
 
-        self.bracketed("(", ")", inner, self.cfg.space_inside_parens)
+        /*
+        The last argument holds the shape, and the ones before it stay put.
+
+        A call whose last argument is a table or a function reads as a call
+        with a block after it, so the block is what opens. The arguments
+        before it never break here, which is the trade the style asks for: a
+        long list of them runs past `column_width` rather than moving to
+        lines of its own.
+
+        Only a value that hangs earns this. A call of plain arguments has
+        nothing to hold the shape, so it opens one per line as it always did.
+        */
+        if cfg.style == CallStyle::HugLast
+            && cfg.expand != ListExpansion::Always
+            && list.len() > 1
+            && list.last().is_some_and(|last| self.hangs(last))
+        {
+            let mut parts = vec![Doc::text("(")];
+
+            for (i, arg) in list.iter().enumerate() {
+                if i > 0 {
+                    parts.push(Doc::text(", "));
+                }
+
+                parts.push(self.expr(arg));
+            }
+
+            parts.push(Doc::text(")"));
+
+            return Doc::concat(parts);
+        }
+
+        self.listed(
+            "(",
+            ")",
+            list.iter().map(|e| self.expr(e)).collect(),
+            self.cfg.space_inside_parens,
+            cfg.expand,
+            cfg.indent,
+        )
     }
 
     /*
@@ -1927,6 +1960,60 @@ impl<'a> Emitter<'a> {
     inner spaces then do not matter, because a newline already separates
     them.
     */
+    /*
+    A parenthesised list, laid out as `expand` asks.
+
+    `when-needed` is the layout larvae always had: the renderer breaks the
+    list when the line does not fit. `always` breaks it whatever the width,
+    and `never` holds it on one line, where a value inside it can still open
+    on its own.
+
+    `levels` is the indent an opened item takes. Zero puts an item at the
+    column of the bracket.
+    */
+    fn listed(
+        &self,
+        open: &'a str,
+        close: &'a str,
+        items: Vec<Doc<'a>>,
+        spaced: bool,
+        expand: ListExpansion,
+        levels: usize,
+    ) -> Doc<'a> {
+        if expand == ListExpansion::Never {
+            let pad = match spaced {
+                true => Doc::text(" "),
+
+                false => Doc::Nil,
+            };
+
+            return Doc::concat([
+                Doc::text(open),
+                pad.clone(),
+                Doc::join(Doc::text(", "), items),
+                pad,
+                Doc::text(close),
+            ]);
+        }
+
+        let (sep, pad) = match expand {
+            ListExpansion::Always => (Doc::Hard, Doc::Hard),
+
+            // Soft holds nothing flat, Line holds the space that `spaced` asks for.
+            _ => match spaced {
+                true => (Doc::Line, Doc::Line),
+
+                false => (Doc::Line, Doc::Soft),
+            },
+        };
+
+        let inner = Doc::join(Doc::concat([Doc::text(","), sep]), items);
+
+        let body = (0..levels).fold(Doc::concat([pad.clone(), inner]), |doc, _| Doc::indent(doc));
+
+        Doc::group(Doc::concat([Doc::text(open), body, pad, Doc::text(close)]))
+    }
+
     fn bracketed(&self, open: &'a str, close: &'a str, inner: Doc<'a>, spaced: bool) -> Doc<'a> {
         let pad = if spaced { Doc::Line } else { Doc::Soft };
 

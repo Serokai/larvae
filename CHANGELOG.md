@@ -19,6 +19,20 @@ Notable changes land here. Format follows
   run, and it disagreed with the release channel, which ships the extension.
   The write side and the read side now spell the file the same way
 
+## Unreleased
+
+### Added
+
+- `[fmt] function_call` and `[fmt] function_declaration` lay out the two lists
+  between parentheses. `expand` takes `when-needed`, which is the layout larvae
+  always had, `always`, and `never`. `indent` gives the levels an opened item
+  takes. Both default to the layout larvae already wrote
+- `[fmt] function_call.style = "hug-last"` keeps the arguments on the line of
+  the call and opens the last one, where that argument is a table, a function,
+  or a string carrying its own newlines. The arguments before it do not break,
+  so a long list of them runs past `column_width`, which is why `one-per-line`
+  stays the default
+
 ## 0.4.0 - 2026-08-18
 
 ### Fixed

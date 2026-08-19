@@ -176,6 +176,93 @@ pub struct SortRequires {
     pub grouping: RequireGrouping,
 }
 
+/*
+Selects when a list between parentheses opens over several lines.
+
+An argument list and a parameter list read the same way here, so one enum
+serves both. The tables that use it are separate, because a project that wants
+every call opened does not always want every declaration opened too.
+*/
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ListExpansion {
+    /// Open the list only where the line does not fit. This is the layout larvae always had.
+    #[default]
+    WhenNeeded,
+    /// Open every list, whatever its width.
+    Always,
+    /*
+    Keep the list on one line.
+
+    A value inside it can still open, so `f(t)` with a large `t` opens the
+    table and not the list. The line can run past `column_width`, because the
+    option asks for that.
+    */
+    Never,
+}
+
+/*
+Selects the shape of an opened argument list.
+
+```lua
+-- one-per-line
+Colors:Apply(
+    frame,
+    "Rarity",
+    { Children = { stroke } }
+)
+
+-- hug-last
+Colors:Apply(frame, "Rarity", {
+    Children = { stroke },
+})
+```
+*/
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CallStyle {
+    /// Every argument on a line of its own.
+    #[default]
+    OnePerLine,
+    /*
+    The arguments stay on the line of the call, and the last one opens.
+
+    This applies where the last argument is a table, a function, or a string
+    that carries its own newlines. Those are the values that read as a block.
+    A call whose last argument is none of them opens one per line, because
+    there is nothing there to hold the shape.
+    */
+    HugLast,
+}
+
+/// How the formatter lays out the argument list of a call.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct FunctionCall {
+    #[serde(default)]
+    pub expand: ListExpansion,
+    #[serde(default)]
+    pub style: CallStyle,
+    /// The indent levels that an opened argument takes.
+    #[serde(default = "default_list_indent")]
+    pub indent: usize,
+}
+
+/// How the formatter lays out the parameter list of a declaration.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct FunctionDeclaration {
+    #[serde(default)]
+    pub expand: ListExpansion,
+    /// The indent levels that an opened parameter takes.
+    #[serde(default = "default_list_indent")]
+    pub indent: usize,
+}
+
+fn default_list_indent() -> usize {
+    1
+}
+
 /// Selects when the formatter opens an `if ... then ... else ...` expression over several lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -265,6 +352,25 @@ pub struct IfExpression {
     /// The indent levels that a continuation line of the expression takes.
     #[serde(default = "default_if_indent")]
     pub indent: usize,
+}
+
+impl Default for FunctionCall {
+    fn default() -> Self {
+        Self {
+            expand: ListExpansion::default(),
+            style: CallStyle::default(),
+            indent: default_list_indent(),
+        }
+    }
+}
+
+impl Default for FunctionDeclaration {
+    fn default() -> Self {
+        Self {
+            expand: ListExpansion::default(),
+            indent: default_list_indent(),
+        }
+    }
 }
 
 impl Default for IfExpression {
@@ -405,6 +511,14 @@ pub struct FmtConfig {
     /// Selects how an `if` expression opens over several lines.
     #[serde(default)]
     pub if_expression: IfExpression,
+
+    /// Selects how the argument list of a call opens over several lines.
+    #[serde(default)]
+    pub function_call: FunctionCall,
+
+    /// Selects how the parameter list of a declaration opens over several lines.
+    #[serde(default)]
+    pub function_declaration: FunctionDeclaration,
 
     /// Selects how a table type opens over several lines.
     #[serde(default)]
