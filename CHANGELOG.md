@@ -4,7 +4,7 @@ Notable changes land here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow
 [semver](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.5.0 - 2026-08-19
 
 ### Added
 
@@ -23,89 +23,11 @@ Notable changes land here. Format follows
   disk, with a progress bar. Under a pipe it prints a line per worm instead
 - `larvae worm remove <name>`, `rm` for short, takes a worm out of the config
   and off the disk, and drops `[worms]` when its last worm goes
-
-### Changed
-
-- A worm is a table, never a string. `xml = "owner/repo@0.1.0"` is refused
-  with a message that prints the table to write instead. The version is a key
-  of its own now, so `install` can tell a pin from a range without splitting a
-  string and a reader can see what is pinned
-- A version says whether the project moves. `"^"` takes the newest release on
-  every install and is what `add` writes, `"^0.1.0"` follows what semver calls
-  compatible, and `"0.1.0"` holds that release
-- `larvae worm update` is gone. The version now says whether a project wants
-  to move, and a command that bumps a pin the user wrote undoes the pin
-- Installing is a step and not a side effect. A command no longer downloads a
-  missing worm; it names it once and carries on. The editor still skips in
-  silence, because it answers a keystroke
-
-### Fixed
-
-- A file a worm claims can be required. `require("@app/widget")` where the
-  project holds `widget.luaux` found no module and warned about a require that
-  is correct, because the resolver looked only for `.luau` and `.lua`. A
-  claimed file is a module: the pipeline turns it into Luau in the output, so
-  the require resolves at runtime. A claimed file beside a `.luau` of the same
-  name is ambiguous, as two `.luau` files would be
-- No command downloads a worm any more. `larvae process` still did, and it
-  passed the version through unresolved, so a worm pinned at `^` asked GitHub
-  for a release tagged `v^`
-- `larvae worm remove` no longer fails with "Directory not empty". NTFS
-  through FUSE reports a directory as not empty right after its last file was
-  unlinked, so the tree comes apart from the bottom and the last step retries
-
-## Unreleased
-
-### Added
-
 - A code action for `unused_variable` and `unused_function`: prefix the name
   with an underscore, which is the fix those lints already print in their
   help. It renames the declaration and every write of the name, because
   prefixing the declaration alone would leave an assignment pointing at a name
   nothing declares, which is a global and a worse bug than the warning
-
-### Fixed
-
-- A global `function f() end` that no line reads now reports
-  `unused_function`. It is dead code, a global belongs to the script that runs
-  it, and both selene and the Luau compiler report it. Larvae reported nothing
-  once the `unscoped_variables` fix below stopped it reporting the wrong thing
-- `function f() end` no longer reports `unscoped_variables`. The statement
-  creates a global the same way `f = 1` does, and the two do not read the
-  same way: neither selene nor the Luau compiler reports the declaration, and
-  a Roblox script defines its callbacks with it. On a 400 file corpus this
-  removed 10 of 29 reports. The name a global function declares is still
-  defined for the file, so `undefined_variable` stays quiet where it is called
-
-### Changed
-
-- An unused `local function` reports `unused_function` and not
-  `unused_variable`. The Luau compiler separates the two, and it separates
-  them by the declaring form and not the value, so `local f = function() end`
-  is still `unused_variable`. Each name carries its own level, so a project
-  that keeps unused helpers while still wanting unused locals reported can now
-  say so. Both read `[lint.options.unused_variable]`. On the same corpus, 44
-  of 206 reports moved to the new name and none were lost
-
-## Unreleased
-
-### Fixed
-
-- A native worm loads on Windows. A worm is built one time and released for
-  every platform, so its manifest names `luaux-worm` while the Windows zip
-  holds `luaux-worm.exe`. Larvae knew that rule in the place that runs a worm
-  and not in the two places that read its bytes, so loading stopped at
-  "The system cannot find the file specified" before the rule ever ran. Every
-  reader now resolves the entry through one function
-- A worm installed from cargo keeps the `.exe` that cargo built. It was copied
-  to the bare name the manifest gives, which left Windows a file it does not
-  run, and it disagreed with the release channel, which ships the extension.
-  The write side and the read side now spell the file the same way
-
-## Unreleased
-
-### Added
-
 - `prefer_const`, a lint for a local that nothing reassigns. Off by default,
   because `const` is larvae's own reading of Luau and a codebase of ordinary
   `local` would report on nearly every line the first time it ran. It leaves
@@ -131,6 +53,63 @@ Notable changes land here. Format follows
   or a string carrying its own newlines. The arguments before it do not break,
   so a long list of them runs past `column_width`, which is why `one-per-line`
   stays the default
+
+### Changed
+
+- A worm is a table, never a string. `xml = "owner/repo@0.1.0"` is refused
+  with a message that prints the table to write instead. The version is a key
+  of its own now, so `install` can tell a pin from a range without splitting a
+  string and a reader can see what is pinned
+- A version says whether the project moves. `"^"` takes the newest release on
+  every install and is what `add` writes, `"^0.1.0"` follows what semver calls
+  compatible, and `"0.1.0"` holds that release
+- `larvae worm update` is gone. The version now says whether a project wants
+  to move, and a command that bumps a pin the user wrote undoes the pin
+- Installing is a step and not a side effect. A command no longer downloads a
+  missing worm; it names it once and carries on. The editor still skips in
+  silence, because it answers a keystroke
+- An unused `local function` reports `unused_function` and not
+  `unused_variable`. The Luau compiler separates the two, and it separates
+  them by the declaring form and not the value, so `local f = function() end`
+  is still `unused_variable`. Each name carries its own level, so a project
+  that keeps unused helpers while still wanting unused locals reported can now
+  say so. Both read `[lint.options.unused_variable]`. On the same corpus, 44
+  of 206 reports moved to the new name and none were lost
+
+### Fixed
+
+- A file a worm claims can be required. `require("@app/widget")` where the
+  project holds `widget.luaux` found no module and warned about a require that
+  is correct, because the resolver looked only for `.luau` and `.lua`. A
+  claimed file is a module: the pipeline turns it into Luau in the output, so
+  the require resolves at runtime. A claimed file beside a `.luau` of the same
+  name is ambiguous, as two `.luau` files would be
+- No command downloads a worm any more. `larvae process` still did, and it
+  passed the version through unresolved, so a worm pinned at `^` asked GitHub
+  for a release tagged `v^`
+- `larvae worm remove` no longer fails with "Directory not empty". NTFS
+  through FUSE reports a directory as not empty right after its last file was
+  unlinked, so the tree comes apart from the bottom and the last step retries
+- A global `function f() end` that no line reads now reports
+  `unused_function`. It is dead code, a global belongs to the script that runs
+  it, and both selene and the Luau compiler report it. Larvae reported nothing
+  once the `unscoped_variables` fix below stopped it reporting the wrong thing
+- `function f() end` no longer reports `unscoped_variables`. The statement
+  creates a global the same way `f = 1` does, and the two do not read the
+  same way: neither selene nor the Luau compiler reports the declaration, and
+  a Roblox script defines its callbacks with it. On a 400 file corpus this
+  removed 10 of 29 reports. The name a global function declares is still
+  defined for the file, so `undefined_variable` stays quiet where it is called
+- A native worm loads on Windows. A worm is built one time and released for
+  every platform, so its manifest names `luaux-worm` while the Windows zip
+  holds `luaux-worm.exe`. Larvae knew that rule in the place that runs a worm
+  and not in the two places that read its bytes, so loading stopped at
+  "The system cannot find the file specified" before the rule ever ran. Every
+  reader now resolves the entry through one function
+- A worm installed from cargo keeps the `.exe` that cargo built. It was copied
+  to the bare name the manifest gives, which left Windows a file it does not
+  run, and it disagreed with the release channel, which ships the extension.
+  The write side and the read side now spell the file the same way
 
 ## 0.4.0 - 2026-08-18
 
