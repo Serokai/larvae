@@ -22,4 +22,4 @@ larvae.toml
 !CONTRIBUTING.md
 !README.md
 
-.vscode/
+.vscode/*
