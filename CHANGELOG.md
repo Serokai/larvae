@@ -8,10 +8,55 @@ Notable changes land here. Format follows
 
 ### Added
 
+- `[fmt] enabled` and `[lint] enabled`. `false` turns that half of larvae off:
+  the formatter writes no file and reports no `--check` failure, the linter
+  reports nothing and exits zero, and the editor gets a formatter with no edits
+  and a file with no diagnostics. This is for a project that wants larvae for
+  one job and keeps another tool for the other
+- `[fmt] recommended`, the same three states as `[lint] recommended`. `false`
+  starts from a base that changes as little as possible: `magic_trailing_comma`,
+  `space_inside_braces` and `trailing_comma` go off, and the project turns back
+  on what it wants. Those three are the options where larvae has an opinion and
+  the opinion changes a file. Every other default is either stylua's or a
+  setting that does nothing until a project asks for it, so `recommended` does
+  not move it
 - `[lint] recommended`, as Biome has it. Absent and `true` both mean the
   default levels apply, which is what larvae always did. `false` starts every
   lint at `allow`, so a project gets the lints it names and no others. A level
   the project wrote always wins, in either state
+- `implicit_any_local`, a lint for `local test` with no value and no type. What
+  the name holds is then decided by whatever assigns it first, and in a file
+  with no `--!strict` directive Luau accepts any later assignment of any type.
+  A local that nothing ever assigns is left to `uninitialized_local`, which
+  says the more urgent thing about the same line
+- `[fmt] prefer_const`, which turns a `local` that nothing reassigns into a
+  `const`. The same rule the `prefer_const` lint reports, with the formatter
+  making the edit, and it carries the same `mutated_tables_stay_local` option
+  under the same name. Off by default: it rewrites a keyword, which is a
+  bigger step than moving spaces
+
+### Changed
+
+- Four lints deny by default now: `duplicate_keys`, `duplicate_local`,
+  `format_string` and `zero_step_loop`. They join `undefined_variable`. The bar
+  is two things at once: no reading of the code makes the finding wrong,
+  because each check reads a literal and never a runtime value, and the code as
+  written cannot be what the author meant. `{ a = 1, a = 2 }` discards the
+  first entry, `local a, a` kills the first binding where it stands,
+  `string.format("%y", 1)` raises, and a zero step hangs. Over a 364 file
+  corpus the four report nothing, which is the point: nobody writes these
+  shapes on purpose
+- `implicit_return` and `multiple_statements` are `allow` now. `implicit_return`
+  said so in its own comment while its level said `warn`; the comment had the
+  better argument, because a lookup that falls off the end is idiomatic Luau.
+  `multiple_statements` is ground `larvae fmt` already owns: with
+  `collapse_simple_statement` at `never` a format run removes every finding the
+  lint can make
+- `implicit_any_local` warns instead of denying. The fix never changes
+  behaviour, which argued for a deny. The shape argues against one: `local
+  found` above the loop that fills it in runs correctly, Luau's own linter says
+  nothing about it, and a deny failed the build of every project on the day it
+  adopted larvae
 
 ### Fixed
 
@@ -19,21 +64,6 @@ Notable changes land here. Format follows
   that recovers a reference from inside a type skipped a name after a colon,
   which is right for `obj:method` and wrong inside a type: `type T = { e:
   jecs.Entity }` puts the field name before the colon and the type after it
-
-### Added
-
-- `implicit_any_local`, a lint for `local test` with no value and no type. What
-  the name holds is then decided by whatever assigns it first, and in a file
-  with no `--!strict` directive Luau accepts any later assignment of any type.
-  It denies by default, which no other lint does, because the fix is an
-  annotation and an annotation changes no behaviour. A local that nothing ever
-  assigns is left to `uninitialized_local`, which says the more urgent thing
-  about the same line
-- `[fmt] prefer_const`, which turns a `local` that nothing reassigns into a
-  `const`. The same rule the `prefer_const` lint reports, with the formatter
-  making the edit, and it carries the same `mutated_tables_stay_local` option
-  under the same name. Off by default: it rewrites a keyword, which is a
-  bigger step than moving spaces
 
 ## 0.5.0 - 2026-08-19
 

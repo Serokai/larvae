@@ -403,9 +403,26 @@ fn parentheses_that_group_something_are_left_alone() {
     ));
 }
 
+/*
+The lint is `allow`, because `larvae fmt` splits the line already.
+
+Luau's own linter reports the shape, and larvae reported it too while it
+matched Luau lint for lint. Luau ships no formatter and larvae does, and
+`collapse_simple_statement` is `never`, so a format run removes every finding
+this lint can make. A warning about what the formatter fixes on save is noise
+until the formatter runs.
+*/
 #[test]
-fn multiple_statements_reports_by_default_as_luau_does() {
-    assert!(fires("multiple_statements", "local a = 1 local b = 2\n"));
+fn multiple_statements_is_allow_because_the_formatter_owns_it() {
+    assert!(!fires("multiple_statements", "local a = 1 local b = 2\n"));
+
+    let cfg = with("multiple_statements", Level::Warn);
+
+    assert!(
+        fired("local a = 1 local b = 2\n", &cfg)
+            .iter()
+            .any(|n| n == "multiple_statements")
+    );
 }
 
 /// The lint must not report this pattern, even when the lint is on.
@@ -1332,12 +1349,15 @@ fn returns(src: &str) -> bool {
         .any(|n| n == "implicit_return")
 }
 
-/// The lint is off by default, because the shape it reports is idiomatic.
+/// The lint is `allow`, because the shape it reports is idiomatic.
 #[test]
-fn implicit_return_reports_by_default_as_luau_does() {
+fn implicit_return_is_allow_because_the_shape_is_idiomatic() {
     let src = "local function f(a)\n\tif a then\n\t\treturn 1\n\tend\nend\nreturn f\n";
 
-    assert!(fires("implicit_return", src));
+    assert!(!fires("implicit_return", src));
+
+    // A project that wants every exit spelled out still gets the report.
+    assert!(returns(src));
 }
 
 #[test]
@@ -2059,9 +2079,15 @@ fn a_local_with_no_value_and_no_type_is_reported() {
     ));
 }
 
-/// This is the only lint larvae denies by default.
+/*
+The lint warns, and it does not deny.
+
+The fix never changes behaviour, which argued for a deny. The shape argues
+against one: `local found` above the loop that fills it in runs correctly,
+and a deny fails the build of every project on the day it adopts larvae.
+*/
 #[test]
-fn implicit_any_local_denies_by_default() {
+fn implicit_any_local_warns_by_default() {
     let found = lint(
         Path::new("test.luau"),
         "local test\ntest = 1\nprint(test)\n",
@@ -2074,7 +2100,7 @@ fn implicit_any_local_denies_by_default() {
         .find(|d| d.message.contains("implicit_any_local"))
         .expect("it fires");
 
-    assert_eq!(one.severity, Severity::Error);
+    assert_eq!(one.severity, Severity::Warning);
 }
 
 /// Either half answers the question the lint asks, so either half silences it.
@@ -2183,4 +2209,91 @@ fn a_name_no_type_uses_is_still_unused() {
         "unused_variable",
         "const jecs = require(\"@pkg/jecs\")\ntype T = { e: string }\n"
     ));
+}
+
+// --- what larvae denies ----------------------------------------------------
+
+/*
+A deny fails a build, so the set that denies has to earn it.
+
+The bar is two things at once. No reading of the code makes the finding
+wrong, because the check reads literals or syntax and never a runtime value.
+And the code as written cannot be what the author meant: it throws, it hangs,
+or a line of it is provably dead. Every other finding warns.
+
+`bad_string_escape` is the near miss worth naming. It reads a literal and it
+is never wrong, but Luau accepts `"\\q"` and runs the file, checked against
+luau-lsp. The string is wrong and the build is fine, so it warns.
+*/
+#[test]
+fn the_lints_that_deny_are_the_ones_that_earn_it() {
+    let mut denies: Vec<&str> = larvae::lint::registry()
+        .iter()
+        .filter(|l| l.default_level() == Level::Deny)
+        .map(|l| l.name())
+        .collect();
+
+    denies.sort();
+
+    assert_eq!(
+        denies,
+        [
+            "duplicate_keys",
+            "duplicate_local",
+            "format_string",
+            "undefined_variable",
+            "zero_step_loop",
+        ]
+    );
+}
+
+/// Each one reports at error severity without a config that asks for it.
+#[test]
+fn each_deny_reaches_the_report_as_an_error() {
+    let cases = [
+        ("duplicate_keys", "local t = { a = 1, a = 2 }\nreturn t\n"),
+        ("duplicate_local", "local a, a = 1, 2\nreturn a\n"),
+        ("format_string", "return string.format(\"%y\", 1)\n"),
+        ("undefined_variable", "return nowhere\n"),
+        ("zero_step_loop", "for i = 1, 3, 0 do print(i) end\n"),
+    ];
+
+    for (name, src) in cases {
+        let found = lint(Path::new("test.luau"), src, &LintConfig::default())
+            .unwrap_or_else(|_| panic!("{name} case parses"));
+
+        let one = found
+            .iter()
+            .find(|d| d.message.contains(name))
+            .unwrap_or_else(|| panic!("{name} does not fire on its own case"));
+
+        assert_eq!(one.severity, Severity::Error, "{name} has to fail a build");
+    }
+}
+
+/*
+A deny that reads a runtime value would be a false positive that stops a
+build, so each check stays with what the source states outright.
+*/
+#[test]
+fn no_deny_reports_a_value_it_cannot_see() {
+    // The key, the format and the step are all decided elsewhere.
+    let src = "local k = key()\n\
+               local t = { [k] = 1, [k] = 2 }\n\
+               local f = pattern()\n\
+               print(string.format(f, 1))\n\
+               for i = 1, 3, step() do print(i) end\n\
+               local _, _ = 1, 2\n\
+               return t\n";
+
+    let reported = names(src);
+
+    for name in [
+        "duplicate_keys",
+        "format_string",
+        "zero_step_loop",
+        "duplicate_local",
+    ] {
+        assert!(!reported.contains(&name.to_string()), "{name} guessed");
+    }
 }

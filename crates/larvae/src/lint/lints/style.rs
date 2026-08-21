@@ -20,7 +20,7 @@ lints! {
         "a loop body with nothing in it";
     MixedTable => "mixed_table", Warn,
         "a table with both array entries and named keys";
-    MultipleStatements => "multiple_statements", Warn,
+    MultipleStatements => "multiple_statements", Allow,
         "more than one statement on a line";
     ParentheseConditions => "parenthese_conditions", Warn,
         "parentheses around a condition, which Luau does not need";

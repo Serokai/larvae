@@ -34,11 +34,11 @@ lints! {
         "not a == b, or a chain like a < b < c, which does not group the way it reads";
     DuplicateFunction => "duplicate_function", Warn,
         "two functions of the same name in one scope, where the first is discarded";
-    DuplicateLocal => "duplicate_local", Warn,
+    DuplicateLocal => "duplicate_local", Deny,
         "one local statement or parameter list that declares the same name twice";
-    FormatString => "format_string", Warn,
+    FormatString => "format_string", Deny,
         "a format string that string.format or os.date rejects at runtime";
-    ImplicitReturn => "implicit_return", Warn,
+    ImplicitReturn => "implicit_return", Allow,
         "a function that returns a value on one path and falls off the end on another";
     MisleadingAndOr => "misleading_and_or", Warn,
         "cond and false or b, which always gives b because the middle is never truthy";
@@ -48,13 +48,13 @@ lints! {
         "reading _, the name that says a value is discarded";
     TableOperations => "table_operations", Warn,
         "a table.insert or table.remove whose index or argument count is wrong";
-    ImplicitAnyLocal => "implicit_any_local", Deny,
+    ImplicitAnyLocal => "implicit_any_local", Warn,
         "a local declared with no value and no type, so what it holds is decided elsewhere";
     UninitializedLocal => "uninitialized_local", Warn,
         "a local declared with no value and never assigned, so every read is nil";
     UnknownType => "unknown_type", Warn,
         "comparing type(x) against a string that type() never returns";
-    ZeroStepLoop => "zero_step_loop", Warn,
+    ZeroStepLoop => "zero_step_loop", Deny,
         "a numeric for whose step is zero, so the counter never moves";
 }
 
@@ -235,7 +235,7 @@ impl ImplicitReturn {
     nil. When the function is a lookup, that is the design. When it is not,
     the author forgot a branch, and the nil arrives far from here.
 
-    The lint is off by default, because the first reading is common and
+    The lint is `allow`, because the first reading is common and
     idiomatic. `local function find(t, x) for i, v in t do if v == x then
     return i end end end` is correct Luau, and this lint reports it. A
     project that wants every exit spelled out turns the lint on and writes
@@ -1200,11 +1200,12 @@ impl ImplicitAnyLocal {
     the value arrives later. Write the value, `local test = 0`, when it can
     arrive now.
 
-    This is the only lint larvae denies by default. A `deny` fails a build,
-    and it is set that way because the shape has a fix that is always
-    available and never changes behaviour: an annotation states what the code
-    already does. A project that disagrees sets it to `warn` or `allow` like
-    any other lint.
+    The lint warns, and it does not deny. The fix is always available and it
+    never changes behaviour, which argued for a deny at first. The shape
+    argues against one: `local found` above the loop that fills it in is
+    ordinary Luau that runs correctly, Luau's own linter says nothing about
+    it, and a deny fails the build of every project on the day it adopts
+    larvae. A project that wants the discipline as a gate writes one line.
 
     A local that nothing ever assigns is left to `uninitialized_local`, which
     says the more urgent thing about the same line: every read of it is nil.

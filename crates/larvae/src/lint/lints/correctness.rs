@@ -19,7 +19,7 @@ lints! {
         "comparing against a table literal, which compares identity and is always false";
     DivideByZero => "divide_by_zero", Warn,
         "dividing by a literal zero";
-    DuplicateKeys => "duplicate_keys", Warn,
+    DuplicateKeys => "duplicate_keys", Deny,
         "a table key written twice, where only the last one survives";
     IfsSameCond => "ifs_same_cond", Warn,
         "an elseif repeating a condition already tested, which can never run";

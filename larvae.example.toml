@@ -198,21 +198,32 @@ std = "roblox"                           # or "luau", "none", or a selene name l
 globals = ["shared", "_TESTING"]         # names the project defines itself
 exclude = ["Packages", "**/*.spec.luau"] # relative to the project root
 
-# A lint keeps its own default until it is named here. Forty nine of them;
-# `larvae lint --explain <name>` describes one. These are the defaults.
+# A lint keeps its own default until it is named here. Fifty two of them;
+# `larvae lint --explain <name>` describes one. These are the defaults: five
+# deny, five allow, and the other forty two warn.
+#
+# A lint denies when the code cannot be what the author meant and no reading
+# of it makes the finding wrong. Then the build stops. Everything softer
+# warns, and a matter of taste is allow until the project asks for it.
 #
 # Larvae covers all 28 lints of the Luau compiler, and `larvae init` turns
 # Luau's own off in .luaurc. Each one keeps the level that Luau gives it, so
 # the change of linter changes no report.
 [lint.rules]
-undefined_variable = "deny"
+undefined_variable = "deny"              # the name is nil, and the line throws
+duplicate_keys = "deny"                  # the first entry is discarded
+duplicate_local = "deny"                 # the first binding is dead on arrival
+format_string = "deny"                   # string.format raises on this one
+zero_step_loop = "deny"                  # the counter never moves, so it hangs
 high_cyclomatic_complexity = "allow"     # a branch count is not a defect on its own
 non_const_require = "allow"              # const is newer than most codebases
+prefer_const = "allow"                   # a keyword is a bigger edit than a space
+multiple_statements = "allow"            # `larvae fmt` splits the line already
+implicit_return = "allow"                # a lookup that finds nothing reads well
 unused_variable = "warn"
 shadowing = "warn"
 mixed_table = "warn"
-multiple_statements = "warn"             # Luau reports this one too
-implicit_return = "warn"                 # and this one
+implicit_any_local = "warn"
 # ... every other lint warns
 
 # Per lint settings. `config` is selene's name for this table, and works too,
