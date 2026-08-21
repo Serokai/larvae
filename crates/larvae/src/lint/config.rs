@@ -83,6 +83,20 @@ impl<'de> Deserialize<'de> for StdLib {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct LintConfig {
+    /*
+    Whether a lint larvae recommends is on without the project saying so.
+
+    Three states, as Biome has them. Absent and `true` both mean the defaults
+    apply, which is what larvae always did. `false` starts every lint at
+    `allow`, so a project gets the lints it names and no others.
+
+    A level the project wrote always wins, in either state. `recommended =
+    false` with `shadowing = "warn"` is one lint on and the rest off, which is
+    the reason to reach for it.
+    */
+    #[serde(default)]
+    pub recommended: Option<bool>,
+
     /// The level for each lint, keyed by the lint's name.
     #[serde(default, deserialize_with = "levels")]
     pub rules: BTreeMap<String, Level>,
@@ -114,7 +128,20 @@ pub struct LintConfig {
 impl LintConfig {
     /// Returns the level for one lint. The lint's own default applies unless the project sets one.
     pub fn level_for(&self, name: &str, default: Level) -> Level {
-        self.rules.get(name).copied().unwrap_or(default)
+        if let Some(level) = self.rules.get(name) {
+            return *level;
+        }
+
+        /*
+        A name the project did not mention falls back to what larvae
+        recommends, unless the project turned that off. Absent reads as
+        `true`, so a config written before this option behaves as it did.
+        */
+        match self.recommended {
+            Some(false) => Level::Allow,
+
+            _ => default,
+        }
     }
 
     /// Returns the paths that this config tells `larvae lint` to skip.
@@ -159,6 +186,13 @@ impl LintConfig {
 
         if let Some(value) = larvae {
             let over: Self = value.clone().try_into().context("[lint]")?;
+
+            /*
+            selene has no such key, so `[lint]` is the only place it can come
+            from. A merge that forgot it left the option parsed and inert,
+            which is worse than not having it.
+            */
+            config.recommended = over.recommended.or(config.recommended);
 
             config.rules.extend(over.rules);
             config.options.extend(over.options);
@@ -221,6 +255,8 @@ fn selene_file(root: &Path) -> Result<Option<LintConfig>> {
 
     Ok(Some(LintConfig {
         include: Vec::new(),
+        // selene has no such key, so a selene.toml states nothing about it
+        recommended: None,
         rules: file.rules,
         options: file.config,
         std,

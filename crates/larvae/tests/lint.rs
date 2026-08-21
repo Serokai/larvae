@@ -2133,3 +2133,54 @@ fn only_the_untyped_name_of_a_declaration_is_reported() {
         "{found:?}"
     );
 }
+
+// --- a name used only by a type ---------------------------------------------
+
+/*
+A require bound for its types alone is used.
+
+larvae's parser takes a type for its extent and never reads inside it, so a
+token walk recovers the references. The walk skipped a name after a colon,
+which is right for `obj:method` and wrong inside a type: a table type puts the
+field name before the colon and the type after it.
+*/
+#[test]
+fn a_name_used_only_inside_a_table_type_is_used() {
+    assert!(!fires(
+        "unused_variable",
+        "const jecs = require(\"@pkg/jecs\")\ntype T = { e: jecs.Entity }\n"
+    ));
+}
+
+#[test]
+fn every_type_position_counts_as_a_use() {
+    for src in [
+        "type Component = jecs.Component\n",
+        "export type Component = jecs.Component\n",
+        "type W = Map<string, jecs.Entity>\n",
+        "type F = (jecs.Entity) -> ()\n",
+        "type T = { e: jecs.Entity }\n",
+        "type T = { f: (jecs.Entity) -> () }\n",
+        "type U = jecs.Entity | nil\n",
+        "type T = typeof(jecs)\n",
+        "local function f(e: jecs.Entity)\n\treturn e\nend\nreturn f\n",
+        "local x: jecs.Entity = nil\nprint(x)\n",
+        "return (nil :: any) :: jecs.Entity\n",
+    ] {
+        let whole = format!("const jecs = require(\"@pkg/jecs\")\n{src}");
+
+        assert!(
+            !fires("unused_variable", &whole),
+            "a type used it, so it is used: {src:?}"
+        );
+    }
+}
+
+/// A require that no type and no code uses is still reported.
+#[test]
+fn a_name_no_type_uses_is_still_unused() {
+    assert!(fires(
+        "unused_variable",
+        "const jecs = require(\"@pkg/jecs\")\ntype T = { e: string }\n"
+    ));
+}

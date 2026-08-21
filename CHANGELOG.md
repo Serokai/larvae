@@ -8,6 +8,20 @@ Notable changes land here. Format follows
 
 ### Added
 
+- `[lint] recommended`, as Biome has it. Absent and `true` both mean the
+  default levels apply, which is what larvae always did. `false` starts every
+  lint at `allow`, so a project gets the lints it names and no others. A level
+  the project wrote always wins, in either state
+
+### Fixed
+
+- A name used only by a type is no longer reported as unused. The token walk
+  that recovers a reference from inside a type skipped a name after a colon,
+  which is right for `obj:method` and wrong inside a type: `type T = { e:
+  jecs.Entity }` puts the field name before the colon and the type after it
+
+### Added
+
 - `implicit_any_local`, a lint for `local test` with no value and no type. What
   the name holds is then decided by whatever assigns it first, and in a file
   with no `--!strict` directive Luau accepts any later assignment of any type.

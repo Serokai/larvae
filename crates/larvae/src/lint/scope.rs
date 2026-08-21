@@ -640,8 +640,17 @@ impl<'a> Binder<'a> {
                 continue;
             }
 
-            // A name after a dot or a colon is a field, not a reference.
-            if i > span.start && matches!(self.tok(i - 1), "." | ":") {
+            /*
+            A name after a dot is a member of the thing before it, so it
+            names nothing this scope holds.
+
+            A colon does not read that way inside a type. `{ e: jecs.Entity }`
+            puts the field name before the colon and the type after it, so a
+            skip on `:` lost the reference and reported `jecs` as unused while
+            a type used it. The same is true of a named parameter,
+            `(e: jecs.Entity) -> ()`.
+            */
+            if i > span.start && self.tok(i - 1) == "." {
                 continue;
             }
 
