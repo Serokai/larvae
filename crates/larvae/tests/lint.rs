@@ -2041,3 +2041,95 @@ fn the_two_levels_are_independent() {
 fn the_underscore_prefix_silences_a_function_too() {
     assert!(!fires("unused_function", "local function _helper() end\n"));
 }
+
+// --- implicit_any_local -----------------------------------------------------
+
+/*
+`local test`, with no value and no type annotation.
+
+What the name holds is decided by whatever assigns it first. In a file with no
+`--!strict` directive Luau accepts any later assignment of any type, which is
+the implicit any this names.
+*/
+#[test]
+fn a_local_with_no_value_and_no_type_is_reported() {
+    assert!(fires(
+        "implicit_any_local",
+        "local test\ntest = 1\nprint(test)\n"
+    ));
+}
+
+/// This is the only lint larvae denies by default.
+#[test]
+fn implicit_any_local_denies_by_default() {
+    let found = lint(
+        Path::new("test.luau"),
+        "local test\ntest = 1\nprint(test)\n",
+        &LintConfig::default(),
+    )
+    .expect("parses");
+
+    let one = found
+        .iter()
+        .find(|d| d.message.contains("implicit_any_local"))
+        .expect("it fires");
+
+    assert_eq!(one.severity, Severity::Error);
+}
+
+/// Either half answers the question the lint asks, so either half silences it.
+#[test]
+fn a_type_or_a_value_is_enough() {
+    assert!(!fires(
+        "implicit_any_local",
+        "local test: number\ntest = 1\nprint(test)\n"
+    ));
+    assert!(!fires(
+        "implicit_any_local",
+        "local test = 1\nprint(test)\n"
+    ));
+}
+
+/// An underscore name states that nobody wants the value.
+#[test]
+fn an_underscore_local_is_left_alone() {
+    assert!(!fires(
+        "implicit_any_local",
+        "local _test\n_test = 1\nprint(_test)\n"
+    ));
+}
+
+/*
+One line gets one finding.
+
+A local that nothing ever assigns is `uninitialized_local`, which says the
+more urgent thing about the same line: every read of it is nil.
+*/
+#[test]
+fn a_local_nothing_assigns_is_left_to_the_other_lint() {
+    let found = names("local test\nprint(test)\n");
+
+    assert!(
+        found.iter().any(|n| n == "uninitialized_local"),
+        "{found:?}"
+    );
+    assert!(
+        !found.iter().any(|n| n == "implicit_any_local"),
+        "one line, one finding: {found:?}"
+    );
+}
+
+/// A declaration binds several names, and each answers for itself.
+#[test]
+fn only_the_untyped_name_of_a_declaration_is_reported() {
+    let found = fired(
+        "local a, b: number\na, b = 1, 2\nprint(a, b)\n",
+        &with("implicit_any_local", Level::Warn),
+    );
+
+    assert_eq!(
+        found.iter().filter(|n| *n == "implicit_any_local").count(),
+        1,
+        "{found:?}"
+    );
+}

@@ -48,6 +48,8 @@ lints! {
         "reading _, the name that says a value is discarded";
     TableOperations => "table_operations", Warn,
         "a table.insert or table.remove whose index or argument count is wrong";
+    ImplicitAnyLocal => "implicit_any_local", Deny,
+        "a local declared with no value and no type, so what it holds is decided elsewhere";
     UninitializedLocal => "uninitialized_local", Warn,
         "a local declared with no value and never assigned, so every read is nil";
     UnknownType => "unknown_type", Warn,
@@ -1178,5 +1180,91 @@ fn each_function(ctx: &LintCtx<'_>, mut f: impl FnMut(&FunctionBody)) {
         if let Expr::Function { body, .. } = e {
             f(body);
         }
+    }
+}
+
+// --- implicit_any_local ----------------------------------------------------
+
+impl ImplicitAnyLocal {
+    /*
+    `local test`, with no value and no type annotation.
+
+    What the name holds is then decided by whatever assigns it first, and a
+    reader of the declaration cannot tell what that is. In a file with no
+    `--!strict` directive, which is most Roblox code, Luau accepts any later
+    assignment of any type: checked against luau-lsp, `local x` then `x = 1`
+    then `x = "s"` is an error under `--!strict` and silence without it. That
+    silence is the implicit `any` this lint names.
+
+    The fix is one of two words. Write the type, `local test: number`, when
+    the value arrives later. Write the value, `local test = 0`, when it can
+    arrive now.
+
+    This is the only lint larvae denies by default. A `deny` fails a build,
+    and it is set that way because the shape has a fix that is always
+    available and never changes behaviour: an annotation states what the code
+    already does. A project that disagrees sets it to `warn` or `allow` like
+    any other lint.
+
+    A local that nothing ever assigns is left to `uninitialized_local`, which
+    says the more urgent thing about the same line: every read of it is nil.
+    One line gets one finding.
+    */
+    fn check(ctx: &LintCtx<'_>, out: &mut Vec<Finding>) {
+        each_stmt(ctx, out, |ctx, s, out| {
+            let Stmt::Local(n) = s else {
+                return;
+            };
+
+            // A declaration with a value has its type from that value.
+            if !n.values.is_empty() {
+                return;
+            }
+
+            for binding in &n.names {
+                // The author wrote what it holds, which is the whole ask.
+                if binding.ty.is_some() {
+                    continue;
+                }
+
+                let name = ctx.tok(binding.name.start);
+
+                // An underscore name states that nobody wants the value.
+                if name.starts_with('_') {
+                    continue;
+                }
+
+                /*
+                Nothing assigns it, so `uninitialized_local` reports the line
+                and says the more urgent thing about it.
+                */
+                let never_assigned = ctx
+                    .names
+                    .by_token
+                    .get(&binding.name.start)
+                    .and_then(|&i| ctx.names.bindings.get(i))
+                    .is_some_and(|b| b.writes.is_empty());
+
+                if never_assigned {
+                    continue;
+                }
+
+                out.push(
+                    Finding::new(
+                        "implicit_any_local",
+                        ctx.bytes(TokSpan::new(
+                            binding.name.start as usize,
+                            binding.name.start as usize + 1,
+                        )),
+                        format!(
+                            "{name} has no value and no type, so what it holds is decided elsewhere"
+                        ),
+                    )
+                    .with_help(format!(
+                        "write the type, `local {name}: T`, or give it a value"
+                    )),
+                );
+            }
+        });
     }
 }

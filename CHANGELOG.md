@@ -4,6 +4,23 @@ Notable changes land here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow
 [semver](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- `implicit_any_local`, a lint for `local test` with no value and no type. What
+  the name holds is then decided by whatever assigns it first, and in a file
+  with no `--!strict` directive Luau accepts any later assignment of any type.
+  It denies by default, which no other lint does, because the fix is an
+  annotation and an annotation changes no behaviour. A local that nothing ever
+  assigns is left to `uninitialized_local`, which says the more urgent thing
+  about the same line
+- `[fmt] prefer_const`, which turns a `local` that nothing reassigns into a
+  `const`. The same rule the `prefer_const` lint reports, with the formatter
+  making the edit, and it carries the same `mutated_tables_stay_local` option
+  under the same name. Off by default: it rewrites a keyword, which is a
+  bigger step than moving spaces
+
 ## 0.5.0 - 2026-08-19
 
 ### Added

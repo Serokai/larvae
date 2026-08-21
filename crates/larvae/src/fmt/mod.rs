@@ -51,7 +51,13 @@ pub fn format(src: &str, cfg: &FmtConfig) -> Result<String> {
     }
 
     let trivia = trivia::Trivia::new(src, &lexed.comments);
-    let rebindings = rebind::plan(src, &lexed.toks, &chunk, cfg.require_binding);
+    let rebindings = rebind::plan(
+        src,
+        &lexed.toks,
+        &chunk,
+        cfg.require_binding,
+        &cfg.prefer_const,
+    );
     let emitter = emit::Emitter::new(src, &lexed.toks, &trivia, cfg, rebindings).ignoring(ignored);
     let document = emitter.chunk(&chunk);
     let out = doc::render(&document, cfg.style());

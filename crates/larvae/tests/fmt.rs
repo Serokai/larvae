@@ -10,8 +10,8 @@ whitespace, and every comment must stay.
 
 use larvae::fmt::config::{
     CallParens, CallStyle, CollapseSimpleStatement, FunctionCall, FunctionDeclaration, IfExpansion,
-    IfExpression, IfPlacement, IfStyle, IndentType, LineEndings, ListExpansion, QuoteStyle,
-    SpaceAfterFunctionNames, TableTypes, TypeSeparator,
+    IfExpression, IfPlacement, IfStyle, IndentType, LineEndings, ListExpansion, PreferConst,
+    QuoteStyle, SpaceAfterFunctionNames, TableTypes, TypeSeparator,
 };
 use larvae::fmt::{FmtConfig, format};
 
@@ -2304,6 +2304,116 @@ fn every_list_layout_is_idempotent_and_parses() {
             for line in once.lines() {
                 assert_eq!(line, line.trim_end(), "trailing whitespace from {src:?}");
             }
+        }
+    }
+}
+
+// --- prefer_const -----------------------------------------------------------
+
+fn const_cfg(enabled: bool, mutated_tables_stay_local: bool) -> FmtConfig {
+    FmtConfig {
+        prefer_const: PreferConst {
+            enabled,
+            mutated_tables_stay_local,
+        },
+        ..Default::default()
+    }
+}
+
+/// Off by default, because it rewrites a keyword and not a space.
+#[test]
+fn a_local_keeps_its_keyword_by_default() {
+    assert_eq!(fmt("local x = 1\nprint(x)\n"), "local x = 1\nprint(x)\n");
+}
+
+#[test]
+fn a_local_that_nothing_reassigns_becomes_const() {
+    assert_eq!(
+        fmt_with("local x = 1\nprint(x)\n", const_cfg(true, false)),
+        "const x = 1\nprint(x)\n"
+    );
+}
+
+/// Luau enforces `const`, so a name something assigns has to keep `local`.
+#[test]
+fn a_reassigned_local_keeps_its_keyword() {
+    assert_eq!(
+        fmt_with("local x = 1\nx = 2\nprint(x)\n", const_cfg(true, false)),
+        "local x = 1\nx = 2\nprint(x)\n"
+    );
+}
+
+/*
+Two forms cannot take `const`, and each would be a syntax error.
+
+`const x` is "Missing initializer in const declaration". And `const` binds the
+declaration and not one name in it, so a multi name local moves only when
+every name in it qualifies.
+*/
+#[test]
+fn the_forms_that_cannot_take_const_keep_their_keyword() {
+    assert_eq!(
+        fmt_with("local x\nx = 1\nprint(x)\n", const_cfg(true, false)),
+        "local x\nx = 1\nprint(x)\n"
+    );
+
+    assert_eq!(
+        fmt_with(
+            "local a, b = 1, 2\nb = 3\nprint(a, b)\n",
+            const_cfg(true, false)
+        ),
+        "local a, b = 1, 2\nb = 3\nprint(a, b)\n"
+    );
+
+    assert_eq!(
+        fmt_with("local a, b = 1, 2\nprint(a, b)\n", const_cfg(true, false)),
+        "const a, b = 1, 2\nprint(a, b)\n"
+    );
+}
+
+/*
+A mutated table moves by default, and the option holds it back.
+
+`const t = {}` followed by `t.x = 1` compiles: Luau enforces `const` against
+reassignment of the name and says nothing about the value.
+*/
+#[test]
+fn the_option_keeps_local_on_a_mutated_table() {
+    let src = "local t = {}\nt.x = 1\nprint(t)\n";
+
+    assert_eq!(
+        fmt_with(src, const_cfg(true, false)),
+        "const t = {}\nt.x = 1\nprint(t)\n"
+    );
+    assert_eq!(fmt_with(src, const_cfg(true, true)), src);
+
+    let inserted = "local u = {}\ntable.insert(u, 1)\nprint(u)\n";
+    assert_eq!(fmt_with(inserted, const_cfg(true, true)), inserted);
+}
+
+/// The rewrite has to reparse and has to be stable.
+#[test]
+fn the_const_rewrite_is_idempotent_and_parses() {
+    let sources = [
+        "local x = 1\nprint(x)\n",
+        "local t = {}\nt.x = 1\nprint(t)\n",
+        "const already = 1\nprint(already)\n",
+        "local a, b = 1, 2\nprint(a, b)\n",
+        "local f = function() end\nf()\n",
+    ];
+
+    for src in sources {
+        for cfg in [const_cfg(true, false), const_cfg(true, true)] {
+            let once = fmt_with(src, cfg.clone());
+            let twice = fmt_with(&once, cfg);
+
+            assert_eq!(once, twice, "unstable for {src:?}");
+
+            let lexed = larvae::syntax::lexer::lex(&once)
+                .unwrap_or_else(|e| panic!("{src:?} gave unlexable output, {}", e.message));
+
+            larvae::syntax::parser::parse(&once, &lexed.toks)
+                .unwrap_or_else(|e| panic!("{src:?} gave unparsable output, {}", e.message));
         }
     }
 }

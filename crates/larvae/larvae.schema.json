@@ -926,6 +926,31 @@
           "default": "preserve",
           "description": "Selects which keyword binds a required module. Luau enforces \"const\", so a name that the file reassigns keeps \"local\" and does not become a syntax error. \"preserve\" keeps each declaration as written.\n\n[require_binding \u2192](https://larvae-luau.github.io/docs/reference/formatting#require-binding)"
         },
+        "prefer_const": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Turns a `local` that nothing reassigns into a `const`. The same rule the `prefer_const` lint reports, with the formatter making the edit. Off by default: it rewrites a keyword, which is a bigger step than moving spaces.\n\n[prefer_const \u2192](https://larvae-luau.github.io/docs/reference/formatting#prefer-const)",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "enum": [
+                true,
+                false
+              ],
+              "default": false,
+              "description": "Make the change.\n\n[prefer_const.enabled \u2192](https://larvae-luau.github.io/docs/reference/formatting#prefer-const-enabled)"
+            },
+            "mutated_tables_stay_local": {
+              "type": "boolean",
+              "enum": [
+                true,
+                false
+              ],
+              "default": false,
+              "description": "Keep `local` on a binding the file mutates through a field, `t.x = 1` or `table.insert(t, 1)`. Off by default, because `const` is correct there: Luau enforces it against reassignment of the name and says nothing about the value. The same choice as [lint.options.prefer_const].\n\n[prefer_const.mutated_tables_stay_local \u2192](https://larvae-luau.github.io/docs/reference/formatting#prefer-const-mutated-tables-stay-local)"
+            }
+          }
+        },
         "semicolons": {
           "enum": [
             "never",
@@ -1266,6 +1291,14 @@
             "deny"
           ],
           "description": "Two branches of the same if with identical bodies. Default: warn."
+        },
+        "implicit_any_local": {
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ],
+          "description": "A local declared with no value and no type, so what it holds is decided by whatever assigns it first. In a file with no `--!strict` directive Luau accepts any later assignment of any type, which is the implicit `any` this names. A local that nothing ever assigns is left to `uninitialized_local`, which says the more urgent thing about the same line. The only lint larvae denies by default, because the fix is an annotation and an annotation changes no behaviour. Default: deny."
         },
         "prefer_const": {
           "enum": [

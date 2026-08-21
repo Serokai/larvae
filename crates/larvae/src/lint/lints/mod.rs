@@ -51,6 +51,7 @@ pub static ALL: &[&dyn Lint] = &[
     &luau::NumberLiteralOverflow,
     &luau::PlaceholderRead,
     &luau::TableOperations,
+    &luau::ImplicitAnyLocal,
     &luau::UninitializedLocal,
     &luau::UnknownType,
     // Names.

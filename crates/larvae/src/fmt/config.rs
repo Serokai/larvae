@@ -177,6 +177,39 @@ pub struct SortRequires {
 }
 
 /*
+Turns a `local` that nothing reassigns into a `const`.
+
+The `prefer_const` lint reports this shape. This option is the same rule with
+the formatter making the edit instead of a person, which is why it carries the
+same sub option under the same name.
+
+Off by default. It rewrites a keyword, which is a bigger step than moving
+spaces, and `require_binding` is off for the same reason.
+*/
+/*
+Keys stay snake case here, which is larvae's rule for a key, and it is also
+the spelling `[lint.options.prefer_const]` uses. One option under two tables
+has to be written one way.
+*/
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct PreferConst {
+    #[serde(default)]
+    pub enabled: bool,
+    /*
+    A binding the file mutates through a field keeps `local`.
+
+    Off by default, because `const` is correct there: Luau enforces `const`
+    against reassignment of the name and says nothing about the value, so
+    `const t = {}` followed by `t.x = 1` compiles. The option is for a project
+    that reads `local` as "this one changes", and it is the same choice,
+    spelled the same way, as `[lint.options.prefer_const]`.
+    */
+    #[serde(default)]
+    pub mutated_tables_stay_local: bool,
+}
+
+/*
 Selects when a list between parentheses opens over several lines.
 
 An argument list and a parameter list read the same way here, so one enum
@@ -503,6 +536,10 @@ pub struct FmtConfig {
     /// Selects which keyword binds a required module.
     #[serde(default)]
     pub require_binding: RequireBinding,
+
+    /// Turns a `local` that nothing reassigns into a `const`.
+    #[serde(default)]
+    pub prefer_const: PreferConst,
 
     /// Selects whether a statement ends with a semicolon.
     #[serde(default)]

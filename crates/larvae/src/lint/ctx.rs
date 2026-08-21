@@ -177,7 +177,7 @@ tree. To store those references would need an `unsafe` change of the
 lifetime. A plain walk is cheaper than an `unsafe` block that each reader
 must verify again.
 */
-fn flatten(chunk: &Chunk) -> (Vec<&Expr>, Vec<&Stmt>, Vec<&Block>) {
+pub(crate) fn flatten(chunk: &Chunk) -> (Vec<&Expr>, Vec<&Stmt>, Vec<&Block>) {
     let mut out = Collected::default();
     out.block(&chunk.block);
 
