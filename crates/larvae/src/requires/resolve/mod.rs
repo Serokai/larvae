@@ -75,7 +75,7 @@ pub struct FileCtx<'a> {
 impl<'a> FileCtx<'a> {
     pub fn new(path: &'a Path, mounts: &MountTable, target: Target, style: IndexingStyle) -> Self {
         let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-        let is_init = script_instance_name(file_name).is_none();
+        let is_init = script_instance_name(file_name, mounts.claimed()).is_none();
         let dir = path.parent().unwrap_or(Path::new("")).to_owned();
 
         Self {
@@ -83,7 +83,7 @@ impl<'a> FileCtx<'a> {
             required: std::cell::RefCell::default(),
             dm: mounts.dm_of(path),
             is_init,
-            kind: script_kind(file_name),
+            kind: script_kind(file_name, mounts.claimed()),
             dir,
             target,
             style,

@@ -60,6 +60,18 @@ Notable changes land here. Format follows
 
 ### Fixed
 
+- A require that names a file a worm claims resolves to the Luau the worm
+  writes. The DataModel read the source name, so `App.luaux` became an
+  instance called `App.luaux`, and `require("../Interface/App")` came out as
+  `require("../Interface/App.luaux")`, which points at nothing. The `path`
+  target was already right, because it strips whatever extension it finds; the
+  two Roblox targets were not. A directory whose init file is claimed resolves
+  as well: `Pkg/init.luaux` is written as `Pkg/init.luau`, so `Pkg` is a module
+  and the resolver no longer warns about a require that is correct
+- A claimed script keeps its realm suffix. `boot.client.luaux` read as a plain
+  module, so the checks that apply to a LocalScript never ran on it, and
+  `boot.server.luaux` had the same gap. UI runs on the server as well as the
+  client, so both halves matter
 - A name used only by a type is no longer reported as unused. The token walk
   that recovers a reference from inside a type skipped a name after a colon,
   which is right for `obj:method` and wrong inside a type: `type T = { e:

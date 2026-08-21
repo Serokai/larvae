@@ -68,6 +68,15 @@ pub struct Outcome {
     the whole project in memory.
     */
     pub sources: std::collections::BTreeMap<PathBuf, String>,
+    /*
+    The extensions a worm front-end claims, without the dot.
+
+    The whole project checks in `larvae check` read a file name to decide
+    what the file is, and a claimed file is written as Luau. So the checks
+    need the same list the pipeline used, and the run is the only place that
+    knows it.
+    */
+    pub claimed: Vec<String>,
 }
 
 impl Outcome {
@@ -178,7 +187,8 @@ fn run_inner(
     drop(worms);
 
     let skip = setup::skip_dirs(&root, config);
-    let mounts = setup::mount_table(&root, config, project.as_ref(), &mut diags);
+    let mounts = setup::mount_table(&root, config, project.as_ref(), &mut diags)
+        .with_claimed(claimed.clone());
     let luaurc = setup::luaurc_index(&root, &skip, &mut diags);
     let (to_process, to_copy) = setup::discover(&root, &roots, config, &claimed)?;
 
@@ -535,6 +545,7 @@ fn run_inner(
         build_project,
         graph,
         sources,
+        claimed,
     })
 }
 

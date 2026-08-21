@@ -21,6 +21,16 @@ pub struct MountTable {
     the project file.
     */
     map: crate::project::sourcemap::SourceMap,
+    /*
+    The extensions a worm front-end claims, without the dot.
+
+    The DataModel describes the output tree, and the output holds Luau. A
+    worm compiles `App.luaux` into `App.luau`, so the instance is named
+    `App` and every naming rule here has to read that name. Without the list
+    the instance is named `App.luaux`, and the require that reaches for it
+    points at nothing.
+    */
+    claimed: Vec<String>,
 }
 
 /// Replication/runtime classification of a DataModel location
@@ -74,7 +84,19 @@ impl MountTable {
         Self {
             mounts,
             map: Default::default(),
+            claimed: Vec::new(),
         }
+    }
+
+    /// The extensions a worm front-end claims, without the dot
+    pub fn with_claimed(mut self, claimed: Vec<String>) -> Self {
+        self.claimed = claimed;
+
+        self
+    }
+
+    pub fn claimed(&self) -> &[String] {
+        &self.claimed
     }
 
     /// Use the rojo sourcemap as the authority; mounts cover what it misses
@@ -169,7 +191,7 @@ impl MountTable {
             if fs_path.is_dir() {
                 segments.push((*comp).to_string());
             } else {
-                match script_instance_name(comp) {
+                match script_instance_name(comp, &self.claimed) {
                     // init.* collapses into the parent directory node.
                     None => {}
                     Some(name) => segments.push(name.to_string()),
@@ -189,12 +211,38 @@ impl MountTable {
     }
 }
 
-/// The instance name for a script file: foo.server.luau becomes foo, and init files return None
-pub fn script_instance_name(file_name: &str) -> Option<&str> {
-    let stem = file_name
+/*
+Drop the module extension: `App.luau`, `App.lua` and a claimed `App.luaux`
+all read as `App`.
+
+A claimed extension counts, because the pipeline writes that file as Luau.
+`App.luaux` reaches the output as `App.luau`, so every rule that reads the
+name has to read the name the output carries. A file with no module
+extension keeps its whole name, which leaves a stray `notes.md` alone.
+*/
+fn module_stem<'a>(file_name: &'a str, claimed: &[String]) -> &'a str {
+    if let Some(stem) = file_name
         .strip_suffix(".luau")
         .or_else(|| file_name.strip_suffix(".lua"))
-        .unwrap_or(file_name);
+    {
+        return stem;
+    }
+
+    for ext in claimed {
+        if let Some(stem) = file_name
+            .strip_suffix(ext.as_str())
+            .and_then(|s| s.strip_suffix('.'))
+        {
+            return stem;
+        }
+    }
+
+    file_name
+}
+
+/// The instance name for a script file: foo.server.luau becomes foo, and init files return None
+pub fn script_instance_name<'a>(file_name: &'a str, claimed: &[String]) -> Option<&'a str> {
+    let stem = module_stem(file_name, claimed);
     let stem = stem
         .strip_suffix(".server")
         .or_else(|| stem.strip_suffix(".client"))
@@ -210,11 +258,8 @@ pub enum ScriptKind {
     Module,
 }
 
-pub fn script_kind(file_name: &str) -> ScriptKind {
-    let stem = file_name
-        .strip_suffix(".luau")
-        .or_else(|| file_name.strip_suffix(".lua"))
-        .unwrap_or(file_name);
+pub fn script_kind(file_name: &str, claimed: &[String]) -> ScriptKind {
+    let stem = module_stem(file_name, claimed);
     if stem.ends_with(".server") {
         ScriptKind::Server
     } else if stem.ends_with(".client") {
@@ -319,5 +364,72 @@ mod tests {
             vec!["ReplicatedStorage".to_string(), "packages".into()]
         );
         assert!(parse_game_path("./relative").is_none());
+    }
+
+    /*
+    A claimed file is named for the Luau it becomes.
+
+    A worm front-end compiles `App.luaux` into `App.luau`, so the instance
+    is `App`. Reading the source name instead gave `App.luaux`, and the
+    require that reached for it pointed at nothing.
+    */
+    #[test]
+    fn a_claimed_extension_drops_like_luau_does() {
+        let claimed = vec!["luaux".to_string(), "rune".to_string()];
+
+        assert_eq!(script_instance_name("App.luaux", &claimed), Some("App"));
+        assert_eq!(script_instance_name("App.rune", &claimed), Some("App"));
+        assert_eq!(script_instance_name("App.luau", &claimed), Some("App"));
+
+        // An init file collapses into its directory whatever it is written in.
+        assert_eq!(script_instance_name("init.luaux", &claimed), None);
+        assert_eq!(script_instance_name("init.luau", &claimed), None);
+    }
+
+    /*
+    A claimed script keeps its realm suffix.
+
+    UI runs on the server as well as the client, so `boot.server.luaux` is a
+    Script and `boot.client.luaux` is a LocalScript. Without the claim both
+    read as a plain module, and the realm check that stops a client from
+    requiring ServerStorage never ran on them.
+    */
+    #[test]
+    fn a_claimed_script_keeps_its_realm() {
+        let claimed = vec!["luaux".to_string()];
+
+        assert_eq!(
+            script_kind("boot.server.luaux", &claimed),
+            ScriptKind::Server
+        );
+        assert_eq!(
+            script_kind("boot.client.luaux", &claimed),
+            ScriptKind::Client
+        );
+        assert_eq!(script_kind("App.luaux", &claimed), ScriptKind::Module);
+
+        assert_eq!(
+            script_instance_name("boot.server.luaux", &claimed),
+            Some("boot")
+        );
+        assert_eq!(
+            script_instance_name("boot.client.luaux", &claimed),
+            Some("boot")
+        );
+    }
+
+    /*
+    A project with no worms reads exactly as it always did, and a file that
+    no worm claims keeps its whole name.
+    */
+    #[test]
+    fn an_unclaimed_extension_is_left_whole() {
+        assert_eq!(script_instance_name("App.luaux", &[]), Some("App.luaux"));
+        assert_eq!(script_kind("boot.client.luaux", &[]), ScriptKind::Module);
+
+        // A stray file in the tree is not a module, and its name is not a stem.
+        let claimed = vec!["luaux".to_string()];
+
+        assert_eq!(script_instance_name("notes.md", &claimed), Some("notes.md"));
     }
 }

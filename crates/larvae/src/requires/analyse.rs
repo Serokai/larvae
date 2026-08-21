@@ -22,12 +22,18 @@ pub fn run(
     cfg: &CheckConfig,
     requires: &crate::config::RequiresConfig,
     root: &Path,
+    /*
+    The extensions a worm front-end claims, without the dot. A claimed file
+    is written as Luau, so `App.client.luaux` is a LocalScript exactly as
+    `App.client.luau` is, and the same checks have to reach it.
+    */
+    claimed: &[String],
 ) -> Vec<Diag> {
     let mut out = Vec::new();
 
     cycles(graph, cfg, &mut out);
-    unused(graph, cfg, root, &mut out);
-    early_require(graph, cfg, requires, &mut out);
+    unused(graph, cfg, root, claimed, &mut out);
+    early_require(graph, cfg, requires, claimed, &mut out);
 
     out
 }
@@ -47,6 +53,7 @@ fn early_require(
     graph: &Graph,
     cfg: &CheckConfig,
     requires: &crate::config::RequiresConfig,
+    claimed: &[String],
     out: &mut Vec<Diag>,
 ) {
     use crate::config::{IndexingStyle, Target};
@@ -68,7 +75,7 @@ fn early_require(
     for node in graph.nodes() {
         let name = node.file_name().and_then(|s| s.to_str()).unwrap_or("");
 
-        if script_kind(name) != ScriptKind::Client || graph.requires_of(node).is_empty() {
+        if script_kind(name, claimed) != ScriptKind::Client || graph.requires_of(node).is_empty() {
             continue;
         }
 
@@ -146,7 +153,7 @@ When a worm owns the requires of a file, the graph has no edges for that
 file, and the file can require any module. Then "nothing requires this" is a
 guess for every module, so the analysis reports nothing.
 */
-fn unused(graph: &Graph, cfg: &CheckConfig, root: &Path, out: &mut Vec<Diag>) {
+fn unused(graph: &Graph, cfg: &CheckConfig, root: &Path, claimed: &[String], out: &mut Vec<Diag>) {
     let Some(severity) = severity(cfg.unused_modules) else {
         return;
     };
@@ -166,7 +173,7 @@ fn unused(graph: &Graph, cfg: &CheckConfig, root: &Path, out: &mut Vec<Diag>) {
         .collect();
 
     for module in graph.unused(&configured) {
-        if !is_module_script(&module) {
+        if !is_module_script(&module, claimed) {
             continue;
         }
 
@@ -184,10 +191,10 @@ fn unused(graph: &Graph, cfg: &CheckConfig, root: &Path, out: &mut Vec<Diag>) {
 }
 
 /// True when Roblox would require this file, not run it
-fn is_module_script(path: &Path) -> bool {
+fn is_module_script(path: &Path, claimed: &[String]) -> bool {
     let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
 
-    script_kind(name) == ScriptKind::Module
+    script_kind(name, claimed) == ScriptKind::Module
 }
 
 #[cfg(test)]
@@ -214,6 +221,7 @@ mod tests {
             cfg,
             &crate::config::RequiresConfig::default(),
             Path::new("/project"),
+            &[],
         )
     }
 
@@ -231,7 +239,7 @@ mod tests {
         cfg: &CheckConfig,
         requires: &crate::config::RequiresConfig,
     ) -> Vec<Diag> {
-        run(graph, cfg, requires, Path::new("/project"))
+        run(graph, cfg, requires, Path::new("/project"), &[])
     }
 
     fn denying() -> CheckConfig {

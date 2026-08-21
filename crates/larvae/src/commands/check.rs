@@ -28,6 +28,7 @@ pub fn run(root: &Path, config: Option<PathBuf>, profile: Option<String>) -> Res
         &config.check,
         &config.requires,
         &root,
+        &outcome.claimed,
     ));
 
     crate::diag::sort(&mut outcome.diags);

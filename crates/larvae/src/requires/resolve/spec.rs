@@ -91,7 +91,18 @@ pub(super) fn resolve_module(
         }
     }
 
-    if base.is_dir() && (base.join("init.luau").is_file() || base.join("init.lua").is_file()) {
+    /*
+    A claimed init file counts, for the same reason a claimed module does.
+    The pipeline writes `init.luaux` as `init.luau`, so the directory is a
+    module at runtime and a require that names it has to resolve here.
+    */
+    let init = ["luau", "lua"]
+        .iter()
+        .map(|e| (*e).to_owned())
+        .chain(claimed.iter().cloned())
+        .any(|ext| base.join(format!("init.{ext}")).is_file());
+
+    if base.is_dir() && init {
         found.push(ModuleNode::Dir(base.to_owned()));
     }
 
@@ -201,6 +212,35 @@ mod claimed_modules {
     `widget.luau` beside `widget.luaux` gives two modules for one require, and
     the RFC makes that an error rather than a guess.
     */
+    /*
+    A directory with a claimed init file is a module.
+
+    The pipeline writes `Pkg/init.luaux` as `Pkg/init.luau`, so `Pkg` is a
+    module at runtime. The resolver looked for `init.luau` alone and warned
+    about a require that was correct.
+    */
+    #[test]
+    fn a_directory_with_a_claimed_init_resolves() {
+        let dir = tree(&["Pkg/init.luaux"]);
+        let found = resolve_module(&dir.path().join("Pkg"), &["luaux".to_string()])
+            .expect("no ambiguity")
+            .expect("the directory is a module");
+
+        assert!(matches!(found, ModuleNode::Dir(_)));
+    }
+
+    /// Without the claim the same directory holds no module, as before.
+    #[test]
+    fn a_claimed_init_needs_the_claim() {
+        let dir = tree(&["Pkg/init.luaux"]);
+
+        assert!(
+            resolve_module(&dir.path().join("Pkg"), &[])
+                .expect("no ambiguity")
+                .is_none()
+        );
+    }
+
     #[test]
     fn a_claimed_file_beside_a_luau_one_is_ambiguous() {
         let dir = tree(&["widget.luau", "widget.luaux"]);
