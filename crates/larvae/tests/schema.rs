@@ -95,7 +95,17 @@ fn fmt_options_match_the_config() {
     let schema = schema();
     let documented = keys(&schema["$defs"]["fmt"]["properties"]);
 
-    let default = toml::Value::try_from(FmtConfig::default()).expect("the config serializes");
+    /*
+    `recommended` is set, because toml omits a `None` on serialization and
+    the default leaves it absent. The test would then read a documented key
+    as one that does not exist.
+    */
+    let full = FmtConfig {
+        recommended: Some(true),
+        ..FmtConfig::default()
+    };
+
+    let default = toml::Value::try_from(full).expect("the config serializes");
     let mut real: BTreeSet<String> = default
         .as_table()
         .expect("a table")

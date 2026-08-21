@@ -13,7 +13,7 @@ change. So a run over a formatted tree changes no mtimes and does not activate
 a file watcher.
 */
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -41,6 +41,21 @@ pub fn run(
     config: Option<PathBuf>,
 ) -> Result<ExitCode> {
     let mut cfg = discover(root, config.clone())?;
+
+    /*
+    A project that turned the formatter off gets no edits and a zero exit,
+    `--check` included. Stdin still answers with its input, because a
+    pipeline reads the output of this command as the file.
+    */
+    if !cfg.enabled {
+        if stdin {
+            let mut bytes = Vec::new();
+            std::io::stdin().read_to_end(&mut bytes)?;
+            std::io::stdout().write_all(&bytes)?;
+        }
+
+        return Ok(ExitCode::SUCCESS);
+    }
 
     /*
     Stdin alone has no file path, so it formats only Luau. An editor that

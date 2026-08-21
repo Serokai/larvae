@@ -18,6 +18,11 @@ impl Server {
             return Ok(Value::Null);
         };
 
+        // `[fmt] enabled = false` reaches the editor as a formatter with no edits
+        if !self.fmt.enabled {
+            return Ok(json!([]));
+        }
+
         let Some(formatted) = self.formatted(uri, src)? else {
             return Ok(json!([]));
         };

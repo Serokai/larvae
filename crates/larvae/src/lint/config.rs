@@ -84,6 +84,16 @@ impl<'de> Deserialize<'de> for StdLib {
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct LintConfig {
     /*
+    Whether `larvae lint` reports on this project at all.
+
+    `false` reports nothing and exits zero. A project that wants larvae for
+    its formatter and its requires, and keeps another linter, says so here
+    rather than by not running the command.
+    */
+    #[serde(default)]
+    pub enabled: Option<bool>,
+
+    /*
     Whether a lint larvae recommends is on without the project saying so.
 
     Three states, as Biome has them. Absent and `true` both mean the defaults
@@ -127,6 +137,11 @@ pub struct LintConfig {
 
 impl LintConfig {
     /// Returns the level for one lint. The lint's own default applies unless the project sets one.
+    /// Reports whether the command runs. Absent reads as on.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled != Some(false)
+    }
+
     pub fn level_for(&self, name: &str, default: Level) -> Level {
         if let Some(level) = self.rules.get(name) {
             return *level;
@@ -193,6 +208,7 @@ impl LintConfig {
             which is worse than not having it.
             */
             config.recommended = over.recommended.or(config.recommended);
+            config.enabled = over.enabled.or(config.enabled);
 
             config.rules.extend(over.rules);
             config.options.extend(over.options);
@@ -255,8 +271,9 @@ fn selene_file(root: &Path) -> Result<Option<LintConfig>> {
 
     Ok(Some(LintConfig {
         include: Vec::new(),
-        // selene has no such key, so a selene.toml states nothing about it
+        // selene has no such key, so a selene.toml states nothing about them
         recommended: None,
+        enabled: None,
         rules: file.rules,
         options: file.config,
         std,
@@ -455,5 +472,30 @@ mod tests {
 
         // An absent or malformed table falls back to the default. The run does not fail.
         assert_eq!(cfg.options_for::<Opts>("missing"), Opts::default());
+    }
+
+    #[test]
+    fn the_enabled_switch_reads_absent_as_on() {
+        let dir = tempfile::tempdir().unwrap();
+
+        assert!(LintConfig::default().is_enabled());
+
+        let over = toml::from_str::<toml::Value>("enabled = false").unwrap();
+        let cfg = LintConfig::discover(dir.path(), Some(&over)).unwrap();
+
+        assert!(!cfg.is_enabled());
+
+        /*
+        The merge has to carry it. A field by field merge that forgets the
+        key leaves the option parsed and inert, which is the defect that
+        `recommended` had.
+        */
+        let over = toml::from_str::<toml::Value>("enabled = true").unwrap();
+
+        assert!(
+            LintConfig::discover(dir.path(), Some(&over))
+                .unwrap()
+                .is_enabled()
+        );
     }
 }

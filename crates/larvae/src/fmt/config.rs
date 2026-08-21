@@ -501,6 +501,32 @@ impl TypeSeparator {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct FmtConfig {
+    /*
+    Whether `larvae fmt` changes this project at all.
+
+    `false` leaves every file as it is. A project that wants larvae for its
+    lints and its requires, and keeps another formatter, says so here rather
+    than by not running the command.
+    */
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /*
+    Whether larvae's own defaults apply, or only the ones the project wrote.
+
+    Three states, as `[lint] recommended` has them. Absent and `true` both
+    mean larvae's defaults apply, which is what larvae always did. `false`
+    starts from a base that changes as little as possible, and the project
+    builds up from there.
+
+    Only the options where larvae has an opinion move: a trailing comma that
+    holds a table open, the space inside a brace, and the trailing comma
+    larvae writes into a table it opened. Every other default is either what
+    stylua does or a setting that changes nothing until a project asks for it.
+    */
+    #[serde(default)]
+    pub recommended: Option<bool>,
+
     // --- stylua parity: the same names and the same defaults -------------
     #[serde(default = "default_width")]
     pub column_width: usize,
@@ -661,6 +687,26 @@ impl Default for FmtConfig {
 
 impl FmtConfig {
     /*
+    The base that `recommended = false` starts from.
+
+    Three options carry an opinion of larvae's and change a file on their
+    own. The rest of the defaults are stylua's, or they are a setting that
+    does nothing until a project asks for it, so they stay as they are: a
+    base that turned those off would not be neutral, it would be a third
+    style nobody chose.
+    */
+    pub fn neutral() -> Self {
+        Self {
+            magic_trailing_comma: false,
+            space_inside_braces: false,
+            trailing_comma: false,
+            ..Self::default()
+        }
+    }
+}
+
+impl FmtConfig {
+    /*
     The same settings, with the named options back at their own defaults.
 
     A project uses this to keep one option out of the files that a worm
@@ -758,7 +804,25 @@ impl FmtConfig {
     `[fmt]` in `larvae.toml` wins, because it is the more specific file.
     */
     pub fn discover(root: &Path, larvae: Option<&toml::Value>) -> Result<Self> {
-        let mut config = stylua_file(root)?.unwrap_or_default();
+        /*
+        `recommended` decides what the merge starts from, so an option the
+        project wrote lands on top of it in the usual way and nothing has to
+        track which keys were written.
+
+        A `stylua.toml` states the style of the project already, so it is the
+        base where one exists, whatever `recommended` says.
+        */
+        let asked = larvae
+            .and_then(|value| value.get("recommended"))
+            .and_then(toml::Value::as_bool);
+
+        let base = match asked {
+            Some(false) => Self::neutral(),
+
+            _ => Self::default(),
+        };
+
+        let mut config = stylua_file(root)?.unwrap_or(base);
 
         if let Some(value) = larvae {
             config = config.merged(value)?;
@@ -1109,5 +1173,60 @@ call_parentheses = "NoSingleTable"
             .expect_err("no worm declares it");
 
         assert!(format!("{err:#}").contains("colum_width"), "{err:#}");
+    }
+
+    #[test]
+    fn recommended_false_drops_the_opinions_and_keeps_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let over = toml::from_str::<toml::Value>("recommended = false").unwrap();
+        let cfg = FmtConfig::discover(dir.path(), Some(&over)).unwrap();
+
+        assert!(!cfg.magic_trailing_comma);
+        assert!(!cfg.space_inside_braces);
+        assert!(!cfg.trailing_comma);
+
+        // Everything else is stylua's default, and `recommended` does not move it.
+        let same = FmtConfig::default();
+
+        assert_eq!(cfg.column_width, same.column_width);
+        assert_eq!(cfg.indent_width, same.indent_width);
+        assert!(cfg.final_newline);
+    }
+
+    #[test]
+    fn a_key_the_project_wrote_beats_the_neutral_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = "recommended = false\nspace_inside_braces = true";
+        let over = toml::from_str::<toml::Value>(text).unwrap();
+        let cfg = FmtConfig::discover(dir.path(), Some(&over)).unwrap();
+
+        assert!(cfg.space_inside_braces);
+        assert!(!cfg.trailing_comma);
+    }
+
+    #[test]
+    fn recommended_absent_is_the_same_config_as_before_the_option() {
+        let dir = tempfile::tempdir().unwrap();
+        let over = toml::from_str::<toml::Value>("column_width = 100").unwrap();
+        let cfg = FmtConfig::discover(dir.path(), Some(&over)).unwrap();
+
+        assert!(cfg.magic_trailing_comma);
+        assert!(cfg.space_inside_braces);
+        assert!(cfg.trailing_comma);
+        assert_eq!(cfg.column_width, 100);
+    }
+
+    #[test]
+    fn the_enabled_switch_defaults_to_on() {
+        assert!(FmtConfig::default().enabled);
+
+        let dir = tempfile::tempdir().unwrap();
+        let over = toml::from_str::<toml::Value>("enabled = false").unwrap();
+
+        assert!(
+            !FmtConfig::discover(dir.path(), Some(&over))
+                .unwrap()
+                .enabled
+        );
     }
 }

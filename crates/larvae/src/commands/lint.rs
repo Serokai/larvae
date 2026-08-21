@@ -39,6 +39,15 @@ pub fn run(
     let cfg = discover(root, config.clone())?;
 
     /*
+    A project that turned the linter off gets no report and a zero exit, on
+    every path including stdin. The command still runs, so a script or an
+    editor that calls it needs no branch of its own.
+    */
+    if !cfg.is_enabled() {
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    /*
     Stdin alone has no file path, so it lints only Luau. An editor that pipes
     a claimed file names the path with --stdin-filepath, and the pool routes
     on it exactly as a walk does.
