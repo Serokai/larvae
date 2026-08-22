@@ -6,12 +6,14 @@ a lint by its name, and the name stays the same in every file. Thus to move a
 lint between these files changes nothing that a project can see.
 */
 
+pub mod conditionals;
 pub mod configured;
 pub mod correctness;
 pub mod luau;
 pub mod names;
 pub mod original;
 pub mod roblox;
+pub mod shape;
 pub mod style;
 
 use super::Lint;
@@ -52,6 +54,7 @@ pub static ALL: &[&dyn Lint] = &[
     &luau::PlaceholderRead,
     &luau::TableOperations,
     &luau::ImplicitAnyLocal,
+    &luau::ImplicitAnyParameter,
     &luau::UninitializedLocal,
     &luau::UnknownType,
     // Names.
@@ -67,6 +70,7 @@ pub static ALL: &[&dyn Lint] = &[
     &configured::HighCyclomaticComplexity,
     &configured::ManualTableClone,
     &configured::PreferConst,
+    &configured::RestrictedGlobals,
     // Roblox data types.
     &roblox::RobloxIncorrectColor3NewBounds,
     &roblox::RobloxSuspiciousUdim2New,
@@ -77,25 +81,40 @@ pub static ALL: &[&dyn Lint] = &[
     &original::SelfAssignment,
     &original::StringConcatInLoop,
     &original::ShadowedLoopWork,
+    &original::LengthAsCondition,
+    &original::BuiltinShadowed,
+    &original::IgnoredPcallResult,
     // Style.
     &style::EmptyIf,
     &style::EmptyLoop,
     &style::MixedTable,
     &style::MultipleStatements,
     &style::ParentheseConditions,
+    &shape::ConstantCondition,
+    &shape::ElseAfterReturn,
+    &shape::CollapsibleIf,
+    &shape::NegatedCondition,
+    &conditionals::AndOrConditional,
+    &conditionals::IfExpressionAssignment,
 ];
 
 /*
 The boilerplate that every lint shares.
 
-Each entry declares the unit type, the name that a user writes, the default
-level, and the one-line explanation. The lint itself is the `check` function,
-which the author writes as normal code. Thus the author writes only the part
-that differs per lint.
+Each entry declares the unit type, the name that a user writes, the group it
+belongs to, the default level, and the one-line explanation. The lint itself
+is the `check` function, which the author writes as normal code. Thus the
+author writes only the part that differs per lint.
+
+The group is what a project sets under `[lint.groups]`, and it is also how
+`--explain` and the docs order the list. The file a lint lives in is a
+separate thing and stays that way: these files split by where a lint came
+from, so `configured.rs` holds a compile error beside an opinion about branch
+counts. That is a useful editing category and a useless configuration one.
 */
 #[macro_export]
 macro_rules! lints {
-    ($($ty:ident => $name:literal, $level:ident, $about:literal;)*) => {
+    ($($ty:ident => $name:literal, $group:ident, $level:ident, $about:literal;)*) => {
         $(
             pub struct $ty;
 
@@ -106,6 +125,10 @@ macro_rules! lints {
 
                 fn default_level(&self) -> $crate::lint::Level {
                     $crate::lint::Level::$level
+                }
+
+                fn group(&self) -> $crate::lint::Group {
+                    $crate::lint::Group::$group
                 }
 
                 fn about(&self) -> &'static str {

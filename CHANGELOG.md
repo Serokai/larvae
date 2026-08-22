@@ -20,6 +20,34 @@ Notable changes land here. Format follows
   the opinion changes a file. Every other default is either stylua's or a
   setting that does nothing until a project asks for it, so `recommended` does
   not move it
+- Eleven lints, mostly Luau equivalents of Biome rules. Four fill real gaps
+  that Luau's own linter reports on none of, checked against luau-lsp:
+  `length_as_condition` (deny), `builtin_shadowed`, `ignored_pcall_result` and
+  `constant_condition`. Two report a conditional used as a value, both allow:
+  `and_or_conditional` and `if_expression_assignment`. Three report the shape
+  of a branch, all allow: `else_after_return`, `collapsible_if` and
+  `negated_condition`. And two more: `implicit_any_parameter` (allow, the
+  sibling of `implicit_any_local` on the other side of the call) and
+  `restricted_globals` (silent until `[lint.options.restricted_globals]` names
+  one, so it costs nothing until a project asks)
+- `[lint.groups]`, a level for a whole kind of lint at once: `correctness`,
+  `suspicious`, `style`, `complexity`, `performance` and `roblox`. It sits
+  between `recommended` and `[lint.rules]`, so a name the project wrote always
+  wins and a group covers every lint it did not name. Two rules are worth
+  knowing. The table is separate from `[lint.rules]` and not nested inside it,
+  because a table there already means the lints of a worm of that name and
+  nothing reserves a worm name. And a group does not wake a lint that is
+  `allow` on purpose: `style = "info"` asks the style lints a project already
+  sees to say less, and `prefer_const` stays off until the project names it
+- `info`, a level below `warn`. It reports and it leaves the exit code alone,
+  exactly as `warn` does. The two differ in what they ask of the reader, and an
+  editor draws an info as a hint and a warning as a squiggle. The summary line
+  counts them separately, and only when a project uses the level
+- `larvae lint --explain <name>` prints the group of a lint, and the list it
+  prints when a name misses is grouped rather than one alphabetical run of 52
+- `larvae init` writes `recommended = true` into `[fmt]` and `[lint]`. The
+  value is the default already; the key is the point. A key that is there can
+  be turned off, and a key that is absent has to be found in the docs first
 - `[lint] recommended`, as Biome has it. Absent and `true` both mean the
   default levels apply, which is what larvae always did. `false` starts every
   lint at `allow`, so a project gets the lints it names and no others. A level
@@ -37,8 +65,16 @@ Notable changes land here. Format follows
 
 ### Changed
 
-- Four lints deny by default now: `duplicate_keys`, `duplicate_local`,
-  `format_string` and `zero_step_loop`. They join `undefined_variable`. The bar
+- `misleading_and_or` reaches a middle that syntax proves is a boolean. It
+  fired only on a literal `false` or `nil`, but `ready and (count == 0) or
+  "pending"` gives "pending" when the count is not zero, which is exactly when
+  the author wanted `false`. A comparison yields a boolean because it is a
+  comparison, so the wider net needs no types. The two cases carry different
+  messages: the literal is wrong for every input and the boolean is wrong for
+  half of them
+- Five lints deny by default now: `duplicate_keys`, `duplicate_local`,
+  `format_string`, `zero_step_loop` and `length_as_condition`. They join
+  `undefined_variable`. The bar
   is two things at once: no reading of the code makes the finding wrong,
   because each check reads a literal and never a runtime value, and the code as
   written cannot be what the author meant. `{ a = 1, a = 2 }` discards the

@@ -16,21 +16,23 @@ use crate::syntax::ast::*;
 use super::correctness::{each_block, each_expr, each_stmt};
 
 lints! {
-    BadStringEscape => "bad_string_escape", Warn,
+    BadStringEscape => "bad_string_escape", Correctness, Warn,
         "an escape sequence the language does not define";
-    Deprecated => "deprecated", Warn,
+    Deprecated => "deprecated", Style, Warn,
         "a function that still works but has been replaced";
-    HighCyclomaticComplexity => "high_cyclomatic_complexity", Allow,
+    HighCyclomaticComplexity => "high_cyclomatic_complexity", Complexity, Allow,
         "a function with more branches than anyone can hold at once";
-    ManualTableClone => "manual_table_clone", Warn,
+    ManualTableClone => "manual_table_clone", Performance, Warn,
         "a loop that copies a table, which table.clone does in one call";
-    MismatchedArgCount => "mismatched_arg_count", Warn,
+    MismatchedArgCount => "mismatched_arg_count", Correctness, Warn,
         "calling a function in this file with the wrong number of arguments";
-    MustUse => "must_use", Warn,
+    MustUse => "must_use", Correctness, Warn,
         "calling a pure function and discarding what it returned";
-    PreferConst => "prefer_const", Allow,
+    PreferConst => "prefer_const", Style, Allow,
         "a local that nothing reassigns, which const states outright";
-    RestrictedModulePaths => "restricted_module_paths", Warn,
+    RestrictedGlobals => "restricted_globals", Style, Warn,
+        "reading a global the project has ruled out";
+    RestrictedModulePaths => "restricted_module_paths", Style, Warn,
         "requiring a module the project has ruled out";
 }
 
@@ -416,6 +418,70 @@ impl RestrictedModulePaths {
                         "restricted_module_paths",
                         ctx.bytes(*span),
                         format!("{path} is restricted"),
+                    )
+                    .with_help(why.clone()),
+                );
+            }
+        });
+    }
+}
+
+// --- restricted_globals ----------------------------------------------------
+
+/*
+The globals that the project forbids, as `name = "why"`.
+
+The map is the whole table, and not a key inside it, so a project writes
+`[lint.options.restricted_globals]` and then one line per name. The reason is
+required, because the message a reader gets is the reason. A list of bare
+names would report "this is restricted" and leave the reader to guess.
+*/
+#[derive(Deserialize, Default)]
+#[serde(transparent)]
+pub struct RestrictedGlobalsOptions {
+    pub names: std::collections::BTreeMap<String, String>,
+}
+
+impl RestrictedGlobals {
+    /*
+    `loadstring("return 1")`, where the project bans `loadstring`.
+
+    This lint is fully config driven, and it is silent until a project fills
+    the config in. Thus the default level costs a project nothing.
+
+    The use is a global that works and that the project still refuses.
+    `loadstring` compiles at runtime, `getfenv` deoptimises the function
+    that holds it, and a house style bans `print` in shipped code. None of
+    them is wrong in general, so a built-in list does not exist and cannot
+    exist.
+
+    A name only counts when it is the global. A local of the same name
+    belongs to the author, and the project ruled out the global.
+    */
+    fn check(ctx: &LintCtx<'_>, out: &mut Vec<Finding>) {
+        let options: RestrictedGlobalsOptions = ctx.cfg.options_for("restricted_globals");
+
+        if options.names.is_empty() {
+            return;
+        }
+
+        each_expr(ctx, out, |ctx, e, out| {
+            let Expr::Name(span) = e else {
+                return;
+            };
+
+            if !ctx.names.is_global(span.start) {
+                return;
+            }
+
+            let name = ctx.text(*span);
+
+            if let Some(why) = options.names.get(name) {
+                out.push(
+                    Finding::new(
+                        "restricted_globals",
+                        ctx.bytes(*span),
+                        format!("{name} is restricted"),
                     )
                     .with_help(why.clone()),
                 );
