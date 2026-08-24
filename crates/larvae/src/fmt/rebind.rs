@@ -231,7 +231,11 @@ and the `non_const_require` lint: one name, one value, no type annotation. A
 multi binding cannot be const one name at a time, and an annotated local
 states something that the author cared about.
 */
-fn single_require_binding<'a>(src: &str, toks: &[Tok], local: &'a Local) -> Option<&'a Binding> {
+pub(super) fn single_require_binding<'a>(
+    src: &str,
+    toks: &[Tok],
+    local: &'a Local,
+) -> Option<&'a Binding> {
     let ([binding], [value]) = (local.names.as_slice(), local.values.as_slice()) else {
         return None;
     };
@@ -262,7 +266,7 @@ The walk is written out and does not go through the shared `Visit` trait.
 That trait hands a callback a reference whose lifetime is the visit call and
 not the tree, so the collector cannot store those references.
 */
-fn collect<'a>(chunk: &'a Chunk, out: &mut Vec<&'a Local>) {
+pub(super) fn collect<'a>(chunk: &'a Chunk, out: &mut Vec<&'a Local>) {
     block(&chunk.block, out);
 }
 

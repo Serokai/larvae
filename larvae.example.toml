@@ -181,6 +181,13 @@ space_inside_parens = false              # f( a ) rather than f(a)
 space_inside_brackets = false            # t[ k ] rather than t[k]
 trailing_comma = true                    # a table that broke keeps its last comma
 
+# What to do with a required module that nothing uses: underscore renames it to
+# `_Name`, remove deletes the line. `ignore` is the default, because `require`
+# runs a module the first time a file asks for it, so a module can do its work
+# by being required at all, and deleting the line stops that work. A name that
+# only a type reads counts as used.
+unused_imports = "ignore"                # or "underscore", "remove"
+
 exclude = ["Packages", "**/*.gen.luau"]  # relative to the project root
 # syntax = "Luau"                        # accepted from stylua, and ignored
 

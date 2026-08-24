@@ -4,6 +4,26 @@ Notable changes land here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow
 [semver](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- `[fmt] unused_imports`, which decides what the formatter does with a required
+  module that nothing uses. `ignore` leaves it as written, `underscore` renames
+  it to `_Name`, and `remove` deletes the declaration. `ignore` is the default,
+  and the default matters more here than for the other options: `require` runs
+  a module the first time a file asks for it, so a module can do its work by
+  being required at all, and deleting the line stops that work while the file
+  still compiles. Larvae cannot see inside that file, so the project decides.
+  A name that only a type reads counts as used, which is the case the option
+  turns on for: the parser consumes type syntax for its extent and does not
+  interpret it, so a walk of the expressions never sees the name again, and the
+  resolver the linter builds recovers the reference. A name that already opens
+  with `_` is left alone, a declaration binding more than one name is left
+  alone, and a statement inside a `fmt off` region is never removed. A removal
+  keeps every comment around it: a formatter may rewrite code and may not
+  delete prose
+
 ## 0.6.0 - 2026-08-21
 
 ### Added

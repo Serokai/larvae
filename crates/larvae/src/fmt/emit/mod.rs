@@ -39,6 +39,8 @@ pub struct Emitter<'a> {
     cfg: &'a FmtConfig,
     /// The keywords that `require_binding` decided to change, by their token index
     rebindings: super::rebind::Rebindings,
+    /// What `unused_imports` decided about each dead require
+    unused: super::unused::Plan,
     /// Byte ranges that a `fmt off` flag holds the formatter out of
     ignored: Vec<(u32, u32)>,
     /*
@@ -67,9 +69,17 @@ impl<'a> Emitter<'a> {
             trivia,
             cfg,
             rebindings,
+            unused: super::unused::Plan::default(),
             ignored: Vec::new(),
             if_depth: std::cell::Cell::new(0),
         }
+    }
+
+    /// Gives the emitter what `unused_imports` decided
+    pub fn dropping(mut self, plan: super::unused::Plan) -> Self {
+        self.unused = plan;
+
+        self
     }
 
     /// Holds the emitter out of these byte ranges
@@ -87,7 +97,7 @@ impl<'a> Emitter<'a> {
     keeps the indentation the author gave it. The renderer treats a text with
     newlines in it as written, so the shape of the block survives.
     */
-    fn verbatim_stmt(&self, stmt: &Stmt) -> Option<&'a str> {
+    pub(crate) fn verbatim_stmt(&self, stmt: &Stmt) -> Option<&'a str> {
         let (lo, hi) = self.byte_span(stmt.span());
 
         if !crate::flags::within(&self.ignored, lo) {

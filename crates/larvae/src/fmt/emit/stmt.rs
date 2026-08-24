@@ -111,14 +111,17 @@ impl<'a> Emitter<'a> {
     }
 
     fn binding(&self, b: &Binding) -> Doc<'a> {
-        match b.ty {
-            Some(ty) => Doc::concat([
-                Doc::text(self.one(b.name)),
-                Doc::text(": "),
-                self.type_doc(ty),
-            ]),
+        // `unused_imports = "underscore"` marks a dead require where it is declared.
+        let name = match self.unused.renames.get(&b.name.start) {
+            Some(renamed) => Doc::text(renamed.clone()),
 
             None => Doc::text(self.one(b.name)),
+        };
+
+        match b.ty {
+            Some(ty) => Doc::concat([name, Doc::text(": "), self.type_doc(ty)]),
+
+            None => name,
         }
     }
 

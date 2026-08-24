@@ -136,6 +136,33 @@ impl<'a> Emitter<'a> {
                 continue;
             }
 
+            /*
+            `unused_imports = "remove"` drops the declaration and keeps every
+            comment around it.
+
+            The cursor does not move. So the gap that the next statement
+            reads still opens where this one opened, and the comments that
+            sat above and beside the dead import stay in the output attached
+            to whatever follows.
+
+            A statement inside a `fmt off` region is not removed. That flag
+            means the author writes those lines, and a formatter that deletes
+            one of them keeps none of the promise.
+
+            A formatter may rewrite code. It may not delete prose, and
+            `check_comments_survived` enforces that on every run: an earlier
+            cut of this pass moved the cursor past the statement, and the
+            check refused the whole file rather than lose one line of
+            someone's writing. A comment that now describes a require that
+            is gone is for the author to remove. Larvae cannot know whether
+            the words were about the import or about the code below it.
+            */
+            if self.unused.removals.contains(&stmt.span().start)
+                && self.verbatim_stmt(stmt).is_none()
+            {
+                continue;
+            }
+
             let span = stmt.span();
             let start = self.tok_start(span.start);
             let att = self.trivia.split(cursor, start);

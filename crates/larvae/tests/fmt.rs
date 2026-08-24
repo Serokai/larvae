@@ -11,7 +11,7 @@ whitespace, and every comment must stay.
 use larvae::fmt::config::{
     CallParens, CallStyle, CollapseSimpleStatement, FunctionCall, FunctionDeclaration, IfExpansion,
     IfExpression, IfPlacement, IfStyle, IndentType, LineEndings, ListExpansion, PreferConst,
-    QuoteStyle, SpaceAfterFunctionNames, TableTypes, TypeSeparator,
+    QuoteStyle, SpaceAfterFunctionNames, TableTypes, TypeSeparator, UnusedImports,
 };
 use larvae::fmt::{FmtConfig, format};
 
@@ -2415,5 +2415,180 @@ fn the_const_rewrite_is_idempotent_and_parses() {
             larvae::syntax::parser::parse(&once, &lexed.toks)
                 .unwrap_or_else(|e| panic!("{src:?} gave unparsable output, {}", e.message));
         }
+    }
+}
+
+// --- unused_imports --------------------------------------------------------
+
+fn imports(mode: UnusedImports) -> FmtConfig {
+    FmtConfig {
+        unused_imports: mode,
+        ..Default::default()
+    }
+}
+
+/*
+`ignore` is the default, and the default has to change nothing.
+
+`require` runs a module the first time a file asks for it, so a module can do
+its work by being required at all. Larvae cannot see inside that file, so the
+project decides.
+*/
+#[test]
+fn unused_imports_are_left_alone_by_default() {
+    let src = "local Dead = require(\"@pkg/Dead\")\nreturn 1\n";
+
+    assert_eq!(fmt(src), src);
+    assert_eq!(fmt_with(src, imports(UnusedImports::Ignore)), src);
+}
+
+#[test]
+fn underscore_marks_the_name_and_keeps_the_require() {
+    let src = "local Dead = require(\"@pkg/Dead\")\nreturn 1\n";
+
+    assert_eq!(
+        fmt_with(src, imports(UnusedImports::Underscore)),
+        "local _Dead = require(\"@pkg/Dead\")\nreturn 1\n"
+    );
+}
+
+#[test]
+fn remove_deletes_the_declaration() {
+    let src = "local Dead = require(\"@pkg/Dead\")\nreturn 1\n";
+
+    assert_eq!(fmt_with(src, imports(UnusedImports::Remove)), "return 1\n");
+}
+
+/*
+A name that only a type reads is used, and this is the case the option turns
+on for.
+
+The parser consumes type syntax for its extent and does not interpret it, so
+a walk of the expressions never sees `jecs` again. To delete that line breaks
+the type below it. The resolver recovers the reference, because
+`unused_variable` had the same defect and it was fixed there.
+*/
+#[test]
+fn an_import_that_only_a_type_uses_survives_both_modes() {
+    let src = "local jecs = require(\"@pkg/jecs\")\n\ntype Component = jecs.Component\n\nreturn nil :: Component?\n";
+
+    assert_eq!(fmt_with(src, imports(UnusedImports::Remove)), src);
+    assert_eq!(fmt_with(src, imports(UnusedImports::Underscore)), src);
+}
+
+/// The same holds for a type nested inside another one.
+#[test]
+fn an_import_used_deep_inside_a_type_survives() {
+    let src = "local Deep = require(\"@pkg/Deep\")\n\ntype Held = { field: Deep.Thing }\n\nreturn nil :: Held?\n";
+
+    assert_eq!(fmt_with(src, imports(UnusedImports::Remove)), src);
+}
+
+/// An import the code reads is untouched, whatever the mode says.
+#[test]
+fn a_used_import_is_never_touched() {
+    let src = "local Used = require(\"@pkg/Used\")\n\nreturn Used.make()\n";
+
+    for mode in [
+        UnusedImports::Ignore,
+        UnusedImports::Underscore,
+        UnusedImports::Remove,
+    ] {
+        assert_eq!(fmt_with(src, imports(mode)), src, "{mode:?} changed it");
+    }
+}
+
+/*
+A name that already opens with `_` says it is unused.
+
+That is the convention `unused_variable` reads, so under `underscore` there
+is nothing left to do, and under `remove` the author marked the line and
+asked for it to stay.
+*/
+#[test]
+fn a_name_already_marked_is_left_as_it_is() {
+    let src = "local _Dead = require(\"@pkg/Dead\")\nreturn 1\n";
+
+    assert_eq!(fmt_with(src, imports(UnusedImports::Underscore)), src);
+    assert_eq!(fmt_with(src, imports(UnusedImports::Remove)), src);
+}
+
+/*
+A removal keeps every comment.
+
+A formatter may rewrite code. It may not delete prose, and the comment check
+enforces that: an earlier cut of this pass moved the cursor past the
+statement, and the check refused the whole file rather than lose a line of
+someone's writing.
+*/
+#[test]
+fn removing_an_import_keeps_the_comments_around_it() {
+    let src =
+        "-- the dead one\nlocal Dead = require(\"@pkg/Dead\")\n-- a trailing thought\n\nreturn 1\n";
+    let out = fmt_with(src, imports(UnusedImports::Remove));
+
+    assert!(!out.contains("require"), "the declaration stayed: {out}");
+    assert!(out.contains("-- the dead one"), "{out}");
+    assert!(out.contains("-- a trailing thought"), "{out}");
+}
+
+/// A `fmt off` region means the author writes those lines, removal included.
+#[test]
+fn a_held_off_import_is_not_removed() {
+    let src =
+        "-- larvae: fmt off\nlocal Dead = require(\"@pkg/Dead\")\n-- larvae: fmt on\nreturn 1\n";
+
+    assert_eq!(fmt_with(src, imports(UnusedImports::Remove)), src);
+    assert_eq!(fmt_with(src, imports(UnusedImports::Underscore)), src);
+}
+
+/// A declaration that binds more than one name is left alone, which is conservative.
+#[test]
+fn a_multi_name_declaration_is_left_alone() {
+    let src = "local A, B = require(\"@pkg/A\"), require(\"@pkg/B\")\nreturn 1\n";
+
+    assert_eq!(fmt_with(src, imports(UnusedImports::Remove)), src);
+}
+
+/// A local that holds anything else is not an import, so nothing here reaches it.
+#[test]
+fn only_a_require_counts_as_an_import() {
+    let src = "local dead = 1\nreturn 2\n";
+
+    assert_eq!(fmt_with(src, imports(UnusedImports::Remove)), src);
+    assert_eq!(fmt_with(src, imports(UnusedImports::Underscore)), src);
+}
+
+/// Both modes have to reach a nested scope, and leave a legal block behind.
+#[test]
+fn a_dead_import_inside_a_function_is_handled() {
+    let src = "local function f()\n\tlocal Dead = require(\"@pkg/Dead\")\nend\n\nreturn f\n";
+
+    assert_eq!(
+        fmt_with(src, imports(UnusedImports::Remove)),
+        "local function f()\nend\n\nreturn f\n"
+    );
+    assert_eq!(
+        fmt_with(src, imports(UnusedImports::Underscore)),
+        "local function f()\n\tlocal _Dead = require(\"@pkg/Dead\")\nend\n\nreturn f\n"
+    );
+}
+
+/*
+Both modes settle after one pass.
+
+`underscore` is the case to watch: a second run must not produce `__Dead`.
+The `_` prefix check is what stops it, and it is the same check that leaves
+an author's own `_name` alone.
+*/
+#[test]
+fn both_modes_are_stable() {
+    let src = "-- a note\nlocal Dead = require(\"@pkg/Dead\")\nlocal jecs = require(\"@pkg/jecs\")\n\ntype C = jecs.Component\n\nreturn nil :: C?\n";
+
+    for mode in [UnusedImports::Underscore, UnusedImports::Remove] {
+        let once = fmt_with(src, imports(mode));
+        let twice = fmt_with(&once, imports(mode));
+
+        assert_eq!(once, twice, "{mode:?} did not settle");
     }
 }

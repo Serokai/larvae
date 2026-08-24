@@ -132,6 +132,38 @@ pub enum RequireBinding {
 }
 
 /*
+Selects what the formatter does with a required module that nothing uses.
+
+Off by default, and the default matters more here than it does for the other
+options. `require` runs the module the first time a file asks for it, so a
+module can do its work by being required at all: it connects an event, it
+registers a component, it fills a table somewhere else. To delete the line
+then stops that work, and the file still compiles, so nothing says the
+behaviour changed. Larvae cannot tell that module from a module that only
+returns a value, because the answer is inside a file the formatter is not
+reading.
+
+So the project decides. `underscore` keeps the require and marks the name,
+which changes no behaviour at all and silences the lint. `remove` deletes the
+statement, which is what a project wants when its modules only return values.
+
+A name that a type uses is used. `const jecs = require("@pkg/jecs")` with
+`type C = jecs.Component` below it reads the binding, and the resolution the
+linter builds already counts it.
+*/
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UnusedImports {
+    /// Leave it as written.
+    #[default]
+    Ignore,
+    /// `local _Signal = require(...)`, which keeps the module and marks the name.
+    Underscore,
+    /// Delete the declaration.
+    Remove,
+}
+
+/*
 Selects whether a statement ends with a semicolon.
 
 Luau needs one in exactly one place: before a statement that opens with `(`,
@@ -566,6 +598,14 @@ pub struct FmtConfig {
     /// Turns a `local` that nothing reassigns into a `const`.
     #[serde(default)]
     pub prefer_const: PreferConst,
+    /*
+    What to do with a required module that nothing uses.
+
+    `ignore` by default, because `remove` can stop a module from running at
+    all. See [`UnusedImports`].
+    */
+    #[serde(default)]
+    pub unused_imports: UnusedImports,
 
     /// Selects whether a statement ends with a semicolon.
     #[serde(default)]

@@ -16,6 +16,7 @@ pub mod doc;
 pub mod emit;
 pub mod rebind;
 pub mod trivia;
+pub mod unused;
 
 use anyhow::{Context, Result};
 
@@ -58,7 +59,16 @@ pub fn format(src: &str, cfg: &FmtConfig) -> Result<String> {
         cfg.require_binding,
         &cfg.prefer_const,
     );
-    let emitter = emit::Emitter::new(src, &lexed.toks, &trivia, cfg, rebindings).ignoring(ignored);
+    /*
+    The removal pass reads the rebindings, so it runs second. A declaration
+    that `require_binding` or `prefer_const` decided to rewrite stays, and
+    the output does not depend on which pass ran first.
+    */
+    let dead = unused::plan(src, &lexed.toks, &chunk, cfg.unused_imports, &rebindings);
+
+    let emitter = emit::Emitter::new(src, &lexed.toks, &trivia, cfg, rebindings)
+        .dropping(dead)
+        .ignoring(ignored);
     let document = emitter.chunk(&chunk);
     let out = doc::render(&document, cfg.style());
 
