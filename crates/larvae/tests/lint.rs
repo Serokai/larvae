@@ -403,9 +403,26 @@ fn parentheses_that_group_something_are_left_alone() {
     ));
 }
 
+/*
+The lint is `allow`, because `larvae fmt` splits the line already.
+
+Luau's own linter reports the shape, and larvae reported it too while it
+matched Luau lint for lint. Luau ships no formatter and larvae does, and
+`collapse_simple_statement` is `never`, so a format run removes every finding
+this lint can make. A warning about what the formatter fixes on save is noise
+until the formatter runs.
+*/
 #[test]
-fn multiple_statements_reports_by_default_as_luau_does() {
-    assert!(fires("multiple_statements", "local a = 1 local b = 2\n"));
+fn multiple_statements_is_allow_because_the_formatter_owns_it() {
+    assert!(!fires("multiple_statements", "local a = 1 local b = 2\n"));
+
+    let cfg = with("multiple_statements", Level::Warn);
+
+    assert!(
+        fired("local a = 1 local b = 2\n", &cfg)
+            .iter()
+            .any(|n| n == "multiple_statements")
+    );
 }
 
 /// The lint must not report this pattern, even when the lint is on.
@@ -426,7 +443,9 @@ fn a_one_line_guard_is_not_two_statements() {
 #[test]
 fn unused_variable_catches_a_local_nothing_reads() {
     assert!(fires("unused_variable", "local x = 1\n"));
-    assert!(fires("unused_variable", "local function helper() end\n"));
+
+    // A `local function` is `unused_function` now, as the Luau compiler has it.
+    assert!(fires("unused_function", "local function helper() end\n"));
 }
 
 #[test]
@@ -1330,12 +1349,15 @@ fn returns(src: &str) -> bool {
         .any(|n| n == "implicit_return")
 }
 
-/// The lint is off by default, because the shape it reports is idiomatic.
+/// The lint is `allow`, because the shape it reports is idiomatic.
 #[test]
-fn implicit_return_reports_by_default_as_luau_does() {
+fn implicit_return_is_allow_because_the_shape_is_idiomatic() {
     let src = "local function f(a)\n\tif a then\n\t\treturn 1\n\tend\nend\nreturn f\n";
 
-    assert!(fires("implicit_return", src));
+    assert!(!fires("implicit_return", src));
+
+    // A project that wants every exit spelled out still gets the report.
+    assert!(returns(src));
 }
 
 #[test]
@@ -1818,5 +1840,1071 @@ fn a_fmt_marker_does_not_hold_the_linter() {
     assert_eq!(
         count("-- larvae: fmt off\nlocal unusedA = 1\nreturn 1\n"),
         1
+    );
+}
+
+// --- prefer_const -----------------------------------------------------------
+
+fn prefer_const(mutated_tables_stay_local: bool) -> LintConfig {
+    let mut cfg = with("prefer_const", Level::Warn);
+
+    if mutated_tables_stay_local {
+        cfg.options.insert(
+            "prefer_const".to_string(),
+            toml::from_str("mutated_tables_stay_local = true").expect("the option parses"),
+        );
+    }
+
+    cfg
+}
+
+fn const_findings(src: &str, mutated_tables_stay_local: bool) -> usize {
+    fired(src, &prefer_const(mutated_tables_stay_local))
+        .iter()
+        .filter(|n| *n == "prefer_const")
+        .count()
+}
+
+/*
+The lint is off by default.
+
+`const` is larvae's own reading of Luau, and a codebase of ordinary `local`
+would report on nearly every line the first time it ran.
+*/
+#[test]
+fn prefer_const_says_nothing_until_a_project_asks() {
+    assert!(!fires("prefer_const", "local x = 1\nreturn x\n"));
+}
+
+#[test]
+fn a_local_that_nothing_reassigns_is_reported() {
+    assert_eq!(const_findings("local x = 1\nreturn x\n", false), 1);
+}
+
+#[test]
+fn a_local_that_something_reassigns_is_left_alone() {
+    assert_eq!(const_findings("local x = 1\nx = 2\nreturn x\n", false), 0);
+}
+
+/*
+Three forms cannot take `const`, and each would be a syntax error or has no
+`local` to change.
+*/
+#[test]
+fn the_forms_that_cannot_take_const_are_left_alone() {
+    // "Missing initializer in const declaration"
+    assert_eq!(const_findings("local x\nreturn x\n", false), 0);
+
+    assert_eq!(const_findings("const x = 1\nreturn x\n", false), 0);
+
+    assert_eq!(
+        const_findings("local function f() end\nreturn f\n", false),
+        0
+    );
+
+    assert_eq!(const_findings("for i = 1, 3 do print(i) end\n", false), 0);
+}
+
+/*
+`const` binds the declaration and not one name inside it.
+
+So `local a, b = 1, 2` where only `b` changes cannot become `const`, and the
+lint reports the statement only when every name in it qualifies.
+*/
+#[test]
+fn a_multi_name_local_reports_only_when_every_name_qualifies() {
+    assert_eq!(const_findings("local a, b = 1, 2\nreturn a, b\n", false), 1);
+    assert_eq!(
+        const_findings("local a, b = 1, 2\nb = 3\nreturn a, b\n", false),
+        0
+    );
+}
+
+/*
+A mutated table reports like any other binding by default.
+
+Luau enforces `const` against reassignment of the name and says nothing about
+the value, so `const t = {}` then `t.x = 1` compiles.
+*/
+#[test]
+fn a_mutated_table_reports_by_default() {
+    assert_eq!(
+        const_findings("local t = {}\nt.x = 1\nreturn t\n", false),
+        1
+    );
+    assert_eq!(
+        const_findings("local t = {}\ntable.insert(t, 1)\nreturn t\n", false),
+        1
+    );
+}
+
+/// The option is for a project that reads `local` as "this one changes".
+#[test]
+fn the_option_keeps_local_on_a_mutated_table() {
+    for src in [
+        "local t = {}\nt.x = 1\nreturn t\n",
+        "local t = {}\nt.a.b = 1\nreturn t\n",
+        "local t = {}\nt[key] = 1\nreturn t\n",
+        "local t = {}\nt.n += 1\nreturn t\n",
+        "local t = {}\ntable.insert(t, 1)\nreturn t\n",
+        "local t = {}\ntable.sort(t)\nreturn t\n",
+    ] {
+        assert_eq!(const_findings(src, true), 0, "{src:?}");
+    }
+}
+
+/*
+The option covers a mutation and nothing else.
+
+`table.freeze` returns a frozen copy and changes nothing, and a binding that
+holds no table was never in scope for the option.
+*/
+#[test]
+fn the_option_leaves_everything_else_reporting() {
+    assert_eq!(
+        const_findings("local t = {}\ntable.freeze(t)\nreturn t\n", true),
+        1
+    );
+    assert_eq!(const_findings("local n = 5\nreturn n\n", true), 1);
+}
+
+/// A read of a field is not a mutation of it.
+#[test]
+fn reading_a_field_is_not_mutating_it() {
+    assert_eq!(
+        const_findings("local t = {}\nprint(t.x)\nreturn t\n", true),
+        1
+    );
+}
+
+// --- functions are not variables --------------------------------------------
+
+/*
+`function f() end` creates a global, and it is not `unscoped_variables`.
+
+The statement makes the name the same way `f = 1` does, and the two do not
+read the same way. Neither selene nor the Luau compiler reports the
+declaration. A Roblox script defines its callbacks with it, so larvae
+reporting it made the lint unusable on the codebase it is for.
+*/
+#[test]
+fn a_global_function_declaration_is_not_an_unscoped_variable() {
+    assert!(!fires(
+        "unscoped_variables",
+        "function onTouch()\nend\nreturn onTouch\n"
+    ));
+}
+
+/// A bare assignment is still the thing the lint is for.
+#[test]
+fn a_bare_global_assignment_is_still_reported() {
+    assert!(fires("unscoped_variables", "x = 1\nreturn x\n"));
+}
+
+/// The name a global function declares is still defined for the file.
+#[test]
+fn a_global_function_is_not_undefined_where_it_is_called() {
+    assert!(!fires(
+        "undefined_variable",
+        "function helper()\nend\nhelper()\n"
+    ));
+}
+
+/*
+The Luau compiler splits the two by the declaring form and not by the value.
+
+`local function f() end` is FunctionUnused and `local f = function() end` is
+LocalUnused, so larvae reports `unused_function` for the first and
+`unused_variable` for the second.
+*/
+#[test]
+fn an_unused_local_function_is_a_function_and_not_a_variable() {
+    assert!(fires("unused_function", "local function f() end\n"));
+    assert!(!fires("unused_variable", "local function f() end\n"));
+
+    assert!(fires("unused_function", "const function f() end\n"));
+}
+
+#[test]
+fn a_local_holding_a_function_value_stays_a_variable() {
+    assert!(fires("unused_variable", "local f = function() end\n"));
+    assert!(!fires("unused_function", "local f = function() end\n"));
+}
+
+#[test]
+fn an_unused_local_is_still_a_variable() {
+    assert!(fires("unused_variable", "local x = 1\n"));
+    assert!(!fires("unused_function", "local x = 1\n"));
+}
+
+/*
+Each one carries its own level, which is the point of the split.
+
+A project that keeps unused helpers around while still wanting unused locals
+reported has no way to say so when the two share a name.
+*/
+#[test]
+fn the_two_levels_are_independent() {
+    let src = "local function f() end\nlocal x = 1\n";
+
+    let quiet_functions = fired(src, &with("unused_function", Level::Allow));
+    assert!(quiet_functions.iter().any(|n| n == "unused_variable"));
+    assert!(!quiet_functions.iter().any(|n| n == "unused_function"));
+
+    let quiet_variables = fired(src, &with("unused_variable", Level::Allow));
+    assert!(quiet_variables.iter().any(|n| n == "unused_function"));
+    assert!(!quiet_variables.iter().any(|n| n == "unused_variable"));
+}
+
+/// The ignore pattern is shared, because it means the same thing to both.
+#[test]
+fn the_underscore_prefix_silences_a_function_too() {
+    assert!(!fires("unused_function", "local function _helper() end\n"));
+}
+
+// --- implicit_any_local -----------------------------------------------------
+
+/*
+`local test`, with no value and no type annotation.
+
+What the name holds is decided by whatever assigns it first. In a file with no
+`--!strict` directive Luau accepts any later assignment of any type, which is
+the implicit any this names.
+*/
+#[test]
+fn a_local_with_no_value_and_no_type_is_reported() {
+    assert!(fires(
+        "implicit_any_local",
+        "local test\ntest = 1\nprint(test)\n"
+    ));
+}
+
+/*
+The lint warns, and it does not deny.
+
+The fix never changes behaviour, which argued for a deny. The shape argues
+against one: `local found` above the loop that fills it in runs correctly,
+and a deny fails the build of every project on the day it adopts larvae.
+*/
+#[test]
+fn implicit_any_local_warns_by_default() {
+    let found = lint(
+        Path::new("test.luau"),
+        "local test\ntest = 1\nprint(test)\n",
+        &LintConfig::default(),
+    )
+    .expect("parses");
+
+    let one = found
+        .iter()
+        .find(|d| d.message.contains("implicit_any_local"))
+        .expect("it fires");
+
+    assert_eq!(one.severity, Severity::Warning);
+}
+
+/// Either half answers the question the lint asks, so either half silences it.
+#[test]
+fn a_type_or_a_value_is_enough() {
+    assert!(!fires(
+        "implicit_any_local",
+        "local test: number\ntest = 1\nprint(test)\n"
+    ));
+    assert!(!fires(
+        "implicit_any_local",
+        "local test = 1\nprint(test)\n"
+    ));
+}
+
+/// An underscore name states that nobody wants the value.
+#[test]
+fn an_underscore_local_is_left_alone() {
+    assert!(!fires(
+        "implicit_any_local",
+        "local _test\n_test = 1\nprint(_test)\n"
+    ));
+}
+
+/*
+One line gets one finding.
+
+A local that nothing ever assigns is `uninitialized_local`, which says the
+more urgent thing about the same line: every read of it is nil.
+*/
+#[test]
+fn a_local_nothing_assigns_is_left_to_the_other_lint() {
+    let found = names("local test\nprint(test)\n");
+
+    assert!(
+        found.iter().any(|n| n == "uninitialized_local"),
+        "{found:?}"
+    );
+    assert!(
+        !found.iter().any(|n| n == "implicit_any_local"),
+        "one line, one finding: {found:?}"
+    );
+}
+
+/// A declaration binds several names, and each answers for itself.
+#[test]
+fn only_the_untyped_name_of_a_declaration_is_reported() {
+    let found = fired(
+        "local a, b: number\na, b = 1, 2\nprint(a, b)\n",
+        &with("implicit_any_local", Level::Warn),
+    );
+
+    assert_eq!(
+        found.iter().filter(|n| *n == "implicit_any_local").count(),
+        1,
+        "{found:?}"
+    );
+}
+
+// --- a name used only by a type ---------------------------------------------
+
+/*
+A require bound for its types alone is used.
+
+larvae's parser takes a type for its extent and never reads inside it, so a
+token walk recovers the references. The walk skipped a name after a colon,
+which is right for `obj:method` and wrong inside a type: a table type puts the
+field name before the colon and the type after it.
+*/
+#[test]
+fn a_name_used_only_inside_a_table_type_is_used() {
+    assert!(!fires(
+        "unused_variable",
+        "const jecs = require(\"@pkg/jecs\")\ntype T = { e: jecs.Entity }\n"
+    ));
+}
+
+#[test]
+fn every_type_position_counts_as_a_use() {
+    for src in [
+        "type Component = jecs.Component\n",
+        "export type Component = jecs.Component\n",
+        "type W = Map<string, jecs.Entity>\n",
+        "type F = (jecs.Entity) -> ()\n",
+        "type T = { e: jecs.Entity }\n",
+        "type T = { f: (jecs.Entity) -> () }\n",
+        "type U = jecs.Entity | nil\n",
+        "type T = typeof(jecs)\n",
+        "local function f(e: jecs.Entity)\n\treturn e\nend\nreturn f\n",
+        "local x: jecs.Entity = nil\nprint(x)\n",
+        "return (nil :: any) :: jecs.Entity\n",
+    ] {
+        let whole = format!("const jecs = require(\"@pkg/jecs\")\n{src}");
+
+        assert!(
+            !fires("unused_variable", &whole),
+            "a type used it, so it is used: {src:?}"
+        );
+    }
+}
+
+/// A require that no type and no code uses is still reported.
+#[test]
+fn a_name_no_type_uses_is_still_unused() {
+    assert!(fires(
+        "unused_variable",
+        "const jecs = require(\"@pkg/jecs\")\ntype T = { e: string }\n"
+    ));
+}
+
+// --- what larvae denies ----------------------------------------------------
+
+/*
+A deny fails a build, so the set that denies has to earn it.
+
+The bar is two things at once. No reading of the code makes the finding
+wrong, because the check reads literals or syntax and never a runtime value.
+And the code as written cannot be what the author meant: it throws, it hangs,
+or a line of it is provably dead. Every other finding warns.
+
+`bad_string_escape` is the near miss worth naming. It reads a literal and it
+is never wrong, but Luau accepts `"\\q"` and runs the file, checked against
+luau-lsp. The string is wrong and the build is fine, so it warns.
+*/
+#[test]
+fn the_lints_that_deny_are_the_ones_that_earn_it() {
+    let mut denies: Vec<&str> = larvae::lint::registry()
+        .iter()
+        .filter(|l| l.default_level() == Level::Deny)
+        .map(|l| l.name())
+        .collect();
+
+    denies.sort();
+
+    assert_eq!(
+        denies,
+        [
+            "duplicate_keys",
+            "duplicate_local",
+            "format_string",
+            "length_as_condition",
+            "undefined_variable",
+            "zero_step_loop",
+        ]
+    );
+}
+
+/// Each one reports at error severity without a config that asks for it.
+#[test]
+fn each_deny_reaches_the_report_as_an_error() {
+    let cases = [
+        ("duplicate_keys", "local t = { a = 1, a = 2 }\nreturn t\n"),
+        ("duplicate_local", "local a, a = 1, 2\nreturn a\n"),
+        ("format_string", "return string.format(\"%y\", 1)\n"),
+        ("undefined_variable", "return nowhere\n"),
+        ("zero_step_loop", "for i = 1, 3, 0 do print(i) end\n"),
+        ("length_as_condition", "if #t then print(1) end\n"),
+    ];
+
+    for (name, src) in cases {
+        let found = lint(Path::new("test.luau"), src, &LintConfig::default())
+            .unwrap_or_else(|_| panic!("{name} case parses"));
+
+        let one = found
+            .iter()
+            .find(|d| d.message.contains(name))
+            .unwrap_or_else(|| panic!("{name} does not fire on its own case"));
+
+        assert_eq!(one.severity, Severity::Error, "{name} has to fail a build");
+    }
+}
+
+/*
+A deny that reads a runtime value would be a false positive that stops a
+build, so each check stays with what the source states outright.
+*/
+#[test]
+fn no_deny_reports_a_value_it_cannot_see() {
+    // The key, the format and the step are all decided elsewhere.
+    let src = "local k = key()\n\
+               local t = { [k] = 1, [k] = 2 }\n\
+               local f = pattern()\n\
+               print(string.format(f, 1))\n\
+               for i = 1, 3, step() do print(i) end\n\
+               local _, _ = 1, 2\n\
+               if #t > 0 then print(1) end\n\
+               return t\n";
+
+    let reported = names(src);
+
+    for name in [
+        "duplicate_keys",
+        "format_string",
+        "zero_step_loop",
+        "duplicate_local",
+        "length_as_condition",
+    ] {
+        assert!(!reported.contains(&name.to_string()), "{name} guessed");
+    }
+}
+
+// --- the Biome shaped gaps -------------------------------------------------
+
+/*
+`#t` as a condition is always true, because a number is true in Luau.
+
+Only `nil` and `false` are false, and zero is a number. So the guard does
+nothing and the branch runs every time. Luau's own linter says nothing about
+the shape, checked against luau-lsp.
+*/
+#[test]
+fn a_length_used_as_a_condition_is_reported() {
+    assert!(fires("length_as_condition", "if #t then print(1) end\n"));
+    assert!(fires("length_as_condition", "while #t do break end\n"));
+    assert!(fires("length_as_condition", "repeat break until #t\n"));
+}
+
+/// A comparison is what the author meant, and it must stay quiet.
+#[test]
+fn a_length_that_is_compared_is_left_alone() {
+    assert!(!fires(
+        "length_as_condition",
+        "if #t > 0 then print(1) end\n"
+    ));
+    assert!(!fires(
+        "length_as_condition",
+        "if #t == 0 then print(1) end\n"
+    ));
+
+    // A length outside a condition is an ordinary value.
+    assert!(!fires("length_as_condition", "local n = #t\nreturn n\n"));
+}
+
+/// It denies, because no runtime value makes the finding wrong.
+#[test]
+fn length_as_condition_denies() {
+    let found = lint(
+        Path::new("test.luau"),
+        "if #t then print(1) end\n",
+        &LintConfig::default(),
+    )
+    .expect("parses");
+
+    let one = found
+        .iter()
+        .find(|d| d.message.contains("length_as_condition"))
+        .expect("it fires");
+
+    assert_eq!(one.severity, Severity::Error);
+}
+
+/*
+A local that takes the name of a standard global hides the library.
+
+`table_operations` already stops when `table` is a local, and says so in its
+own comment. This lint is the diagnostic behind that silent stop.
+*/
+#[test]
+fn a_local_that_hides_a_standard_global_is_reported() {
+    assert!(fires(
+        "builtin_shadowed",
+        "local table = {}\nreturn table\n"
+    ));
+    assert!(fires(
+        "builtin_shadowed",
+        "local function type() end\nreturn type\n"
+    ));
+}
+
+/*
+A parameter and a loop variable are left alone.
+
+Both name a small scope that the author reads in full, and the name of a
+parameter belongs to the signature the caller decided.
+*/
+#[test]
+fn a_parameter_named_for_a_global_is_left_alone() {
+    assert!(!fires(
+        "builtin_shadowed",
+        "local function f(type)\n\treturn type\nend\nreturn f\n"
+    ));
+    assert!(!fires(
+        "builtin_shadowed",
+        "for _, next in t do\n\tprint(next)\nend\n"
+    ));
+
+    // An ordinary name is not a global.
+    assert!(!fires(
+        "builtin_shadowed",
+        "local widget = {}\nreturn widget\n"
+    ));
+}
+
+/*
+Caching a global in a local of the same name loses nothing.
+
+`local pairs = pairs` is what Lua code does for speed, and `local unpack =
+unpack or table.unpack` picks the one the host has. Both keep the library
+reachable under the same name. On a corpus of 364 files the two idioms were
+48 of 86 findings and the defect was none of them, so the exemption is what
+makes the lint usable rather than noise.
+*/
+#[test]
+fn caching_a_global_under_its_own_name_is_left_alone() {
+    assert!(!fires(
+        "builtin_shadowed",
+        "local pairs = pairs\nreturn pairs\n"
+    ));
+    assert!(!fires(
+        "builtin_shadowed",
+        "local unpack = unpack or table.unpack\nreturn unpack\n"
+    ));
+    assert!(!fires(
+        "builtin_shadowed",
+        "local type, tonumber = type, tonumber\nreturn type, tonumber\n"
+    ));
+}
+
+/*
+A rebind that puts nothing back still reports.
+
+`local table = other.table` hides the library and does not read the global,
+so the name is gone below that line. The token scan asks `is_global`, which
+separates a read of the global from a field that carries the name.
+*/
+#[test]
+fn a_rebind_that_does_not_read_the_global_is_reported() {
+    assert!(fires(
+        "builtin_shadowed",
+        "local table = other.table\nreturn table\n"
+    ));
+
+    // A declaration with no value cannot be caching anything.
+    assert!(fires("builtin_shadowed", "local debug\nreturn debug\n"));
+}
+
+/*
+`pcall(f)` as a statement catches the error and drops it.
+
+The failure then leaves no trace: no crash, no log, and a later line reading
+a value nobody wrote. That is worse than the unguarded call.
+*/
+#[test]
+fn a_pcall_that_keeps_nothing_is_reported() {
+    assert!(fires("ignored_pcall_result", "pcall(risky)\n"));
+    assert!(fires("ignored_pcall_result", "xpcall(risky, handler)\n"));
+}
+
+/// Reading the flag is the whole point of the function, so that stays quiet.
+#[test]
+fn a_pcall_whose_flag_is_read_is_left_alone() {
+    assert!(!fires(
+        "ignored_pcall_result",
+        "local ok = pcall(risky)\nreturn ok\n"
+    ));
+    assert!(!fires(
+        "ignored_pcall_result",
+        "local ok, err = pcall(risky)\nreturn ok, err\n"
+    ));
+
+    // A local of that name belongs to the project, not to the language.
+    assert!(!fires(
+        "ignored_pcall_result",
+        "local function pcall(f)\n\treturn f\nend\npcall(risky)\n"
+    ));
+}
+
+/*
+`misleading_and_or` reaches a middle that syntax proves is a boolean.
+
+`ready and (count == 0) or "pending"` gives "pending" when the count is not
+zero, which is exactly when the author wanted `false`. A comparison yields a
+boolean because it is a comparison, so no type is needed to know it.
+*/
+#[test]
+fn an_and_or_with_a_boolean_middle_is_reported() {
+    assert!(fires(
+        "misleading_and_or",
+        "local x = ready and (count == 0) or \"pending\"\nreturn x\n"
+    ));
+    assert!(fires(
+        "misleading_and_or",
+        "local x = ready and not locked or fallback\nreturn x\n"
+    ));
+
+    // The literal cases still report, and they say "always".
+    let found = lint(
+        Path::new("test.luau"),
+        "local x = ready and false or other\nreturn x\n",
+        &LintConfig::default(),
+    )
+    .expect("parses");
+
+    assert!(
+        found
+            .iter()
+            .any(|d| d.message.contains("misleading_and_or") && d.message.contains("always")),
+        "the literal case lost its message"
+    );
+}
+
+/*
+A middle that is not provably a boolean stays quiet.
+
+`ok and count or 0` is correct whenever `count` is truthy, and larvae cannot
+see the value. To report it would need the type, which the parser does not
+build, so the lint stops where the proof stops.
+*/
+#[test]
+fn an_and_or_with_an_ordinary_middle_is_left_alone() {
+    assert!(!fires(
+        "misleading_and_or",
+        "local x = ok and count or 0\nreturn x\n"
+    ));
+    assert!(!fires(
+        "misleading_and_or",
+        "local x = ok and record.enabled or default\nreturn x\n"
+    ));
+}
+
+/// The wider message names the middle, so a reader sees what larvae proved.
+#[test]
+fn the_boolean_case_says_whenever_and_not_always() {
+    let found = lint(
+        Path::new("test.luau"),
+        "local x = ready and (count == 0) or \"pending\"\nreturn x\n",
+        &LintConfig::default(),
+    )
+    .expect("parses");
+
+    let one = found
+        .iter()
+        .find(|d| d.message.contains("misleading_and_or"))
+        .expect("it fires");
+
+    assert!(one.message.contains("whenever"), "{}", one.message);
+    assert!(!one.message.contains("always"), "{}", one.message);
+}
+
+// --- and_or_conditional ----------------------------------------------------
+
+#[test]
+fn an_and_or_that_gives_a_value_is_reported() {
+    let cfg = with("and_or_conditional", Level::Warn);
+
+    let cases = [
+        "local ok = true\nlocal a = ok and 1 or 2\nreturn a\n",
+        "local ok, a = true, 0\na = ok and 1 or 2\nreturn a\n",
+        "local ok = true\nreturn ok and 1 or 2\n",
+        "local ok = true\nprint(ok and 1 or 2)\n",
+    ];
+
+    for src in cases {
+        assert!(
+            fired(src, &cfg).contains(&"and_or_conditional".to_string()),
+            "no report for {src}"
+        );
+    }
+}
+
+/// A condition is where the language asks for the operators, and the `if`
+/// statement that reads it is already there.
+#[test]
+fn an_and_or_in_a_condition_is_not_a_value() {
+    let cfg = with("and_or_conditional", Level::Warn);
+
+    let cases = [
+        "local ok, ready = true, false\nif ok and ready or true then print(1) end\n",
+        "local ok, ready = true, false\nwhile ok and ready or true do break end\n",
+        "local ok, ready = true, false\nrepeat print(1) until ok and ready or true\n",
+        // arithmetic over one, where an if statement repeats the addition
+        "local ok = true\nlocal n = 1 + (ok and 2 or 3)\nreturn n\n",
+    ];
+
+    for src in cases {
+        assert!(
+            !fired(src, &cfg).contains(&"and_or_conditional".to_string()),
+            "reported {src}"
+        );
+    }
+}
+
+// --- if_expression_assignment ----------------------------------------------
+
+#[test]
+fn an_if_expression_that_gives_a_value_is_reported() {
+    let cfg = with("if_expression_assignment", Level::Warn);
+
+    let cases = [
+        "local ok = true\nlocal a = if ok then 1 else 2\nreturn a\n",
+        "local ok, a = true, 0\na = if ok then 1 else 2\nreturn a\n",
+        "local ok = true\nreturn if ok then 1 else 2\n",
+        "local ok = true\nprint(if ok then 1 else 2)\n",
+    ];
+
+    for src in cases {
+        assert!(
+            fired(src, &cfg).contains(&"if_expression_assignment".to_string()),
+            "no report for {src}"
+        );
+    }
+}
+
+#[test]
+fn an_if_expression_in_a_condition_is_not_a_value() {
+    let cfg = with("if_expression_assignment", Level::Warn);
+
+    let cases = [
+        "local ok = true\nif (if ok then true else false) then print(1) end\n",
+        "local ok = true\nwhile (if ok then true else false) do break end\n",
+    ];
+
+    for src in cases {
+        assert!(
+            !fired(src, &cfg).contains(&"if_expression_assignment".to_string()),
+            "reported {src}"
+        );
+    }
+}
+
+/*
+Both lints are style opinions, and one reports the form that
+`misleading_and_or` advises. A default that spoke would report the repair
+that another lint asked for.
+*/
+#[test]
+fn a_conditional_value_says_nothing_by_default() {
+    let src = "local ok = true\n\
+               local a = ok and 1 or 2\n\
+               local b = if ok then 1 else 2\n\
+               return a, b\n";
+
+    let reported = names(src);
+
+    for name in ["and_or_conditional", "if_expression_assignment"] {
+        assert!(!reported.contains(&name.to_string()), "{name} speaks first");
+    }
+
+    // the exact repair that misleading_and_or names
+    assert!(!fires(
+        "if_expression_assignment",
+        "local ok = true\nreturn if ok then false else 1\n"
+    ));
+}
+
+// --- shape -----------------------------------------------------------------
+
+#[test]
+fn constant_condition_catches_a_literal_test() {
+    assert!(fires("constant_condition", "if true then work() end\n"));
+    assert!(fires("constant_condition", "if nil then work() end\n"));
+    assert!(fires(
+        "constant_condition",
+        "if \"cache\" then work() end\n"
+    ));
+}
+
+/// Only nil and false are false in Luau, so `if 0 then` runs the branch.
+#[test]
+fn zero_is_a_condition_that_always_passes() {
+    assert!(fires("constant_condition", "if 0 then work() end\n"));
+}
+
+/// Both loops are the standard Luau form, so neither one is a finding.
+#[test]
+fn the_two_endless_loops_are_exempt() {
+    assert!(!fires("constant_condition", "while true do work() end\n"));
+    assert!(!fires("constant_condition", "repeat work() until false\n"));
+}
+
+/// The exemption covers the endless form alone, and not every literal.
+#[test]
+fn a_loop_that_the_literal_stops_is_still_reported() {
+    assert!(fires("constant_condition", "while false do work() end\n"));
+    assert!(fires("constant_condition", "repeat work() until true\n"));
+}
+
+#[test]
+fn a_condition_that_reads_a_value_is_left_alone() {
+    assert!(!fires("constant_condition", "if ready then work() end\n"));
+    assert!(!fires(
+        "constant_condition",
+        "while count > 0 do work() end\n"
+    ));
+}
+
+#[test]
+fn else_after_return_needs_the_switch() {
+    let src = "if x then\n\treturn 1\nelse\n\treturn 2\nend\n";
+
+    assert!(!fires("else_after_return", src));
+
+    assert!(
+        fired(src, &with("else_after_return", Level::Warn))
+            .iter()
+            .any(|n| n == "else_after_return")
+    );
+}
+
+/// Every branch has to jump. An elseif that falls through still needs the else.
+#[test]
+fn a_branch_that_falls_through_keeps_its_else() {
+    let cfg = with("else_after_return", Level::Warn);
+    let has = |src: &str| fired(src, &cfg).iter().any(|n| n == "else_after_return");
+
+    assert!(!has(
+        "if x then\n\treturn 1\nelseif y then\n\tlog()\nelse\n\tstop()\nend\n"
+    ));
+    assert!(!has("if x then\n\ta()\nelse\n\tb()\nend\n"));
+}
+
+#[test]
+fn collapsible_if_needs_the_switch() {
+    let src = "if a then\n\tif b then\n\t\twork()\n\tend\nend\n";
+
+    assert!(!fires("collapsible_if", src));
+
+    assert!(
+        fired(src, &with("collapsible_if", Level::Warn))
+            .iter()
+            .any(|n| n == "collapsible_if")
+    );
+}
+
+/// Anything beside the inner if, or an else on either, blocks the merge.
+#[test]
+fn an_if_that_holds_more_than_one_if_stays() {
+    let cfg = with("collapsible_if", Level::Warn);
+    let has = |src: &str| fired(src, &cfg).iter().any(|n| n == "collapsible_if");
+
+    assert!(!has("if a then\n\tif b then work() end\n\tmore()\nend\n"));
+    assert!(!has(
+        "if a then\n\tif b then work() else other() end\nend\n"
+    ));
+    assert!(!has(
+        "if a then\n\tif b then work() end\nelse\n\tother()\nend\n"
+    ));
+}
+
+#[test]
+fn negated_condition_needs_the_switch() {
+    let src = "if not ready then\n\ta()\nelse\n\tb()\nend\n";
+
+    assert!(!fires("negated_condition", src));
+
+    assert!(
+        fired(src, &with("negated_condition", Level::Warn))
+            .iter()
+            .any(|n| n == "negated_condition")
+    );
+}
+
+#[test]
+fn a_negation_that_costs_the_reader_nothing_stays() {
+    let cfg = with("negated_condition", Level::Warn);
+    let has = |src: &str| fired(src, &cfg).iter().any(|n| n == "negated_condition");
+
+    assert!(!has("if not ready then\n\ta()\nend\n"), "no else to swap");
+    assert!(
+        !has("if not ready then\n\ta()\nelseif other then\n\tb()\nelse\n\tc()\nend\n"),
+        "a swap would rewrite the chain"
+    );
+    assert!(!has("if ready then\n\ta()\nelse\n\tb()\nend\n"));
+}
+
+// --- implicit_any_parameter -------------------------------------------------
+
+const UNTYPED_PARAMS: &str = "local function apply(list, transform)\n\
+                              \treturn transform(list)\n\
+                              end\n\
+                              return apply\n";
+
+/*
+The lint is off until a project asks for it.
+
+Most Luau carries no annotations. A warn default would report hundreds of
+times on the first run, and a report that large teaches users to stop reading
+the linter.
+*/
+#[test]
+fn implicit_any_parameter_says_nothing_until_a_project_asks() {
+    assert!(!fires("implicit_any_parameter", UNTYPED_PARAMS));
+}
+
+/// Each parameter answers for itself, so the two untyped ones give two findings.
+#[test]
+fn a_parameter_with_no_type_is_reported_when_the_project_asks() {
+    let found = fired(UNTYPED_PARAMS, &with("implicit_any_parameter", Level::Warn));
+
+    assert_eq!(
+        found
+            .iter()
+            .filter(|n| *n == "implicit_any_parameter")
+            .count(),
+        2,
+        "{found:?}"
+    );
+}
+
+/// The annotation is the whole ask, so an annotated signature is silent.
+#[test]
+fn a_typed_parameter_is_left_alone() {
+    let src = "local function apply(list: { number }, transform: (number) -> number)\n\
+               \treturn transform(list[1])\n\
+               end\n\
+               return apply\n";
+
+    let found = fired(src, &with("implicit_any_parameter", Level::Warn));
+
+    assert!(
+        !found.iter().any(|n| n == "implicit_any_parameter"),
+        "{found:?}"
+    );
+}
+
+/// A name that starts with `_` says that the body never reads the value.
+#[test]
+fn an_underscore_parameter_is_left_alone() {
+    let src = "local function handler(_, _index)\n\treturn 1\nend\nreturn handler\n";
+    let found = fired(src, &with("implicit_any_parameter", Level::Warn));
+
+    assert!(
+        !found.iter().any(|n| n == "implicit_any_parameter"),
+        "{found:?}"
+    );
+}
+
+/// Luau gives `self` the type of the table the method hangs on.
+#[test]
+fn the_self_of_a_method_is_left_alone() {
+    for src in [
+        "local t = {}\nfunction t:method(a: number)\n\treturn a\nend\nreturn t\n",
+        "local t = {}\nfunction t.method(self, a: number)\n\treturn a\nend\nreturn t\n",
+    ] {
+        let found = fired(src, &with("implicit_any_parameter", Level::Warn));
+
+        assert!(
+            !found.iter().any(|n| n == "implicit_any_parameter"),
+            "{found:?}"
+        );
+    }
+}
+
+/// The vararg takes a list and not one value, so its annotation is another question.
+#[test]
+fn a_vararg_is_left_alone() {
+    let src = "local function log(...)\n\treturn select(\"#\", ...)\nend\nreturn log\n";
+    let found = fired(src, &with("implicit_any_parameter", Level::Warn));
+
+    assert!(
+        !found.iter().any(|n| n == "implicit_any_parameter"),
+        "{found:?}"
+    );
+}
+
+// --- restricted_globals -----------------------------------------------------
+
+/// The lint is fully config driven, so the default level costs a project nothing.
+#[test]
+fn restricted_globals_is_quiet_until_a_project_fills_it_in() {
+    assert!(!fires(
+        "restricted_globals",
+        "return loadstring(\"return 1\")\n"
+    ));
+
+    let cfg = opts(
+        "restricted_globals",
+        "loadstring = \"compiles a string at runtime, ship the code instead\"",
+    );
+
+    let found = fired("return loadstring(\"return 1\")\n", &cfg);
+
+    assert!(found.iter().any(|n| n == "restricted_globals"), "{found:?}");
+}
+
+/// A local of the same name belongs to the author, and the project ruled out the global.
+#[test]
+fn a_local_of_the_restricted_name_is_left_alone() {
+    let cfg = opts(
+        "restricted_globals",
+        "loadstring = \"compiles a string at runtime, ship the code instead\"",
+    );
+
+    let src = "local function loadstring(s)\n\treturn s\nend\nreturn loadstring(\"x\")\n";
+    let found = fired(src, &cfg);
+
+    assert!(
+        !found.iter().any(|n| n == "restricted_globals"),
+        "{found:?}"
+    );
+}
+
+/// A name the config does not list is not restricted.
+#[test]
+fn only_the_named_globals_are_restricted() {
+    let cfg = opts(
+        "restricted_globals",
+        "getfenv = \"deoptimises the whole function\"",
+    );
+
+    let found = fired("return loadstring(\"return 1\")\n", &cfg);
+
+    assert!(
+        !found.iter().any(|n| n == "restricted_globals"),
+        "{found:?}"
     );
 }

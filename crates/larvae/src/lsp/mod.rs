@@ -24,7 +24,9 @@ the Luau parser reads the first markup character and reports a syntax error.
 pub mod analysis;
 pub mod rpc;
 
+mod actions;
 mod diagnostics;
+pub mod extend;
 mod features;
 mod state;
 #[cfg(test)]
@@ -248,6 +250,41 @@ impl Server {
                 self.reply(message, out, symbols)?;
             }
 
+            /*
+            larvae's own actions come first, then the worms'. The worms have
+            nothing to offer yet, and an empty list is still the right reply:
+            an empty list and an error read the same to a user and are not
+            the same to an editor, which logs a failure on every keystroke
+            that opens the lightbulb.
+            */
+            "textDocument/codeAction" => {
+                self.refresh_worms();
+
+                let uri = uri_of(&message.params);
+                let text = self.documents.get(&uri).cloned().unwrap_or_default();
+                let range = message.params["range"].clone();
+
+                let mut actions = actions::for_range(&uri, &text, &range, &self.lint);
+
+                actions.extend(extend::code_actions(&self.worms, &uri, &text, &range));
+
+                self.reply(message, out, Value::Array(actions))?;
+            }
+
+            /*
+            A request of larvae's own, under its own name, because no method
+            in the protocol carries this. A worm that teaches larvae a new
+            kind of module supplies the type of that module, and an editor
+            that wants those types asks here.
+            */
+            "larvae/definitions" => {
+                self.refresh_worms();
+
+                let reply = extend::definitions_reply(&self.worms);
+
+                self.reply(message, out, reply)?;
+            }
+
             // All other methods get an answer only if the message expects one.
             _ => {
                 if let Some(id) = &message.id {
@@ -276,6 +313,13 @@ fn capabilities(analysis: bool) -> Value {
         "textDocumentSync": { "openClose": true, "change": 1, "save": true },
         "documentFormattingProvider": true,
         "documentSymbolProvider": true,
+        /*
+        A worm will offer the actions. Larvae advertises the capability
+        now and answers with an empty list, because an editor decides at
+        initialize whether to ever ask, and a capability that appears
+        later needs the client to be told and to agree to re register.
+        */
+        "codeActionProvider": true,
     });
 
     /*

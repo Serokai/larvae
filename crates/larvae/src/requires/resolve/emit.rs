@@ -32,50 +32,36 @@ impl<'a> Resolver<'a> {
             return Rewrite::Keep;
         }
 
-        /*
-        A require may name a claimed file outright. A data file has no
-        extensionless spelling, and the worm that claims it lowers it to a
-        Luau module in the output tree, so the file itself is the module
-        node and every emitted form drops the extension.
-        */
-        let claimed_file =
-            self.claimed.iter().any(|ext| spec.ends_with(ext.as_str())) && target_base.is_file();
+        let node = match resolve_module(target_base, self.claimed) {
+            Ok(Some(node)) => node,
 
-        let node = if claimed_file {
-            super::ModuleNode::File(target_base.to_path_buf())
-        } else {
-            match resolve_module(target_base) {
-                Ok(Some(node)) => node,
+            Ok(None) => {
+                let d = Diag::warning(
+                    ctx.path,
+                    format!(
+                        "require(\"{spec}\"): no module found at {}",
+                        crate::ui::rel(target_base)
+                    ),
+                )
+                .at(src, offset);
+                diags.push(if self.strict {
+                    Diag {
+                        severity: crate::diag::Severity::Error,
+                        ..d
+                    }
+                } else {
+                    d
+                });
 
-                Ok(None) => {
-                    let d = Diag::warning(
-                        ctx.path,
-                        format!(
-                            "require(\"{spec}\"): no module found at {}",
-                            crate::ui::rel(target_base)
-                        ),
-                    )
-                    .at(src, offset);
-                    diags.push(if self.strict {
-                        Diag {
-                            severity: crate::diag::Severity::Error,
-                            ..d
-                        }
-                    } else {
-                        d
-                    });
+                return Rewrite::Keep;
+            }
 
-                    return Rewrite::Keep;
-                }
+            Err(msg) => {
+                diags.push(
+                    Diag::error(ctx.path, format!("require(\"{spec}\"): {msg}")).at(src, offset),
+                );
 
-                Err(msg) => {
-                    diags.push(
-                        Diag::error(ctx.path, format!("require(\"{spec}\"): {msg}"))
-                            .at(src, offset),
-                    );
-
-                    return Rewrite::Keep;
-                }
+                return Rewrite::Keep;
             }
         };
 
@@ -123,6 +109,38 @@ impl<'a> Resolver<'a> {
 
             ModuleNode::File(f) => f.with_extension(""),
         };
+
+        /*
+        A module inside the directory of an init file is `@self`.
+
+        `./` from an init file resolves against the parent of its directory,
+        which the RFC states and a runtime enforces: `./utils/helper` from
+        `pkg/init.luau` fails to resolve, and `./pkg/utils/helper` works. So
+        the relative form has to name the directory the init file sits in.
+
+        That name is the bug. Larvae resolves against the source tree, so
+        `src/init.luau` emitted `./src/utils/helper`, and the file is written
+        to `dist/init.luau`, where the same string still points into `src`.
+        The output required the input.
+
+        `@self` names the directory of the init file without spelling it, so
+        the require reads the same at `src/init.luau`, at `dist/init.luau`,
+        and inside a package a consumer has vendored under a name neither
+        tree used. The roblox-string target already emits `@self` for a child
+        of the requirer, and this is that rule for a path.
+        */
+        if ctx.is_init
+            && let Ok(tail) = target.strip_prefix(&ctx.dir)
+            && tail.components().next().is_some()
+        {
+            let tail: Vec<&str> = tail
+                .components()
+                .filter_map(|c| c.as_os_str().to_str())
+                .collect();
+
+            // A require is written with forward slashes on every platform.
+            return format!("@self/{}", tail.join("/"));
+        }
 
         fs_relative(ctx.dot_base(), &target)
     }

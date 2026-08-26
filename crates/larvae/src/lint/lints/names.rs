@@ -17,15 +17,17 @@ use crate::syntax::ast::*;
 use super::correctness::each_expr;
 
 lints! {
-    GlobalUsage => "global_usage", Warn,
+    GlobalUsage => "global_usage", Suspicious, Warn,
         "reaching into _G, which is shared with every other script";
-    Shadowing => "shadowing", Warn,
+    Shadowing => "shadowing", Suspicious, Warn,
         "a name that hides another still in scope";
-    UndefinedVariable => "undefined_variable", Deny,
+    UndefinedVariable => "undefined_variable", Correctness, Deny,
         "a name nothing declares, which is nil at runtime";
-    UnscopedVariables => "unscoped_variables", Warn,
+    UnscopedVariables => "unscoped_variables", Suspicious, Warn,
         "an assignment with no local, which creates a global";
-    UnusedVariable => "unused_variable", Warn,
+    UnusedFunction => "unused_function", Correctness, Warn,
+        "a local function that nothing calls";
+    UnusedVariable => "unused_variable", Correctness, Warn,
         "a name declared and never read";
 }
 
@@ -60,77 +62,188 @@ impl Default for UnusedOptions {
     }
 }
 
-impl UnusedVariable {
+/*
+`unused_function` and `unused_variable` split the same walk in two.
+
+The Luau compiler separates them, and it separates them by the form that
+declared the name and not by the value it holds: `local function f() end` is
+FunctionUnused, while `local f = function() end` is LocalUnused. larvae
+follows that split, because a reader who turns one of them off means the one
+they named, and a project that keeps unused helpers around while still
+wanting unused locals reported has no way to say so otherwise.
+
+Each one is a real lint with its own level, so the config and the `allow`
+comment reach the name the user wrote. They share `unused`, so the two cannot
+drift apart, and they share `[lint.options.unused_variable]`, because
+`ignore_pattern` means the same thing to both.
+*/
+impl UnusedFunction {
     fn check(ctx: &LintCtx<'_>, out: &mut Vec<Finding>) {
-        let options: UnusedOptions = ctx.cfg.options_for("unused_variable");
+        unused(ctx, out, Wanted::Functions);
+        unused_globals(ctx, out);
+    }
+}
 
-        /*
-        The default pattern is a prefix test. To compile a regex for it
-        costs several times the whole rest of this lint. Thus only a
-        project that changed the pattern pays for the regex engine.
-        */
-        let ignore = match options.ignore_pattern.as_str() {
-            "^_" => None,
+/*
+A global `function f() end` that nothing in the file calls.
 
-            pattern => regex::Regex::new(pattern).ok(),
+A global is not a binding, so the walk above never sees it. It is still dead
+code: a global in Luau belongs to the script that runs, so a declaration no
+line reads is a function nothing can reach. The Luau compiler reports it as
+FunctionUnused, and selene reports it too.
+
+The read test is by name, because that is what a global is. A file that
+declares `function f()` and later binds `local f` reads the local and not the
+global, and this counts that as a read. Silence is the safe answer there: the
+lint says nothing rather than telling an author to delete a function that a
+line does appear to call.
+*/
+fn unused_globals(ctx: &LintCtx<'_>, out: &mut Vec<Finding>) {
+    let options: UnusedOptions = ctx.cfg.options_for("unused_variable");
+
+    let ignore = match options.ignore_pattern.as_str() {
+        "^_" => None,
+
+        pattern => regex::Regex::new(pattern).ok(),
+    };
+
+    for &token in &ctx.names.global_functions {
+        let name = ctx.tok(token);
+
+        if ctx.names.global_reads.contains(name) {
+            continue;
+        }
+
+        let ignored = match &ignore {
+            Some(pattern) => pattern.is_match(name),
+
+            None => name.starts_with('_'),
         };
 
-        for binding in &ctx.names.bindings {
-            if !binding.reads.is_empty() {
-                continue;
-            }
-
-            let wanted = match binding.origin {
-                Origin::Local | Origin::LocalFunction => true,
-
-                Origin::Param => options.parameters,
-
-                Origin::Loop => options.loop_variables,
-            };
-
-            if !wanted {
-                continue;
-            }
-
-            // A method's implicit self has no name token, so the user cannot remove it.
-            if binding.name == "self" && binding.origin == Origin::Param {
-                continue;
-            }
-
-            let ignored = match &ignore {
-                Some(pattern) => pattern.is_match(binding.name),
-
-                None => binding.is_ignored(),
-            };
-
-            if ignored {
-                continue;
-            }
-
-            let span = TokSpan::new(
-                binding.declared_at as usize,
-                binding.declared_at as usize + 1,
-            );
-
-            /*
-            A binding that is written but never read needs a different
-            message. It usually means that the code computes a value and
-            discards it, which is a possible bug and not only untidy code.
-            */
-            let (message, help) = if binding.writes.is_empty() {
-                (
-                    format!("{} is never used", binding.name),
-                    "remove it, or prefix the name with _ to keep it".to_string(),
-                )
-            } else {
-                (
-                    format!("{} is assigned but never read", binding.name),
-                    format!("{} writes go nowhere", binding.writes.len()),
-                )
-            };
-
-            out.push(Finding::new("unused_variable", ctx.bytes(span), message).with_help(help));
+        if ignored {
+            continue;
         }
+
+        let span = TokSpan::new(token as usize, token as usize + 1);
+
+        out.push(
+            Finding::new(
+                "unused_function",
+                ctx.bytes(span),
+                format!("{name} is never called"),
+            )
+            .with_help("remove it, or prefix the name with _ to keep it"),
+        );
+    }
+}
+
+impl UnusedVariable {
+    fn check(ctx: &LintCtx<'_>, out: &mut Vec<Finding>) {
+        unused(ctx, out, Wanted::Everything);
+    }
+}
+
+/// Which half of the walk a caller wants.
+#[derive(PartialEq)]
+enum Wanted {
+    /// `local function f() end`, which the Luau compiler calls FunctionUnused.
+    Functions,
+    /// Everything else a scope binds.
+    Everything,
+}
+
+fn unused(ctx: &LintCtx<'_>, out: &mut Vec<Finding>, wanted: Wanted) {
+    let options: UnusedOptions = ctx.cfg.options_for("unused_variable");
+
+    /*
+    The default pattern is a prefix test. To compile a regex for it
+    costs several times the whole rest of this lint. Thus only a
+    project that changed the pattern pays for the regex engine.
+    */
+    let ignore = match options.ignore_pattern.as_str() {
+        "^_" => None,
+
+        pattern => regex::Regex::new(pattern).ok(),
+    };
+
+    for binding in &ctx.names.bindings {
+        if !binding.reads.is_empty() {
+            continue;
+        }
+
+        let is_function = binding.origin == Origin::LocalFunction;
+
+        if is_function != (wanted == Wanted::Functions) {
+            continue;
+        }
+
+        let report = match binding.origin {
+            Origin::Local | Origin::LocalFunction => true,
+
+            Origin::Param => options.parameters,
+
+            Origin::Loop => options.loop_variables,
+        };
+
+        if !report {
+            continue;
+        }
+
+        // A method's implicit self has no name token, so the user cannot remove it.
+        if binding.name == "self" && binding.origin == Origin::Param {
+            continue;
+        }
+
+        let ignored = match &ignore {
+            Some(pattern) => pattern.is_match(binding.name),
+
+            None => binding.is_ignored(),
+        };
+
+        if ignored {
+            continue;
+        }
+
+        /*
+        The Luau compiler calls an unused `local function` FunctionUnused
+        and an unused `local` LocalUnused. The split is the declaring
+        form, so `local f = function() end` stays a variable here.
+        */
+        let lint = match is_function {
+            true => "unused_function",
+
+            false => "unused_variable",
+        };
+
+        let span = TokSpan::new(
+            binding.declared_at as usize,
+            binding.declared_at as usize + 1,
+        );
+
+        /*
+        A binding that is written but never read needs a different
+        message. It usually means that the code computes a value and
+        discards it, which is a possible bug and not only untidy code.
+        */
+        let (message, help) = if binding.writes.is_empty() {
+            let what = match is_function {
+                true => "is never called",
+
+                false => "is never used",
+            };
+
+            (
+                format!("{} {what}", binding.name),
+                "remove it, or prefix the name with _ to keep it".to_string(),
+            )
+        } else {
+            (
+                format!("{} is assigned but never read", binding.name),
+                format!("{} writes go nowhere", binding.writes.len()),
+            )
+        };
+
+        out.push(Finding::new(lint, ctx.bytes(span), message).with_help(help));
     }
 }
 
@@ -254,6 +367,19 @@ impl UnscopedVariables {
 
             // To assign a known global is an intentional act, not a mistake.
             if globals::has(ctx.cfg.std, name) || ctx.cfg.globals.iter().any(|g| g == name) {
+                continue;
+            }
+
+            /*
+            `function f() end` is a global, and it is not this lint.
+
+            The statement creates the name the same way `f = 1` does, and the
+            two do not read the same way. Neither selene nor the Luau compiler
+            reports the declaration, and a Roblox script defines its callbacks
+            with it, so larvae reporting it made the lint unusable on the
+            codebase it is for.
+            */
+            if ctx.names.global_functions.contains(&token) {
                 continue;
             }
 

@@ -26,33 +26,37 @@ use super::configured::global_path;
 use super::correctness::{each_block, each_expr, each_stmt, number, unwrap_parens};
 
 lints! {
-    BadCommentDirective => "bad_comment_directive", Warn,
+    BadCommentDirective => "bad_comment_directive", Correctness, Warn,
         "a --! directive that Luau does not know, or one that comes after the code it should govern";
-    BuiltinGlobalWrite => "builtin_global_write", Warn,
+    BuiltinGlobalWrite => "builtin_global_write", Suspicious, Warn,
         "an assignment over a standard global, which every later script sees";
-    ComparisonPrecedence => "comparison_precedence", Warn,
+    ComparisonPrecedence => "comparison_precedence", Correctness, Warn,
         "not a == b, or a chain like a < b < c, which does not group the way it reads";
-    DuplicateFunction => "duplicate_function", Warn,
+    DuplicateFunction => "duplicate_function", Correctness, Warn,
         "two functions of the same name in one scope, where the first is discarded";
-    DuplicateLocal => "duplicate_local", Warn,
+    DuplicateLocal => "duplicate_local", Correctness, Deny,
         "one local statement or parameter list that declares the same name twice";
-    FormatString => "format_string", Warn,
+    FormatString => "format_string", Correctness, Deny,
         "a format string that string.format or os.date rejects at runtime";
-    ImplicitReturn => "implicit_return", Warn,
+    ImplicitReturn => "implicit_return", Suspicious, Allow,
         "a function that returns a value on one path and falls off the end on another";
-    MisleadingAndOr => "misleading_and_or", Warn,
+    MisleadingAndOr => "misleading_and_or", Correctness, Warn,
         "cond and false or b, which always gives b because the middle is never truthy";
-    NumberLiteralOverflow => "number_literal_overflow", Warn,
+    NumberLiteralOverflow => "number_literal_overflow", Correctness, Warn,
         "a hexadecimal or binary literal wider than 64 bits, which is truncated";
-    PlaceholderRead => "placeholder_read", Warn,
+    PlaceholderRead => "placeholder_read", Suspicious, Warn,
         "reading _, the name that says a value is discarded";
-    TableOperations => "table_operations", Warn,
+    TableOperations => "table_operations", Correctness, Warn,
         "a table.insert or table.remove whose index or argument count is wrong";
-    UninitializedLocal => "uninitialized_local", Warn,
+    ImplicitAnyLocal => "implicit_any_local", Suspicious, Warn,
+        "a local declared with no value and no type, so what it holds is decided elsewhere";
+    ImplicitAnyParameter => "implicit_any_parameter", Suspicious, Allow,
+        "a parameter with no type, so what it takes is decided by the caller";
+    UninitializedLocal => "uninitialized_local", Correctness, Warn,
         "a local declared with no value and never assigned, so every read is nil";
-    UnknownType => "unknown_type", Warn,
+    UnknownType => "unknown_type", Correctness, Warn,
         "comparing type(x) against a string that type() never returns";
-    ZeroStepLoop => "zero_step_loop", Warn,
+    ZeroStepLoop => "zero_step_loop", Correctness, Deny,
         "a numeric for whose step is zero, so the counter never moves";
 }
 
@@ -233,7 +237,7 @@ impl ImplicitReturn {
     nil. When the function is a lookup, that is the design. When it is not,
     the author forgot a branch, and the nil arrives far from here.
 
-    The lint is off by default, because the first reading is common and
+    The lint is `allow`, because the first reading is common and
     idiomatic. `local function find(t, x) for i, v in t do if v == x then
     return i end end end` is correct Luau, and this lint reports it. A
     project that wants every exit spelled out turns the lint on and writes
@@ -661,15 +665,43 @@ fn is_append_index(ctx: &LintCtx<'_>, index: &Expr, table: &Expr) -> bool {
 
 // --- misleading_and_or -----------------------------------------------------
 
+/*
+Reports whether this expression can only be `true` or `false`.
+
+Syntax answers this on its own, which is the whole reason the lint can widen
+without types. A comparison yields a boolean whatever its operands are, and
+`not` yields one as well. `and` and `or` do not: they give back an operand,
+so `a and b` is whatever `b` holds.
+*/
+fn always_boolean(ctx: &LintCtx<'_>, e: &Expr) -> bool {
+    match unwrap_parens(e) {
+        Expr::Binary { op, .. } => matches!(ctx.text(*op), "==" | "~=" | "<" | "<=" | ">" | ">="),
+
+        Expr::Unary { op, .. } => ctx.text(*op) == "not",
+
+        _ => false,
+    }
+}
+
 impl MisleadingAndOr {
     /*
-    `cond and false or other`.
+    `cond and false or other`, and the wider case that hides behind it.
 
     `a and b or c` stands in for a conditional, and it works only while `b`
     is truthy. With `false` or `nil` in the middle, the `and` gives that
     value, the `or` sees it as false, and the whole expression is `c` for
     every input. The author wanted `if cond then false else other`, which
     Luau writes as an expression.
+
+    A middle that is provably a boolean is the same defect with a smaller
+    blast radius, and it is the one that reaches production. `ready and
+    (count == 0) or "pending"` gives "pending" when the count is not zero,
+    which is exactly when the author wanted `false`. Nothing about that
+    needs a type: a comparison yields a boolean because it is a comparison.
+
+    The two cases carry different messages, because the first is wrong for
+    every input and the second is wrong for half of them. A reader who sees
+    "always" for a case that is sometimes right stops trusting the linter.
     */
     fn check(ctx: &LintCtx<'_>, out: &mut Vec<Finding>) {
         each_expr(ctx, out, |ctx, e, out| {
@@ -694,23 +726,29 @@ impl MisleadingAndOr {
                 return;
             }
 
-            let what = match middle.as_ref() {
-                Expr::False(_) => "false",
+            let message = match unwrap_parens(middle.as_ref()) {
+                Expr::False(_) => {
+                    "the middle of this and-or is false, so the result is always the last part"
+                        .to_string()
+                }
 
-                Expr::Nil(_) => "nil",
+                Expr::Nil(_) => {
+                    "the middle of this and-or is nil, so the result is always the last part"
+                        .to_string()
+                }
+
+                other if always_boolean(ctx, other) => format!(
+                    "the middle of this and-or is the boolean `{}`, so the result is the last part \
+                     whenever that is false",
+                    ctx.text(other.span())
+                ),
 
                 _ => return,
             };
 
             out.push(
-                Finding::new(
-                    "misleading_and_or",
-                    ctx.bytes(*span),
-                    format!(
-                        "the middle of this and-or is {what}, so the result is always the last part"
-                    ),
-                )
-                .with_help("write if cond then a else b, which is an expression in Luau"),
+                Finding::new("misleading_and_or", ctx.bytes(*span), message)
+                    .with_help("write if cond then a else b, which is an expression in Luau"),
             );
         });
     }
@@ -1178,5 +1216,141 @@ fn each_function(ctx: &LintCtx<'_>, mut f: impl FnMut(&FunctionBody)) {
         if let Expr::Function { body, .. } = e {
             f(body);
         }
+    }
+}
+
+// --- implicit_any_local ----------------------------------------------------
+
+impl ImplicitAnyLocal {
+    /*
+    `local test`, with no value and no type annotation.
+
+    What the name holds is then decided by whatever assigns it first, and a
+    reader of the declaration cannot tell what that is. In a file with no
+    `--!strict` directive, which is most Roblox code, Luau accepts any later
+    assignment of any type: checked against luau-lsp, `local x` then `x = 1`
+    then `x = "s"` is an error under `--!strict` and silence without it. That
+    silence is the implicit `any` this lint names.
+
+    The fix is one of two words. Write the type, `local test: number`, when
+    the value arrives later. Write the value, `local test = 0`, when it can
+    arrive now.
+
+    The lint warns, and it does not deny. The fix is always available and it
+    never changes behaviour, which argued for a deny at first. The shape
+    argues against one: `local found` above the loop that fills it in is
+    ordinary Luau that runs correctly, Luau's own linter says nothing about
+    it, and a deny fails the build of every project on the day it adopts
+    larvae. A project that wants the discipline as a gate writes one line.
+
+    A local that nothing ever assigns is left to `uninitialized_local`, which
+    says the more urgent thing about the same line: every read of it is nil.
+    One line gets one finding.
+    */
+    fn check(ctx: &LintCtx<'_>, out: &mut Vec<Finding>) {
+        each_stmt(ctx, out, |ctx, s, out| {
+            let Stmt::Local(n) = s else {
+                return;
+            };
+
+            // A declaration with a value has its type from that value.
+            if !n.values.is_empty() {
+                return;
+            }
+
+            for binding in &n.names {
+                // The author wrote what it holds, which is the whole ask.
+                if binding.ty.is_some() {
+                    continue;
+                }
+
+                let name = ctx.tok(binding.name.start);
+
+                // An underscore name states that nobody wants the value.
+                if name.starts_with('_') {
+                    continue;
+                }
+
+                /*
+                Nothing assigns it, so `uninitialized_local` reports the line
+                and says the more urgent thing about it.
+                */
+                let never_assigned = ctx
+                    .names
+                    .by_token
+                    .get(&binding.name.start)
+                    .and_then(|&i| ctx.names.bindings.get(i))
+                    .is_some_and(|b| b.writes.is_empty());
+
+                if never_assigned {
+                    continue;
+                }
+
+                out.push(
+                    Finding::new(
+                        "implicit_any_local",
+                        ctx.bytes(TokSpan::new(
+                            binding.name.start as usize,
+                            binding.name.start as usize + 1,
+                        )),
+                        format!(
+                            "{name} has no value and no type, so what it holds is decided elsewhere"
+                        ),
+                    )
+                    .with_help(format!(
+                        "write the type, `local {name}: T`, or give it a value"
+                    )),
+                );
+            }
+        });
+    }
+}
+
+// --- implicit_any_parameter ------------------------------------------------
+
+impl ImplicitAnyParameter {
+    /*
+    `local function apply(list, transform)`.
+
+    A parameter with no annotation is `any`. What the function takes is then
+    decided by each caller, and a reader of the signature cannot tell what
+    the body expects. This is the defect that `implicit_any_local` names, on
+    the other side of the call: that lint asks what a name holds, and this
+    one asks what a function accepts.
+
+    The lint is off by default. Most Luau carries no annotations, so a warn
+    default would report hundreds of times on the first run, and a report
+    that large teaches users to stop reading the linter. A project that
+    wants annotated signatures asks for them in one line.
+
+    Two names are left out. A name that starts with `_` says that nobody
+    wants the value, which is what `unused_variable` exempts through its
+    `ignore_pattern`. `self` is the receiver of a method, and Luau gives it
+    the type of the table that the method hangs on.
+    */
+    fn check(ctx: &LintCtx<'_>, out: &mut Vec<Finding>) {
+        each_function(ctx, |body| {
+            for param in &body.params {
+                // `...` is not a name, and its annotation is a separate question.
+                if param.is_vararg || param.ty.is_some() {
+                    continue;
+                }
+
+                let name = ctx.tok(param.name.start);
+
+                if name == "self" || name.starts_with('_') {
+                    continue;
+                }
+
+                out.push(
+                    Finding::new(
+                        "implicit_any_parameter",
+                        ctx.bytes(param.name),
+                        format!("{name} has no type, so what it takes is decided by the caller"),
+                    )
+                    .with_help(format!("write the type, `{name}: T`")),
+                );
+            }
+        });
     }
 }

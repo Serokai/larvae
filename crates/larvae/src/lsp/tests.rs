@@ -16,7 +16,60 @@ fn the_advertised_capabilities_are_all_implemented() {
 
     assert_eq!(caps["documentFormattingProvider"], true);
     assert_eq!(caps["documentSymbolProvider"], true);
+    assert_eq!(caps["codeActionProvider"], true);
     assert_eq!(caps["textDocumentSync"]["change"], 1, "full sync");
+}
+
+/*
+The two worm paths answer, and they answer with the shape an editor expects.
+
+Neither carries anything yet. What these hold is that the path is wired: a
+request that errors and a request that returns nothing look the same to a
+user and are not the same to an editor, which logs a failure on every
+keystroke that opens the lightbulb.
+*/
+#[test]
+fn a_code_action_request_answers_with_a_list() {
+    let mut server = server_with("local x = 1\n");
+    let mut out = Vec::new();
+
+    let message = message(
+        "textDocument/codeAction",
+        Some(7),
+        json!({
+            "textDocument": { "uri": "file:///t.luau" },
+            "range": {
+                "start": { "line": 0, "character": 0 },
+                "end": { "line": 0, "character": 5 }
+            },
+            "context": { "diagnostics": [] }
+        }),
+    );
+
+    server.handle(&message, &mut out).unwrap();
+
+    let text = String::from_utf8(out).unwrap();
+
+    assert!(text.contains("\"result\":[]"), "{text}");
+    assert!(
+        !text.contains("error"),
+        "an editor must not see a failure: {text}"
+    );
+}
+
+#[test]
+fn a_definitions_request_answers_with_a_list() {
+    let mut server = server_with("local x = 1\n");
+    let mut out = Vec::new();
+
+    let message = message("larvae/definitions", Some(8), json!({}));
+
+    server.handle(&message, &mut out).unwrap();
+
+    let text = String::from_utf8(out).unwrap();
+
+    assert!(text.contains("definitions"), "{text}");
+    assert!(!text.contains("is not supported"), "{text}");
 }
 
 #[test]
@@ -1098,4 +1151,118 @@ serves_luau = true
 
     // A plain Luau file formats although claim_only is on.
     assert_ne!(server.format("file:///t.luau").unwrap(), Value::Null);
+}
+
+// --- what a worm reaches the editor with ------------------------------------
+
+/*
+A worm's code action travels the real transport and comes out as LSP.
+
+The worm speaks in bytes, because it parsed the file. The host turns those
+into the line and character the protocol wants, which is the conversion a
+finding already goes through, so a wrong one here would put an edit in the
+wrong place.
+*/
+#[cfg(unix)]
+#[test]
+fn a_worm_offers_a_code_action() {
+    let dir = tempfile::tempdir().unwrap();
+
+    worm_that(
+        dir.path(),
+        r#"    if req["op"] == "actions":
+        send({"ok": True, "actions": [
+            {"title": "Wrap it", "edits": [{"span": [6, 9], "text": "there"}],
+             "fixes": "bad_word"}
+        ]})
+        continue
+    send({"ok": True})"#,
+    );
+
+    let server = server_with_worm(
+        "name = \"markup\"\napi = 1\nform = \"native\"\nentry = \"worm.py\"\n\n[frontend]\nclaims = [\".luaux\"]\n\n[lints.bad_word]\ndescription = \"x\"\n",
+        dir.path(),
+        "hello you\n",
+    );
+
+    let found = extend::code_actions(
+        &server.worms,
+        "file:///p/t.luaux",
+        "hello you\n",
+        &json!({
+            "start": { "line": 0, "character": 0 },
+            "end": { "line": 0, "character": 9 }
+        }),
+    );
+
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert_eq!(found[0]["title"], "Wrap it (markup)", "the worm is named");
+    assert_eq!(found[0]["kind"], "quickfix");
+
+    let edits = &found[0]["edit"]["changes"]["file:///p/t.luaux"];
+    assert_eq!(edits[0]["newText"], "there");
+    assert_eq!(
+        edits[0]["range"]["start"]["character"], 6,
+        "byte 6 is column 6"
+    );
+    assert_eq!(edits[0]["range"]["end"]["character"], 9);
+
+    // a fix that names its lint is grouped under that diagnostic
+    assert_eq!(found[0]["diagnostics"][0]["code"], "markup.bad_word");
+}
+
+/// A worm supplies Luau definition text, and it comes out under its name.
+#[cfg(unix)]
+#[test]
+fn a_worm_supplies_type_definitions() {
+    let dir = tempfile::tempdir().unwrap();
+
+    worm_that(
+        dir.path(),
+        r#"    if req["op"] == "definitions":
+        send({"ok": True, "definitions": "declare items: { string }\n"})
+        continue
+    send({"ok": True})"#,
+    );
+
+    let server = server_with_worm(
+        "name = \"markup\"\napi = 1\nform = \"native\"\nentry = \"worm.py\"\n\n[frontend]\nclaims = [\".luaux\"]\n",
+        dir.path(),
+        "x\n",
+    );
+
+    let supplied = extend::definitions(&server.worms);
+
+    assert_eq!(supplied.len(), 1, "{supplied:#?}");
+    assert_eq!(supplied[0].worm, "markup");
+    assert!(supplied[0].text.contains("declare items"), "{supplied:#?}");
+
+    let reply = extend::definitions_reply(&server.worms);
+    assert_eq!(reply["definitions"][0]["worm"], "markup");
+}
+
+/*
+A worm with neither costs a reply and not an error.
+
+The editor asks on a keystroke. A worm that only formats has nothing to say
+here, and a failure would put a line in the editor log every time the
+lightbulb opens.
+*/
+#[cfg(unix)]
+#[test]
+fn a_worm_with_nothing_to_offer_is_quiet() {
+    let dir = tempfile::tempdir().unwrap();
+
+    worm_that(dir.path(), "    send({\"ok\": True})");
+
+    let server = server_with_worm(
+        "name = \"markup\"\napi = 1\nform = \"native\"\nentry = \"worm.py\"\n\n[frontend]\nclaims = [\".luaux\"]\n",
+        dir.path(),
+        "x\n",
+    );
+
+    assert!(
+        extend::code_actions(&server.worms, "file:///p/t.luaux", "x\n", &json!(null)).is_empty()
+    );
+    assert!(extend::definitions(&server.worms).is_empty());
 }

@@ -70,9 +70,26 @@ pub fn plain_view(src: &str) -> std::borrow::Cow<'_, str> {
     let reserved = |text: &str| {
         matches!(
             text,
-            "and" | "break" | "do" | "else" | "elseif" | "end" | "false" | "for" | "if" | "in"
-                | "local" | "nil" | "not" | "or" | "repeat" | "return" | "then" | "true"
-                | "until" | "while"
+            "and"
+                | "break"
+                | "do"
+                | "else"
+                | "elseif"
+                | "end"
+                | "false"
+                | "for"
+                | "if"
+                | "in"
+                | "local"
+                | "nil"
+                | "not"
+                | "or"
+                | "repeat"
+                | "return"
+                | "then"
+                | "true"
+                | "until"
+                | "while"
         )
     };
 

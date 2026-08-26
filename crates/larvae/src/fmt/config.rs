@@ -132,6 +132,38 @@ pub enum RequireBinding {
 }
 
 /*
+Selects what the formatter does with a required module that nothing uses.
+
+Off by default, and the default matters more here than it does for the other
+options. `require` runs the module the first time a file asks for it, so a
+module can do its work by being required at all: it connects an event, it
+registers a component, it fills a table somewhere else. To delete the line
+then stops that work, and the file still compiles, so nothing says the
+behaviour changed. Larvae cannot tell that module from a module that only
+returns a value, because the answer is inside a file the formatter is not
+reading.
+
+So the project decides. `underscore` keeps the require and marks the name,
+which changes no behaviour at all and silences the lint. `remove` deletes the
+statement, which is what a project wants when its modules only return values.
+
+A name that a type uses is used. `const jecs = require("@pkg/jecs")` with
+`type C = jecs.Component` below it reads the binding, and the resolution the
+linter builds already counts it.
+*/
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UnusedImports {
+    /// Leave it as written.
+    #[default]
+    Ignore,
+    /// `local _Signal = require(...)`, which keeps the module and marks the name.
+    Underscore,
+    /// Delete the declaration.
+    Remove,
+}
+
+/*
 Selects whether a statement ends with a semicolon.
 
 Luau needs one in exactly one place: before a statement that opens with `(`,
@@ -174,6 +206,126 @@ pub struct SortRequires {
     pub enabled: bool,
     #[serde(default)]
     pub grouping: RequireGrouping,
+}
+
+/*
+Turns a `local` that nothing reassigns into a `const`.
+
+The `prefer_const` lint reports this shape. This option is the same rule with
+the formatter making the edit instead of a person, which is why it carries the
+same sub option under the same name.
+
+Off by default. It rewrites a keyword, which is a bigger step than moving
+spaces, and `require_binding` is off for the same reason.
+*/
+/*
+Keys stay snake case here, which is larvae's rule for a key, and it is also
+the spelling `[lint.options.prefer_const]` uses. One option under two tables
+has to be written one way.
+*/
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct PreferConst {
+    #[serde(default)]
+    pub enabled: bool,
+    /*
+    A binding the file mutates through a field keeps `local`.
+
+    Off by default, because `const` is correct there: Luau enforces `const`
+    against reassignment of the name and says nothing about the value, so
+    `const t = {}` followed by `t.x = 1` compiles. The option is for a project
+    that reads `local` as "this one changes", and it is the same choice,
+    spelled the same way, as `[lint.options.prefer_const]`.
+    */
+    #[serde(default)]
+    pub mutated_tables_stay_local: bool,
+}
+
+/*
+Selects when a list between parentheses opens over several lines.
+
+An argument list and a parameter list read the same way here, so one enum
+serves both. The tables that use it are separate, because a project that wants
+every call opened does not always want every declaration opened too.
+*/
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ListExpansion {
+    /// Open the list only where the line does not fit. This is the layout larvae always had.
+    #[default]
+    WhenNeeded,
+    /// Open every list, whatever its width.
+    Always,
+    /*
+    Keep the list on one line.
+
+    A value inside it can still open, so `f(t)` with a large `t` opens the
+    table and not the list. The line can run past `column_width`, because the
+    option asks for that.
+    */
+    Never,
+}
+
+/*
+Selects the shape of an opened argument list.
+
+```lua
+-- one-per-line
+Colors:Apply(
+    frame,
+    "Rarity",
+    { Children = { stroke } }
+)
+
+-- hug-last
+Colors:Apply(frame, "Rarity", {
+    Children = { stroke },
+})
+```
+*/
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CallStyle {
+    /// Every argument on a line of its own.
+    #[default]
+    OnePerLine,
+    /*
+    The arguments stay on the line of the call, and the last one opens.
+
+    This applies where the last argument is a table, a function, or a string
+    that carries its own newlines. Those are the values that read as a block.
+    A call whose last argument is none of them opens one per line, because
+    there is nothing there to hold the shape.
+    */
+    HugLast,
+}
+
+/// How the formatter lays out the argument list of a call.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct FunctionCall {
+    #[serde(default)]
+    pub expand: ListExpansion,
+    #[serde(default)]
+    pub style: CallStyle,
+    /// The indent levels that an opened argument takes.
+    #[serde(default = "default_list_indent")]
+    pub indent: usize,
+}
+
+/// How the formatter lays out the parameter list of a declaration.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct FunctionDeclaration {
+    #[serde(default)]
+    pub expand: ListExpansion,
+    /// The indent levels that an opened parameter takes.
+    #[serde(default = "default_list_indent")]
+    pub indent: usize,
+}
+
+fn default_list_indent() -> usize {
+    1
 }
 
 /// Selects when the formatter opens an `if ... then ... else ...` expression over several lines.
@@ -265,6 +417,25 @@ pub struct IfExpression {
     /// The indent levels that a continuation line of the expression takes.
     #[serde(default = "default_if_indent")]
     pub indent: usize,
+}
+
+impl Default for FunctionCall {
+    fn default() -> Self {
+        Self {
+            expand: ListExpansion::default(),
+            style: CallStyle::default(),
+            indent: default_list_indent(),
+        }
+    }
+}
+
+impl Default for FunctionDeclaration {
+    fn default() -> Self {
+        Self {
+            expand: ListExpansion::default(),
+            indent: default_list_indent(),
+        }
+    }
 }
 
 impl Default for IfExpression {
@@ -362,6 +533,32 @@ impl TypeSeparator {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct FmtConfig {
+    /*
+    Whether `larvae fmt` changes this project at all.
+
+    `false` leaves every file as it is. A project that wants larvae for its
+    lints and its requires, and keeps another formatter, says so here rather
+    than by not running the command.
+    */
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /*
+    Whether larvae's own defaults apply, or only the ones the project wrote.
+
+    Three states, as `[lint] recommended` has them. Absent and `true` both
+    mean larvae's defaults apply, which is what larvae always did. `false`
+    starts from a base that changes as little as possible, and the project
+    builds up from there.
+
+    Only the options where larvae has an opinion move: a trailing comma that
+    holds a table open, the space inside a brace, and the trailing comma
+    larvae writes into a table it opened. Every other default is either what
+    stylua does or a setting that changes nothing until a project asks for it.
+    */
+    #[serde(default)]
+    pub recommended: Option<bool>,
+
     // --- stylua parity: the same names and the same defaults -------------
     #[serde(default = "default_width")]
     pub column_width: usize,
@@ -398,6 +595,18 @@ pub struct FmtConfig {
     #[serde(default)]
     pub require_binding: RequireBinding,
 
+    /// Turns a `local` that nothing reassigns into a `const`.
+    #[serde(default)]
+    pub prefer_const: PreferConst,
+    /*
+    What to do with a required module that nothing uses.
+
+    `ignore` by default, because `remove` can stop a module from running at
+    all. See [`UnusedImports`].
+    */
+    #[serde(default)]
+    pub unused_imports: UnusedImports,
+
     /// Selects whether a statement ends with a semicolon.
     #[serde(default)]
     pub semicolons: Semicolons,
@@ -405,6 +614,14 @@ pub struct FmtConfig {
     /// Selects how an `if` expression opens over several lines.
     #[serde(default)]
     pub if_expression: IfExpression,
+
+    /// Selects how the argument list of a call opens over several lines.
+    #[serde(default)]
+    pub function_call: FunctionCall,
+
+    /// Selects how the parameter list of a declaration opens over several lines.
+    #[serde(default)]
+    pub function_declaration: FunctionDeclaration,
 
     /// Selects how a table type opens over several lines.
     #[serde(default)]
@@ -510,6 +727,26 @@ impl Default for FmtConfig {
 
 impl FmtConfig {
     /*
+    The base that `recommended = false` starts from.
+
+    Three options carry an opinion of larvae's and change a file on their
+    own. The rest of the defaults are stylua's, or they are a setting that
+    does nothing until a project asks for it, so they stay as they are: a
+    base that turned those off would not be neutral, it would be a third
+    style nobody chose.
+    */
+    pub fn neutral() -> Self {
+        Self {
+            magic_trailing_comma: false,
+            space_inside_braces: false,
+            trailing_comma: false,
+            ..Self::default()
+        }
+    }
+}
+
+impl FmtConfig {
+    /*
     The same settings, with the named options back at their own defaults.
 
     A project uses this to keep one option out of the files that a worm
@@ -607,7 +844,25 @@ impl FmtConfig {
     `[fmt]` in `larvae.toml` wins, because it is the more specific file.
     */
     pub fn discover(root: &Path, larvae: Option<&toml::Value>) -> Result<Self> {
-        let mut config = stylua_file(root)?.unwrap_or_default();
+        /*
+        `recommended` decides what the merge starts from, so an option the
+        project wrote lands on top of it in the usual way and nothing has to
+        track which keys were written.
+
+        A `stylua.toml` states the style of the project already, so it is the
+        base where one exists, whatever `recommended` says.
+        */
+        let asked = larvae
+            .and_then(|value| value.get("recommended"))
+            .and_then(toml::Value::as_bool);
+
+        let base = match asked {
+            Some(false) => Self::neutral(),
+
+            _ => Self::default(),
+        };
+
+        let mut config = stylua_file(root)?.unwrap_or(base);
 
         if let Some(value) = larvae {
             config = config.merged(value)?;
@@ -958,5 +1213,60 @@ call_parentheses = "NoSingleTable"
             .expect_err("no worm declares it");
 
         assert!(format!("{err:#}").contains("colum_width"), "{err:#}");
+    }
+
+    #[test]
+    fn recommended_false_drops_the_opinions_and_keeps_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let over = toml::from_str::<toml::Value>("recommended = false").unwrap();
+        let cfg = FmtConfig::discover(dir.path(), Some(&over)).unwrap();
+
+        assert!(!cfg.magic_trailing_comma);
+        assert!(!cfg.space_inside_braces);
+        assert!(!cfg.trailing_comma);
+
+        // Everything else is stylua's default, and `recommended` does not move it.
+        let same = FmtConfig::default();
+
+        assert_eq!(cfg.column_width, same.column_width);
+        assert_eq!(cfg.indent_width, same.indent_width);
+        assert!(cfg.final_newline);
+    }
+
+    #[test]
+    fn a_key_the_project_wrote_beats_the_neutral_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = "recommended = false\nspace_inside_braces = true";
+        let over = toml::from_str::<toml::Value>(text).unwrap();
+        let cfg = FmtConfig::discover(dir.path(), Some(&over)).unwrap();
+
+        assert!(cfg.space_inside_braces);
+        assert!(!cfg.trailing_comma);
+    }
+
+    #[test]
+    fn recommended_absent_is_the_same_config_as_before_the_option() {
+        let dir = tempfile::tempdir().unwrap();
+        let over = toml::from_str::<toml::Value>("column_width = 100").unwrap();
+        let cfg = FmtConfig::discover(dir.path(), Some(&over)).unwrap();
+
+        assert!(cfg.magic_trailing_comma);
+        assert!(cfg.space_inside_braces);
+        assert!(cfg.trailing_comma);
+        assert_eq!(cfg.column_width, 100);
+    }
+
+    #[test]
+    fn the_enabled_switch_defaults_to_on() {
+        assert!(FmtConfig::default().enabled);
+
+        let dir = tempfile::tempdir().unwrap();
+        let over = toml::from_str::<toml::Value>("enabled = false").unwrap();
+
+        assert!(
+            !FmtConfig::discover(dir.path(), Some(&over))
+                .unwrap()
+                .enabled
+        );
     }
 }

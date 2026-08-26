@@ -26,9 +26,10 @@ impl Server {
         /*
         The server publishes an excluded file as empty and does not skip it.
         A skip would keep the old diagnostics on screen until the editor
-        closed the file.
+        closed the file. `[lint] enabled = false` clears the file for the
+        same reason.
         */
-        if path.as_deref().is_some_and(|p| self.excluded.skips(p)) {
+        if !self.lint.is_enabled() || path.as_deref().is_some_and(|p| self.excluded.skips(p)) {
             return rpc::notify(
                 out,
                 "textDocument/publishDiagnostics",
@@ -193,8 +194,10 @@ fn diagnostic(src: &str, lines: &rpc::Lines, finding: Finding) -> Value {
 
 fn severity_of(level: Level) -> u8 {
     match level {
-        // 1 is Error, 2 is Warning, and Allow never reaches here
+        // 1 is Error, 2 is Warning, 3 is Information, and Allow never reaches here
         Level::Deny => 1,
+
+        Level::Info => 3,
 
         _ => 2,
     }

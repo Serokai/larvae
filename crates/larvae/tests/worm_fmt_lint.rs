@@ -98,6 +98,14 @@ while True:
         send({"ok": True, "doc": 1,
               "document": {"host": {"start": 0, "end": len(src.encode())}},
               "comments": comments(src)})
+    elif op == "actions":
+        # one action over any range, with a byte edit the host converts
+        send({"ok": True, "actions": [
+            {"title": "Say hello", "edits": [{"span": [0, 0], "text": "-- hi\n"}],
+             "fixes": "bad_word"}
+        ]})
+    elif op == "definitions":
+        send({"ok": True, "definitions": "declare markupThing: string\n"})
     elif op == "lint":
         src = req["source"]
         findings = []
@@ -139,6 +147,51 @@ fn project(worms: bool) -> tempfile::TempDir {
     }
 
     root
+}
+
+/*
+The layout a Windows release leaves behind, end to end.
+
+A worm is built once and released for every platform, so its manifest names
+`worm.py` while the Windows zip holds `worm.py.exe`. Larvae read the name as
+written and failed at the read, before the resolution that knows about `.exe`
+ever ran, so the whole toolchain stopped with "The system cannot find the file
+specified".
+
+The case is built here rather than left to Windows CI. The resolution asks
+nothing about the platform, so this runs on every machine that runs the tests,
+which is what the defect needed and did not have.
+*/
+#[test]
+fn a_worm_whose_artifact_carries_exe_still_loads() {
+    let root = tempfile::tempdir().unwrap();
+
+    write(
+        root.path(),
+        "larvae.toml",
+        "[process]\ninput = \"src\"\n\n[worms.markup]\npath = \"mywormdir\"\n",
+    );
+
+    install_worm(root.path());
+
+    // what the Windows zip holds: the entry with the extension the platform needs
+    let dir = root.path().join("mywormdir");
+    std::fs::rename(dir.join("worm.py"), dir.join("worm.py.exe")).unwrap();
+    assert!(
+        !dir.join("worm.py").exists(),
+        "the bare name has to be gone"
+    );
+
+    write(root.path(), "src/app.luaux", "local  x   =    1\n");
+
+    let (ok, text) = run(root.path(), &["fmt"]);
+
+    assert!(ok, "the worm has to load from the .exe: {text}");
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("src/app.luaux")).unwrap(),
+        "local x = 1\n",
+        "and it has to format the file it claims"
+    );
 }
 
 #[test]
@@ -505,4 +558,199 @@ fn stating_both_lists_is_refused() {
 
     assert!(!ok, "{text}");
     assert!(text.contains("not both"), "{text}");
+}
+
+/*
+A require that names a claimed file resolves to the Luau the worm writes.
+
+The worm compiles `App.luaux` into `App.luau`, so the module is `App`. The
+DataModel read the source name instead and called the instance `App.luaux`,
+so `require("../Interface/App")` came out as `require("../Interface/App.luaux")`
+and pointed at nothing. The path target was already right, because it strips
+whatever extension it finds; the two Roblox targets were not.
+
+A realm suffix is part of the same defect. `boot.client.luaux` read as a plain
+module, so the check that stops a client from requiring ServerStorage never ran
+on it. UI runs on the server as well, so `boot.server.luaux` has to carry its
+realm too.
+*/
+mod claimed_requires {
+    use super::*;
+
+    fn tree(target: &str) -> tempfile::TempDir {
+        let root = tempfile::tempdir().unwrap();
+
+        write(
+            root.path(),
+            "larvae.toml",
+            &format!(
+                "[process]\ninput = \"src\"\noutput = \"dist\"\n\n\
+                 [requires]\ntarget = \"{target}\"\n\n\
+                 [requires.mounts]\n\
+                 \"src/Shared\" = \"@game/ReplicatedStorage/App\"\n\
+                 \"src/Server\" = \"@game/ServerStorage/App\"\n\
+                 \"src/Client\" = \"@game/StarterPlayer/StarterPlayerScripts/App\"\n\n\
+                 [worms.markup]\npath = \"mywormdir\"\n"
+            ),
+        );
+
+        install_worm(root.path());
+
+        write(root.path(), "src/Shared/App.luaux", "return { a = 1 }\n");
+        write(
+            root.path(),
+            "src/Shared/Pkg/init.luaux",
+            "return { p = 1 }\n",
+        );
+
+        root
+    }
+
+    fn out(root: &Path, rel: &str) -> String {
+        std::fs::read_to_string(root.join("dist").join(rel)).expect("the file is written")
+    }
+
+    #[test]
+    fn a_roblox_string_require_names_the_luau_the_worm_writes() {
+        let root = tree("roblox-string");
+
+        write(
+            root.path(),
+            "src/Client/main.luau",
+            "local App = require(\"../Shared/App\")\nreturn App\n",
+        );
+
+        let (ok, text) = run(root.path(), &["process"]);
+
+        assert!(ok, "{text}");
+
+        let written = out(root.path(), "Client/main.luau");
+
+        assert!(
+            !written.contains("luaux"),
+            "the source extension reached the output: {written}"
+        );
+        assert!(written.contains("App"), "{written}");
+    }
+
+    #[test]
+    fn a_roblox_instance_require_names_it_too() {
+        let root = tree("roblox-instance");
+
+        write(
+            root.path(),
+            "src/Client/main.luau",
+            "local App = require(\"../Shared/App\")\nreturn App\n",
+        );
+
+        let (ok, text) = run(root.path(), &["process"]);
+
+        assert!(ok, "{text}");
+        assert!(!out(root.path(), "Client/main.luau").contains("luaux"));
+    }
+
+    /// A directory whose init file is claimed is a module like any other.
+    #[test]
+    fn a_directory_with_a_claimed_init_is_required_by_its_name() {
+        let root = tree("roblox-string");
+
+        write(
+            root.path(),
+            "src/Client/main.luau",
+            "local Pkg = require(\"../Shared/Pkg\")\nreturn Pkg\n",
+        );
+
+        let (ok, text) = run(root.path(), &["process"]);
+
+        assert!(ok, "{text}");
+        assert!(
+            !text.contains("no module found"),
+            "the claimed init file did not resolve: {text}"
+        );
+        assert!(!out(root.path(), "Client/main.luau").contains("luaux"));
+    }
+
+    /*
+    A claimed client script is a LocalScript, so the client checks reach it.
+
+    `early_require` reports a LocalScript that requires through an indexing
+    style that does not wait for replication. It reads the realm suffix off
+    the file name, and `boot.client.luaux` read as a plain module, so the
+    race went unreported on every file a worm claims.
+    */
+    #[test]
+    fn a_claimed_client_script_is_a_local_script() {
+        let root = tree("roblox-instance");
+
+        write(
+            root.path(),
+            "larvae.toml",
+            &std::fs::read_to_string(root.path().join("larvae.toml"))
+                .unwrap()
+                .replace(
+                    "[requires]",
+                    "[check]\nearly_require = \"warn\"\n\n[requires]\n\
+                     indexing_style = \"find-first-child\"",
+                ),
+        );
+
+        write(
+            root.path(),
+            "src/Client/boot.client.luaux",
+            "local App = require(\"../Shared/App\")\nprint(App)\n",
+        );
+
+        let (_, text) = run(root.path(), &["check"]);
+
+        assert!(
+            text.contains("without waiting for replication"),
+            "the claimed client script was not treated as one: {text}"
+        );
+    }
+
+    /*
+    The same file on the server is not, which is the other half.
+
+    UI runs on the server as well as the client, so `boot.server.luaux` has to
+    read as a Script. A Script runs after the DataModel is built, so the
+    replication race does not apply to it and the report would be wrong.
+    */
+    #[test]
+    fn a_claimed_server_script_is_not_a_local_script() {
+        let root = tree("roblox-instance");
+
+        write(
+            root.path(),
+            "larvae.toml",
+            &std::fs::read_to_string(root.path().join("larvae.toml"))
+                .unwrap()
+                .replace(
+                    "[requires]",
+                    "[check]\nearly_require = \"warn\"\n\n[requires]\n\
+                     indexing_style = \"find-first-child\"",
+                ),
+        );
+
+        write(
+            root.path(),
+            "src/Server/boot.server.luaux",
+            "local App = require(\"../Shared/App\")\nprint(App)\n",
+        );
+
+        let (ok, text) = run(root.path(), &["check"]);
+
+        assert!(ok, "{text}");
+        assert!(
+            !text.contains("without waiting for replication"),
+            "a server script has no replication race: {text}"
+        );
+
+        // And the realm suffix survives into the output name.
+        run(root.path(), &["process"]);
+
+        assert!(
+            root.path().join("dist/Server/boot.server.luau").is_file(),
+            "the claimed script lost its realm suffix"
+        );
+    }
 }

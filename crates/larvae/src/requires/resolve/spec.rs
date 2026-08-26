@@ -64,19 +64,45 @@ pub(super) fn normalize_join(base: &Path, spec: &str) -> Option<PathBuf> {
     Some(out)
 }
 
-/// RFC module resolution: a file, or a directory with init; more than one match is ambiguous
-pub(super) fn resolve_module(base: &Path) -> Result<Option<ModuleNode>, String> {
+/*
+RFC module resolution: a file, or a directory with init.
+
+More than one match is ambiguous, which the RFC makes an error.
+
+`claimed` holds the extensions a worm front-end owns. A claimed file is a
+module like any other: the pipeline turns it into Luau in the output, so a
+require that names it resolves at runtime, and the resolver has to find it or
+it warns about a require that is correct. A project with no worms passes an
+empty list and the behaviour is what it always was.
+*/
+pub(super) fn resolve_module(
+    base: &Path,
+    claimed: &[String],
+) -> Result<Option<ModuleNode>, String> {
     let mut found: Vec<ModuleNode> = Vec::new();
 
-    for ext in ["luau", "lua"] {
-        let candidate = base.with_extension(ext);
+    let builtin = ["luau", "lua"].into_iter().map(str::to_owned);
+
+    for ext in builtin.chain(claimed.iter().cloned()) {
+        let candidate = base.with_extension(&ext);
 
         if candidate.is_file() {
             found.push(ModuleNode::File(candidate));
         }
     }
 
-    if base.is_dir() && (base.join("init.luau").is_file() || base.join("init.lua").is_file()) {
+    /*
+    A claimed init file counts, for the same reason a claimed module does.
+    The pipeline writes `init.luaux` as `init.luau`, so the directory is a
+    module at runtime and a require that names it has to resolve here.
+    */
+    let init = ["luau", "lua"]
+        .iter()
+        .map(|e| (*e).to_owned())
+        .chain(claimed.iter().cloned())
+        .any(|ext| base.join(format!("init.{ext}")).is_file());
+
+    if base.is_dir() && init {
         found.push(ModuleNode::Dir(base.to_owned()));
     }
 
@@ -115,5 +141,113 @@ pub(super) fn fs_relative(from_dir: &Path, to: &Path) -> String {
         format!("./{}", parts.join("/"))
     } else {
         parts.join("/")
+    }
+}
+
+#[cfg(test)]
+mod claimed_modules {
+    use super::*;
+
+    fn tree(files: &[&str]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("a temp dir");
+
+        for file in files {
+            let path = dir.path().join(file);
+
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("the parent exists");
+            }
+
+            std::fs::write(&path, "return {}\n").expect("the file writes");
+        }
+
+        dir
+    }
+
+    /*
+    A file a worm claims is a module.
+
+    The pipeline turns it into Luau in the output, so a require that names it
+    resolves at runtime. Without this the resolver finds nothing and warns
+    about a require that is correct, which is what it did.
+    */
+    #[test]
+    fn a_claimed_extension_resolves_as_a_module() {
+        let dir = tree(&["widget.luaux"]);
+        let base = dir.path().join("widget");
+
+        let found = resolve_module(&base, &["luaux".to_string()])
+            .expect("no ambiguity")
+            .expect("the module is found");
+
+        assert!(matches!(found, ModuleNode::File(p) if p.extension().unwrap() == "luaux"));
+    }
+
+    /// A project with no worms behaves as it always did.
+    #[test]
+    fn without_the_claim_the_same_file_is_not_a_module() {
+        let dir = tree(&["widget.luaux"]);
+
+        assert!(
+            resolve_module(&dir.path().join("widget"), &[])
+                .expect("no ambiguity")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn luau_still_resolves_alongside_a_claim() {
+        let dir = tree(&["plain.luau"]);
+
+        assert!(
+            resolve_module(&dir.path().join("plain"), &["luaux".to_string()])
+                .expect("no ambiguity")
+                .is_some()
+        );
+    }
+
+    /*
+    Two files of one name is an error, and a claimed one counts.
+
+    `widget.luau` beside `widget.luaux` gives two modules for one require, and
+    the RFC makes that an error rather than a guess.
+    */
+    /*
+    A directory with a claimed init file is a module.
+
+    The pipeline writes `Pkg/init.luaux` as `Pkg/init.luau`, so `Pkg` is a
+    module at runtime. The resolver looked for `init.luau` alone and warned
+    about a require that was correct.
+    */
+    #[test]
+    fn a_directory_with_a_claimed_init_resolves() {
+        let dir = tree(&["Pkg/init.luaux"]);
+        let found = resolve_module(&dir.path().join("Pkg"), &["luaux".to_string()])
+            .expect("no ambiguity")
+            .expect("the directory is a module");
+
+        assert!(matches!(found, ModuleNode::Dir(_)));
+    }
+
+    /// Without the claim the same directory holds no module, as before.
+    #[test]
+    fn a_claimed_init_needs_the_claim() {
+        let dir = tree(&["Pkg/init.luaux"]);
+
+        assert!(
+            resolve_module(&dir.path().join("Pkg"), &[])
+                .expect("no ambiguity")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_claimed_file_beside_a_luau_one_is_ambiguous() {
+        let dir = tree(&["widget.luau", "widget.luaux"]);
+
+        let err = resolve_module(&dir.path().join("widget"), &["luaux".to_string()])
+            .expect_err("two modules answer one name");
+
+        assert!(err.contains("ambiguous"), "{err}");
     }
 }

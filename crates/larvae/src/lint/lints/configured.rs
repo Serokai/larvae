@@ -16,19 +16,23 @@ use crate::syntax::ast::*;
 use super::correctness::{each_block, each_expr, each_stmt};
 
 lints! {
-    BadStringEscape => "bad_string_escape", Warn,
+    BadStringEscape => "bad_string_escape", Correctness, Warn,
         "an escape sequence the language does not define";
-    Deprecated => "deprecated", Warn,
+    Deprecated => "deprecated", Style, Warn,
         "a function that still works but has been replaced";
-    HighCyclomaticComplexity => "high_cyclomatic_complexity", Allow,
+    HighCyclomaticComplexity => "high_cyclomatic_complexity", Complexity, Allow,
         "a function with more branches than anyone can hold at once";
-    ManualTableClone => "manual_table_clone", Warn,
+    ManualTableClone => "manual_table_clone", Performance, Warn,
         "a loop that copies a table, which table.clone does in one call";
-    MismatchedArgCount => "mismatched_arg_count", Warn,
+    MismatchedArgCount => "mismatched_arg_count", Correctness, Warn,
         "calling a function in this file with the wrong number of arguments";
-    MustUse => "must_use", Warn,
+    MustUse => "must_use", Correctness, Warn,
         "calling a pure function and discarding what it returned";
-    RestrictedModulePaths => "restricted_module_paths", Warn,
+    PreferConst => "prefer_const", Style, Allow,
+        "a local that nothing reassigns, which const states outright";
+    RestrictedGlobals => "restricted_globals", Style, Warn,
+        "reading a global the project has ruled out";
+    RestrictedModulePaths => "restricted_module_paths", Style, Warn,
         "requiring a module the project has ruled out";
 }
 
@@ -422,6 +426,70 @@ impl RestrictedModulePaths {
     }
 }
 
+// --- restricted_globals ----------------------------------------------------
+
+/*
+The globals that the project forbids, as `name = "why"`.
+
+The map is the whole table, and not a key inside it, so a project writes
+`[lint.options.restricted_globals]` and then one line per name. The reason is
+required, because the message a reader gets is the reason. A list of bare
+names would report "this is restricted" and leave the reader to guess.
+*/
+#[derive(Deserialize, Default)]
+#[serde(transparent)]
+pub struct RestrictedGlobalsOptions {
+    pub names: std::collections::BTreeMap<String, String>,
+}
+
+impl RestrictedGlobals {
+    /*
+    `loadstring("return 1")`, where the project bans `loadstring`.
+
+    This lint is fully config driven, and it is silent until a project fills
+    the config in. Thus the default level costs a project nothing.
+
+    The use is a global that works and that the project still refuses.
+    `loadstring` compiles at runtime, `getfenv` deoptimises the function
+    that holds it, and a house style bans `print` in shipped code. None of
+    them is wrong in general, so a built-in list does not exist and cannot
+    exist.
+
+    A name only counts when it is the global. A local of the same name
+    belongs to the author, and the project ruled out the global.
+    */
+    fn check(ctx: &LintCtx<'_>, out: &mut Vec<Finding>) {
+        let options: RestrictedGlobalsOptions = ctx.cfg.options_for("restricted_globals");
+
+        if options.names.is_empty() {
+            return;
+        }
+
+        each_expr(ctx, out, |ctx, e, out| {
+            let Expr::Name(span) = e else {
+                return;
+            };
+
+            if !ctx.names.is_global(span.start) {
+                return;
+            }
+
+            let name = ctx.text(*span);
+
+            if let Some(why) = options.names.get(name) {
+                out.push(
+                    Finding::new(
+                        "restricted_globals",
+                        ctx.bytes(*span),
+                        format!("{name} is restricted"),
+                    )
+                    .with_help(why.clone()),
+                );
+            }
+        });
+    }
+}
+
 // --- high_cyclomatic_complexity --------------------------------------------
 
 #[derive(Deserialize)]
@@ -794,4 +862,186 @@ impl MismatchedArgCount {
             );
         });
     }
+}
+
+// --- prefer_const ----------------------------------------------------------
+
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct PreferConstOptions {
+    /*
+    A local that the file mutates through a field keeps `local`.
+
+    Off by default, so a mutated table reports like every other binding. It
+    is off because `const` is correct there: Luau enforces `const` against
+    reassignment of the name and says nothing about the value, so
+    `const t = {}` followed by `t.x = 1` compiles. The option is for a project
+    that reads `local` as "this one changes" and wants the two spellings to
+    carry that difference.
+    */
+    pub mutated_tables_stay_local: bool,
+}
+
+impl PreferConst {
+    /*
+    `local x = 1` where nothing assigns `x` again.
+
+    This lint is off by default. `const` is larvae's own reading of Luau and
+    not every project writes it, so a codebase of ordinary `local` would
+    report on nearly every line the first time it ran.
+
+    Three rules keep a report honest, and each one is a place where the
+    suggestion would not compile or would not apply:
+
+    - A declaration with no value stays. `const x` is
+      "Missing initializer in const declaration".
+    - `const` binds the declaration and not one name in it, so every name has
+      to be unassigned before the whole statement can change.
+    - A `for` variable, a parameter, and a `local function` are left alone.
+      None of them takes `const`.
+    */
+    fn check(ctx: &LintCtx<'_>, out: &mut Vec<Finding>) {
+        let options: PreferConstOptions = ctx.cfg.options_for("prefer_const");
+
+        let mutated = match options.mutated_tables_stay_local {
+            true => mutated_bindings(ctx),
+
+            false => std::collections::HashSet::new(),
+        };
+
+        each_stmt(ctx, out, |ctx, s, out| {
+            let Stmt::Local(n) = s else {
+                return;
+            };
+
+            // Already said, and a declaration with nothing to bind cannot say it.
+            if n.is_const || n.values.is_empty() {
+                return;
+            }
+
+            let mut names = Vec::with_capacity(n.names.len());
+
+            for binding in &n.names {
+                let Some(&index) = ctx.names.by_token.get(&binding.name.start) else {
+                    return;
+                };
+
+                if !ctx.names.bindings[index].writes.is_empty() || mutated.contains(&index) {
+                    return;
+                }
+
+                names.push(ctx.text(binding.name));
+            }
+
+            let subject = match names.as_slice() {
+                [one] => format!("`{one}` is never reassigned"),
+
+                many => format!("{} are never reassigned", quoted(many)),
+            };
+
+            out.push(
+                Finding::new("prefer_const", ctx.bytes(n.keyword), subject)
+                    .with_help("declare it with `const`, which states that outright"),
+            );
+        });
+    }
+}
+
+/// `a`, `b` and `c`, so the message reads as a sentence.
+fn quoted(names: &[&str]) -> String {
+    let quoted: Vec<String> = names.iter().map(|n| format!("`{n}`")).collect();
+
+    match quoted.split_last() {
+        Some((last, [])) => last.clone(),
+
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+
+        None => String::new(),
+    }
+}
+
+/*
+The bindings that the file changes through a field or a table function.
+
+`t.x = 1` and `table.insert(t, 1)` leave the binding itself alone, so the
+resolver records no write for either. A project that wants a mutated table to
+keep `local` needs them found, and this is the walk that finds them.
+*/
+fn mutated_bindings(ctx: &LintCtx<'_>) -> std::collections::HashSet<usize> {
+    let mut out = std::collections::HashSet::new();
+
+    let mut mark = |root: Option<TokSpan>| {
+        if let Some(span) = root
+            && let Some(&index) = ctx.names.read_of.get(&span.start)
+        {
+            out.insert(index);
+        }
+    };
+
+    for stmt in &ctx.stmts {
+        let Stmt::Assign(n) = stmt else {
+            continue;
+        };
+
+        // `t.x = 1`, `t[k] = v`, `t.a.b = 2`, and the compound forms of each.
+        for target in &n.targets {
+            if matches!(target, Expr::Index { .. }) {
+                mark(root_name(target));
+            }
+        }
+    }
+
+    for expr in &ctx.exprs {
+        let Expr::Call { func, args, .. } = expr else {
+            continue;
+        };
+
+        if !is_table_mutator(ctx, func) {
+            continue;
+        }
+
+        let CallArgs::Paren(list) = args else {
+            continue;
+        };
+
+        // The table these functions change is always the first argument.
+        if let Some(Expr::Name(name)) = list.first() {
+            mark(Some(*name));
+        }
+    }
+
+    out
+}
+
+/// The name an index chain starts from: `t` in `t.a.b[c]`.
+fn root_name(e: &Expr) -> Option<TokSpan> {
+    match e {
+        Expr::Name(span) => Some(*span),
+
+        Expr::Index { object, .. } => root_name(object),
+
+        _ => None,
+    }
+}
+
+/// Reports if this callee is one of the `table` functions that changes its first argument.
+fn is_table_mutator(ctx: &LintCtx<'_>, func: &Expr) -> bool {
+    let Expr::Index {
+        object,
+        key: IndexKey::Field(name),
+        ..
+    } = func
+    else {
+        return false;
+    };
+
+    let Expr::Name(base) = object.as_ref() else {
+        return false;
+    };
+
+    ctx.text(*base) == "table"
+        && matches!(
+            ctx.text(*name),
+            "insert" | "remove" | "sort" | "clear" | "move"
+        )
 }

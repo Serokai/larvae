@@ -9,8 +9,9 @@ whitespace, and every comment must stay.
 */
 
 use larvae::fmt::config::{
-    CallParens, CollapseSimpleStatement, IfExpansion, IfExpression, IfPlacement, IfStyle,
-    IndentType, LineEndings, QuoteStyle, SpaceAfterFunctionNames, TableTypes, TypeSeparator,
+    CallParens, CallStyle, CollapseSimpleStatement, FunctionCall, FunctionDeclaration, IfExpansion,
+    IfExpression, IfPlacement, IfStyle, IndentType, LineEndings, ListExpansion, PreferConst,
+    QuoteStyle, SpaceAfterFunctionNames, TableTypes, TypeSeparator, UnusedImports,
 };
 use larvae::fmt::{FmtConfig, format};
 
@@ -2051,4 +2052,555 @@ fn read_and_write_modifiers_survive_types() {
 
     assert_eq!(out, src);
     assert_eq!(fmt(&out), out, "fixed point");
+}
+
+// --- function calls and declarations ----------------------------------------
+
+fn calls(expand: ListExpansion, style: CallStyle) -> FmtConfig {
+    FmtConfig {
+        function_call: FunctionCall {
+            expand,
+            style,
+            indent: 1,
+        },
+        ..Default::default()
+    }
+}
+
+fn decls(expand: ListExpansion) -> FmtConfig {
+    FmtConfig {
+        function_declaration: FunctionDeclaration { expand, indent: 1 },
+        ..Default::default()
+    }
+}
+
+const HUG_SOURCE: &str = "Colors:Apply(frame, \"Rarity\", rarity, { Children = { stroke, } })";
+
+/// The options are off by default, so no project moves until it asks.
+#[test]
+fn a_call_keeps_its_layout_by_default() {
+    assert_eq!(fmt("f(a, b, c)"), "f(a, b, c)\n");
+    assert_eq!(fmt("function f(a, b) end"), "function f(a, b)\nend\n");
+}
+
+/*
+The last argument holds the shape, and the ones before it stay put.
+
+A trailing comma inside the table keeps it open, and an open table opens the
+call around it. One-per-line answers that by giving every argument a line.
+hug-last answers it by leaving them where they are.
+*/
+#[test]
+fn hug_last_keeps_the_arguments_on_the_line_of_the_call() {
+    let out = fmt_with(
+        HUG_SOURCE,
+        calls(ListExpansion::WhenNeeded, CallStyle::HugLast),
+    );
+
+    assert_eq!(
+        out,
+        "Colors:Apply(frame, \"Rarity\", rarity, {\n\tChildren = {\n\t\tstroke,\n\t},\n})\n"
+    );
+}
+
+#[test]
+fn one_per_line_gives_every_argument_a_line() {
+    let out = fmt_with(
+        HUG_SOURCE,
+        calls(ListExpansion::WhenNeeded, CallStyle::OnePerLine),
+    );
+
+    assert!(out.starts_with("Colors:Apply(\n\tframe,\n"), "{out}");
+}
+
+/*
+Only a value that reads as a block earns the style.
+
+A call of plain arguments has nothing there to hold the shape, so hugging the
+last one would leave a list that runs off the right with no block to show for
+it.
+*/
+#[test]
+fn hug_last_falls_back_where_the_last_argument_is_not_a_block() {
+    let src = "someFunction(argumentNumberOne, argumentNumberTwo, argumentNumberThree, argumentNumberFour, argumentNumberFive, argumentSix)";
+    let out = fmt_with(src, calls(ListExpansion::WhenNeeded, CallStyle::HugLast));
+
+    assert!(out.contains("(\n\targumentNumberOne,\n"), "{out}");
+}
+
+#[test]
+fn always_opens_a_call_at_every_width() {
+    assert_eq!(
+        fmt_with(
+            "f(a, b)",
+            calls(ListExpansion::Always, CallStyle::OnePerLine)
+        ),
+        "f(\n\ta,\n\tb\n)\n"
+    );
+}
+
+/// `always` decides the list, so there is nothing left for a style to hug.
+#[test]
+fn always_wins_over_hug_last() {
+    let out = fmt_with(HUG_SOURCE, calls(ListExpansion::Always, CallStyle::HugLast));
+
+    assert!(out.starts_with("Colors:Apply(\n\tframe,\n"), "{out}");
+}
+
+/// `never` holds the list on one line, whatever the width says.
+#[test]
+fn never_keeps_a_long_call_on_one_line() {
+    let src = "someFunction(argumentNumberOne, argumentNumberTwo, argumentNumberThree, argumentNumberFour, argumentNumberFive, argumentSix)";
+    let out = fmt_with(src, calls(ListExpansion::Never, CallStyle::OnePerLine));
+
+    assert_eq!(out.lines().count(), 1, "{out}");
+    assert!(
+        out.len() > 120,
+        "the line is meant to run past the width: {out}"
+    );
+}
+
+/// A value inside a list that never opens can still open on its own.
+#[test]
+fn never_still_opens_a_table_inside_the_list() {
+    let out = fmt_with(
+        HUG_SOURCE,
+        calls(ListExpansion::Never, CallStyle::OnePerLine),
+    );
+
+    assert!(out.contains("{\n\tChildren"), "{out}");
+    assert!(
+        out.starts_with("Colors:Apply(frame,"),
+        "the list stayed flat: {out}"
+    );
+}
+
+#[test]
+fn a_declaration_opens_when_it_is_told_to() {
+    let out = fmt_with(
+        "function Component(t: { foo: number }, t1: number, t2: string): number\n\treturn 2\nend",
+        decls(ListExpansion::Always),
+    );
+
+    assert_eq!(
+        out,
+        "function Component(\n\tt: { foo: number },\n\tt1: number,\n\tt2: string\n): number\n\treturn 2\nend\n"
+    );
+}
+
+/// The two tables are separate, so one does not move the other.
+#[test]
+fn declarations_and_calls_are_decided_apart() {
+    let out = fmt_with(
+        "f(a, b)\nfunction g(c, d) end\n",
+        decls(ListExpansion::Always),
+    );
+
+    assert!(out.starts_with("f(a, b)\n"), "the call is untouched: {out}");
+    assert!(out.contains("function g(\n\tc,\n\td\n)"), "{out}");
+}
+
+#[test]
+fn the_indent_levels_of_a_call_are_the_projects_to_choose() {
+    let cfg = FmtConfig {
+        function_call: FunctionCall {
+            expand: ListExpansion::Always,
+            style: CallStyle::OnePerLine,
+            indent: 2,
+        },
+        ..Default::default()
+    };
+
+    assert_eq!(fmt_with("f(a)", cfg), "f(\n\t\ta\n)\n");
+}
+
+/*
+`never` and `magic_trailing_comma` govern different things, so they agree.
+
+`never` holds the argument list on one line. The trailing comma holds the
+table open. Neither one asks the other for permission, and the result is the
+table open inside a list that stayed flat.
+*/
+#[test]
+fn never_and_a_magic_trailing_comma_do_not_fight() {
+    let cfg = FmtConfig {
+        function_call: FunctionCall {
+            expand: ListExpansion::Never,
+            style: CallStyle::OnePerLine,
+            indent: 1,
+        },
+        magic_trailing_comma: true,
+        ..Default::default()
+    };
+
+    assert_eq!(
+        fmt_with("f(a, b, { x = 1, })", cfg.clone()),
+        "f(a, b, {\n\tx = 1,\n})\n"
+    );
+
+    /*
+    A table that is not the last argument opens where it stands, and the
+    arguments after it carry on from the closing brace. This is the shape the
+    option asks for: the list does not break, so there is nowhere else for
+    them to go.
+    */
+    assert_eq!(
+        fmt_with("f(a, { x = 1, }, b)", cfg),
+        "f(a, {\n\tx = 1,\n}, b)\n"
+    );
+}
+
+/*
+Where the table is the last argument, `never` writes what `hug-last` writes.
+
+The two reach it by different routes, and they part company as soon as the
+table is not last: `hug-last` has no block at the end to hold the shape, so it
+opens one per line, while `never` keeps the list flat whatever sits where.
+*/
+#[test]
+fn never_and_hug_last_agree_on_a_trailing_table_and_not_on_a_middle_one() {
+    let never = FmtConfig {
+        function_call: FunctionCall {
+            expand: ListExpansion::Never,
+            style: CallStyle::OnePerLine,
+            indent: 1,
+        },
+        ..Default::default()
+    };
+
+    let hug = calls(ListExpansion::WhenNeeded, CallStyle::HugLast);
+
+    let trailing = "f(a, b, { x = 1, })";
+    assert_eq!(
+        fmt_with(trailing, never.clone()),
+        fmt_with(trailing, hug.clone())
+    );
+
+    let middle = "f(a, { x = 1, }, b)";
+    assert_ne!(fmt_with(middle, never), fmt_with(middle, hug));
+}
+
+/// Every layout must reparse and must be stable.
+#[test]
+fn every_list_layout_is_idempotent_and_parses() {
+    let sources = [
+        HUG_SOURCE,
+        "f(a, b, c)",
+        "f()",
+        "f(function() return 1 end)",
+        "function g(a: number, b: string): boolean\n\treturn true\nend",
+        "obj:method(1, { x = 2 })",
+    ];
+
+    let configs = [
+        calls(ListExpansion::WhenNeeded, CallStyle::HugLast),
+        calls(ListExpansion::Always, CallStyle::OnePerLine),
+        calls(ListExpansion::Never, CallStyle::OnePerLine),
+        decls(ListExpansion::Always),
+        decls(ListExpansion::Never),
+    ];
+
+    for src in sources {
+        for cfg in &configs {
+            let once = fmt_with(src, cfg.clone());
+            let twice = fmt_with(&once, cfg.clone());
+
+            assert_eq!(once, twice, "unstable for {src:?}");
+
+            let lexed = larvae::syntax::lexer::lex(&once)
+                .unwrap_or_else(|e| panic!("{src:?} gave unlexable output, {}", e.message));
+
+            larvae::syntax::parser::parse(&once, &lexed.toks)
+                .unwrap_or_else(|e| panic!("{src:?} gave unparsable output, {}", e.message));
+
+            for line in once.lines() {
+                assert_eq!(line, line.trim_end(), "trailing whitespace from {src:?}");
+            }
+        }
+    }
+}
+
+// --- prefer_const -----------------------------------------------------------
+
+fn const_cfg(enabled: bool, mutated_tables_stay_local: bool) -> FmtConfig {
+    FmtConfig {
+        prefer_const: PreferConst {
+            enabled,
+            mutated_tables_stay_local,
+        },
+        ..Default::default()
+    }
+}
+
+/// Off by default, because it rewrites a keyword and not a space.
+#[test]
+fn a_local_keeps_its_keyword_by_default() {
+    assert_eq!(fmt("local x = 1\nprint(x)\n"), "local x = 1\nprint(x)\n");
+}
+
+#[test]
+fn a_local_that_nothing_reassigns_becomes_const() {
+    assert_eq!(
+        fmt_with("local x = 1\nprint(x)\n", const_cfg(true, false)),
+        "const x = 1\nprint(x)\n"
+    );
+}
+
+/// Luau enforces `const`, so a name something assigns has to keep `local`.
+#[test]
+fn a_reassigned_local_keeps_its_keyword() {
+    assert_eq!(
+        fmt_with("local x = 1\nx = 2\nprint(x)\n", const_cfg(true, false)),
+        "local x = 1\nx = 2\nprint(x)\n"
+    );
+}
+
+/*
+Two forms cannot take `const`, and each would be a syntax error.
+
+`const x` is "Missing initializer in const declaration". And `const` binds the
+declaration and not one name in it, so a multi name local moves only when
+every name in it qualifies.
+*/
+#[test]
+fn the_forms_that_cannot_take_const_keep_their_keyword() {
+    assert_eq!(
+        fmt_with("local x\nx = 1\nprint(x)\n", const_cfg(true, false)),
+        "local x\nx = 1\nprint(x)\n"
+    );
+
+    assert_eq!(
+        fmt_with(
+            "local a, b = 1, 2\nb = 3\nprint(a, b)\n",
+            const_cfg(true, false)
+        ),
+        "local a, b = 1, 2\nb = 3\nprint(a, b)\n"
+    );
+
+    assert_eq!(
+        fmt_with("local a, b = 1, 2\nprint(a, b)\n", const_cfg(true, false)),
+        "const a, b = 1, 2\nprint(a, b)\n"
+    );
+}
+
+/*
+A mutated table moves by default, and the option holds it back.
+
+`const t = {}` followed by `t.x = 1` compiles: Luau enforces `const` against
+reassignment of the name and says nothing about the value.
+*/
+#[test]
+fn the_option_keeps_local_on_a_mutated_table() {
+    let src = "local t = {}\nt.x = 1\nprint(t)\n";
+
+    assert_eq!(
+        fmt_with(src, const_cfg(true, false)),
+        "const t = {}\nt.x = 1\nprint(t)\n"
+    );
+    assert_eq!(fmt_with(src, const_cfg(true, true)), src);
+
+    let inserted = "local u = {}\ntable.insert(u, 1)\nprint(u)\n";
+    assert_eq!(fmt_with(inserted, const_cfg(true, true)), inserted);
+}
+
+/// The rewrite has to reparse and has to be stable.
+#[test]
+fn the_const_rewrite_is_idempotent_and_parses() {
+    let sources = [
+        "local x = 1\nprint(x)\n",
+        "local t = {}\nt.x = 1\nprint(t)\n",
+        "const already = 1\nprint(already)\n",
+        "local a, b = 1, 2\nprint(a, b)\n",
+        "local f = function() end\nf()\n",
+    ];
+
+    for src in sources {
+        for cfg in [const_cfg(true, false), const_cfg(true, true)] {
+            let once = fmt_with(src, cfg.clone());
+            let twice = fmt_with(&once, cfg);
+
+            assert_eq!(once, twice, "unstable for {src:?}");
+
+            let lexed = larvae::syntax::lexer::lex(&once)
+                .unwrap_or_else(|e| panic!("{src:?} gave unlexable output, {}", e.message));
+
+            larvae::syntax::parser::parse(&once, &lexed.toks)
+                .unwrap_or_else(|e| panic!("{src:?} gave unparsable output, {}", e.message));
+        }
+    }
+}
+
+// --- unused_imports --------------------------------------------------------
+
+fn imports(mode: UnusedImports) -> FmtConfig {
+    FmtConfig {
+        unused_imports: mode,
+        ..Default::default()
+    }
+}
+
+/*
+`ignore` is the default, and the default has to change nothing.
+
+`require` runs a module the first time a file asks for it, so a module can do
+its work by being required at all. Larvae cannot see inside that file, so the
+project decides.
+*/
+#[test]
+fn unused_imports_are_left_alone_by_default() {
+    let src = "local Dead = require(\"@pkg/Dead\")\nreturn 1\n";
+
+    assert_eq!(fmt(src), src);
+    assert_eq!(fmt_with(src, imports(UnusedImports::Ignore)), src);
+}
+
+#[test]
+fn underscore_marks_the_name_and_keeps_the_require() {
+    let src = "local Dead = require(\"@pkg/Dead\")\nreturn 1\n";
+
+    assert_eq!(
+        fmt_with(src, imports(UnusedImports::Underscore)),
+        "local _Dead = require(\"@pkg/Dead\")\nreturn 1\n"
+    );
+}
+
+#[test]
+fn remove_deletes_the_declaration() {
+    let src = "local Dead = require(\"@pkg/Dead\")\nreturn 1\n";
+
+    assert_eq!(fmt_with(src, imports(UnusedImports::Remove)), "return 1\n");
+}
+
+/*
+A name that only a type reads is used, and this is the case the option turns
+on for.
+
+The parser consumes type syntax for its extent and does not interpret it, so
+a walk of the expressions never sees `jecs` again. To delete that line breaks
+the type below it. The resolver recovers the reference, because
+`unused_variable` had the same defect and it was fixed there.
+*/
+#[test]
+fn an_import_that_only_a_type_uses_survives_both_modes() {
+    let src = "local jecs = require(\"@pkg/jecs\")\n\ntype Component = jecs.Component\n\nreturn nil :: Component?\n";
+
+    assert_eq!(fmt_with(src, imports(UnusedImports::Remove)), src);
+    assert_eq!(fmt_with(src, imports(UnusedImports::Underscore)), src);
+}
+
+/// The same holds for a type nested inside another one.
+#[test]
+fn an_import_used_deep_inside_a_type_survives() {
+    let src = "local Deep = require(\"@pkg/Deep\")\n\ntype Held = { field: Deep.Thing }\n\nreturn nil :: Held?\n";
+
+    assert_eq!(fmt_with(src, imports(UnusedImports::Remove)), src);
+}
+
+/// An import the code reads is untouched, whatever the mode says.
+#[test]
+fn a_used_import_is_never_touched() {
+    let src = "local Used = require(\"@pkg/Used\")\n\nreturn Used.make()\n";
+
+    for mode in [
+        UnusedImports::Ignore,
+        UnusedImports::Underscore,
+        UnusedImports::Remove,
+    ] {
+        assert_eq!(fmt_with(src, imports(mode)), src, "{mode:?} changed it");
+    }
+}
+
+/*
+A name that already opens with `_` says it is unused.
+
+That is the convention `unused_variable` reads, so under `underscore` there
+is nothing left to do, and under `remove` the author marked the line and
+asked for it to stay.
+*/
+#[test]
+fn a_name_already_marked_is_left_as_it_is() {
+    let src = "local _Dead = require(\"@pkg/Dead\")\nreturn 1\n";
+
+    assert_eq!(fmt_with(src, imports(UnusedImports::Underscore)), src);
+    assert_eq!(fmt_with(src, imports(UnusedImports::Remove)), src);
+}
+
+/*
+A removal keeps every comment.
+
+A formatter may rewrite code. It may not delete prose, and the comment check
+enforces that: an earlier cut of this pass moved the cursor past the
+statement, and the check refused the whole file rather than lose a line of
+someone's writing.
+*/
+#[test]
+fn removing_an_import_keeps_the_comments_around_it() {
+    let src =
+        "-- the dead one\nlocal Dead = require(\"@pkg/Dead\")\n-- a trailing thought\n\nreturn 1\n";
+    let out = fmt_with(src, imports(UnusedImports::Remove));
+
+    assert!(!out.contains("require"), "the declaration stayed: {out}");
+    assert!(out.contains("-- the dead one"), "{out}");
+    assert!(out.contains("-- a trailing thought"), "{out}");
+}
+
+/// A `fmt off` region means the author writes those lines, removal included.
+#[test]
+fn a_held_off_import_is_not_removed() {
+    let src =
+        "-- larvae: fmt off\nlocal Dead = require(\"@pkg/Dead\")\n-- larvae: fmt on\nreturn 1\n";
+
+    assert_eq!(fmt_with(src, imports(UnusedImports::Remove)), src);
+    assert_eq!(fmt_with(src, imports(UnusedImports::Underscore)), src);
+}
+
+/// A declaration that binds more than one name is left alone, which is conservative.
+#[test]
+fn a_multi_name_declaration_is_left_alone() {
+    let src = "local A, B = require(\"@pkg/A\"), require(\"@pkg/B\")\nreturn 1\n";
+
+    assert_eq!(fmt_with(src, imports(UnusedImports::Remove)), src);
+}
+
+/// A local that holds anything else is not an import, so nothing here reaches it.
+#[test]
+fn only_a_require_counts_as_an_import() {
+    let src = "local dead = 1\nreturn 2\n";
+
+    assert_eq!(fmt_with(src, imports(UnusedImports::Remove)), src);
+    assert_eq!(fmt_with(src, imports(UnusedImports::Underscore)), src);
+}
+
+/// Both modes have to reach a nested scope, and leave a legal block behind.
+#[test]
+fn a_dead_import_inside_a_function_is_handled() {
+    let src = "local function f()\n\tlocal Dead = require(\"@pkg/Dead\")\nend\n\nreturn f\n";
+
+    assert_eq!(
+        fmt_with(src, imports(UnusedImports::Remove)),
+        "local function f()\nend\n\nreturn f\n"
+    );
+    assert_eq!(
+        fmt_with(src, imports(UnusedImports::Underscore)),
+        "local function f()\n\tlocal _Dead = require(\"@pkg/Dead\")\nend\n\nreturn f\n"
+    );
+}
+
+/*
+Both modes settle after one pass.
+
+`underscore` is the case to watch: a second run must not produce `__Dead`.
+The `_` prefix check is what stops it, and it is the same check that leaves
+an author's own `_name` alone.
+*/
+#[test]
+fn both_modes_are_stable() {
+    let src = "-- a note\nlocal Dead = require(\"@pkg/Dead\")\nlocal jecs = require(\"@pkg/jecs\")\n\ntype C = jecs.Component\n\nreturn nil :: C?\n";
+
+    for mode in [UnusedImports::Underscore, UnusedImports::Remove] {
+        let once = fmt_with(src, imports(mode));
+        let twice = fmt_with(&once, imports(mode));
+
+        assert_eq!(once, twice, "{mode:?} did not settle");
+    }
 }

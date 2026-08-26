@@ -65,6 +65,237 @@ Notable changes land here. Format follows
   `larvae::syntax`, so nothing changes for larvae itself; any other tool
   can now parse Luau with the same parser. Criterion benches ship with the
   crate, a full_moon comparison behind a feature
+- `[fmt] unused_imports`, which decides what the formatter does with a required
+  module that nothing uses. `ignore` leaves it as written, `underscore` renames
+  it to `_Name`, and `remove` deletes the declaration. `ignore` is the default,
+  and the default matters more here than for the other options: `require` runs
+  a module the first time a file asks for it, so a module can do its work by
+  being required at all, and deleting the line stops that work while the file
+  still compiles. Larvae cannot see inside that file, so the project decides.
+  A name that only a type reads counts as used, which is the case the option
+  turns on for: the parser consumes type syntax for its extent and does not
+  interpret it, so a walk of the expressions never sees the name again, and the
+  resolver the linter builds recovers the reference. A name that already opens
+  with `_` is left alone, a declaration binding more than one name is left
+  alone, and a statement inside a `fmt off` region is never removed. A removal
+  keeps every comment around it: a formatter may rewrite code and may not
+  delete prose
+
+## 0.6.0 - 2026-08-21
+
+### Added
+
+- `[fmt] enabled` and `[lint] enabled`. `false` turns that half of larvae off:
+  the formatter writes no file and reports no `--check` failure, the linter
+  reports nothing and exits zero, and the editor gets a formatter with no edits
+  and a file with no diagnostics. This is for a project that wants larvae for
+  one job and keeps another tool for the other
+- `[fmt] recommended`, the same three states as `[lint] recommended`. `false`
+  starts from a base that changes as little as possible: `magic_trailing_comma`,
+  `space_inside_braces` and `trailing_comma` go off, and the project turns back
+  on what it wants. Those three are the options where larvae has an opinion and
+  the opinion changes a file. Every other default is either stylua's or a
+  setting that does nothing until a project asks for it, so `recommended` does
+  not move it
+- Eleven lints, mostly Luau equivalents of Biome rules. Four fill real gaps
+  that Luau's own linter reports on none of, checked against luau-lsp:
+  `length_as_condition` (deny), `builtin_shadowed`, `ignored_pcall_result` and
+  `constant_condition`. Two report a conditional used as a value, both allow:
+  `and_or_conditional` and `if_expression_assignment`. Three report the shape
+  of a branch, all allow: `else_after_return`, `collapsible_if` and
+  `negated_condition`. And two more: `implicit_any_parameter` (allow, the
+  sibling of `implicit_any_local` on the other side of the call) and
+  `restricted_globals` (silent until `[lint.options.restricted_globals]` names
+  one, so it costs nothing until a project asks)
+- `[lint.groups]`, a level for a whole kind of lint at once: `correctness`,
+  `suspicious`, `style`, `complexity`, `performance` and `roblox`. It sits
+  between `recommended` and `[lint.rules]`, so a name the project wrote always
+  wins and a group covers every lint it did not name. Two rules are worth
+  knowing. The table is separate from `[lint.rules]` and not nested inside it,
+  because a table there already means the lints of a worm of that name and
+  nothing reserves a worm name. And a group does not wake a lint that is
+  `allow` on purpose: `style = "info"` asks the style lints a project already
+  sees to say less, and `prefer_const` stays off until the project names it
+- `info`, a level below `warn`. It reports and it leaves the exit code alone,
+  exactly as `warn` does. The two differ in what they ask of the reader, and an
+  editor draws an info as a hint and a warning as a squiggle. The summary line
+  counts them separately, and only when a project uses the level
+- `larvae lint --explain <name>` prints the group of a lint, and the list it
+  prints when a name misses is grouped rather than one alphabetical run of 52
+- `larvae init` writes `recommended = true` into `[fmt]` and `[lint]`. The
+  value is the default already; the key is the point. A key that is there can
+  be turned off, and a key that is absent has to be found in the docs first
+- `[lint] recommended`, as Biome has it. Absent and `true` both mean the
+  default levels apply, which is what larvae always did. `false` starts every
+  lint at `allow`, so a project gets the lints it names and no others. A level
+  the project wrote always wins, in either state
+- `implicit_any_local`, a lint for `local test` with no value and no type. What
+  the name holds is then decided by whatever assigns it first, and in a file
+  with no `--!strict` directive Luau accepts any later assignment of any type.
+  A local that nothing ever assigns is left to `uninitialized_local`, which
+  says the more urgent thing about the same line
+- `[fmt] prefer_const`, which turns a `local` that nothing reassigns into a
+  `const`. The same rule the `prefer_const` lint reports, with the formatter
+  making the edit, and it carries the same `mutated_tables_stay_local` option
+  under the same name. Off by default: it rewrites a keyword, which is a
+  bigger step than moving spaces
+
+### Changed
+
+- `misleading_and_or` reaches a middle that syntax proves is a boolean. It
+  fired only on a literal `false` or `nil`, but `ready and (count == 0) or
+  "pending"` gives "pending" when the count is not zero, which is exactly when
+  the author wanted `false`. A comparison yields a boolean because it is a
+  comparison, so the wider net needs no types. The two cases carry different
+  messages: the literal is wrong for every input and the boolean is wrong for
+  half of them
+- Five lints deny by default now: `duplicate_keys`, `duplicate_local`,
+  `format_string`, `zero_step_loop` and `length_as_condition`. They join
+  `undefined_variable`. The bar
+  is two things at once: no reading of the code makes the finding wrong,
+  because each check reads a literal and never a runtime value, and the code as
+  written cannot be what the author meant. `{ a = 1, a = 2 }` discards the
+  first entry, `local a, a` kills the first binding where it stands,
+  `string.format("%y", 1)` raises, and a zero step hangs. Over a 364 file
+  corpus the four report nothing, which is the point: nobody writes these
+  shapes on purpose
+- `implicit_return` and `multiple_statements` are `allow` now. `implicit_return`
+  said so in its own comment while its level said `warn`; the comment had the
+  better argument, because a lookup that falls off the end is idiomatic Luau.
+  `multiple_statements` is ground `larvae fmt` already owns: with
+  `collapse_simple_statement` at `never` a format run removes every finding the
+  lint can make
+- `implicit_any_local` warns instead of denying. The fix never changes
+  behaviour, which argued for a deny. The shape argues against one: `local
+  found` above the loop that fills it in runs correctly, Luau's own linter says
+  nothing about it, and a deny failed the build of every project on the day it
+  adopted larvae
+
+### Fixed
+
+- A require that names a file a worm claims resolves to the Luau the worm
+  writes. The DataModel read the source name, so `App.luaux` became an
+  instance called `App.luaux`, and `require("../Interface/App")` came out as
+  `require("../Interface/App.luaux")`, which points at nothing. The `path`
+  target was already right, because it strips whatever extension it finds; the
+  two Roblox targets were not. A directory whose init file is claimed resolves
+  as well: `Pkg/init.luaux` is written as `Pkg/init.luau`, so `Pkg` is a module
+  and the resolver no longer warns about a require that is correct
+- A claimed script keeps its realm suffix. `boot.client.luaux` read as a plain
+  module, so the checks that apply to a LocalScript never ran on it, and
+  `boot.server.luaux` had the same gap. UI runs on the server as well as the
+  client, so both halves matter
+- A name used only by a type is no longer reported as unused. The token walk
+  that recovers a reference from inside a type skipped a name after a colon,
+  which is right for `obj:method` and wrong inside a type: `type T = { e:
+  jecs.Entity }` puts the field name before the colon and the type after it
+
+## 0.5.0 - 2026-08-19
+
+### Added
+
+- A worm can offer code actions and supply Luau type definitions, through the
+  two LSP paths, in all three forms. A native worm answers the `actions` and
+  `definitions` ops, a wasm worm exports `larvae_actions` and
+  `larvae_definitions`, and a Luau worm puts `actions` and `definitions` on
+  its `frontend` table. All three are optional: a worm with nothing to offer
+  answers with nothing and not an error, because the editor asks on a
+  keystroke
+- `larvae worm add <spec>` writes a worm into `[worms]`. It takes a short name
+  larvae knows, `luaux`, or `owner/repo`, either with `@version`. `--cargo`
+  takes a crate instead. It writes the config and stops, because an edit is
+  instant and offline while a download is neither
+- `larvae worm install`, `i` for short, puts every worm the config names on
+  disk, with a progress bar. Under a pipe it prints a line per worm instead
+- `larvae worm remove <name>`, `rm` for short, takes a worm out of the config
+  and off the disk, and drops `[worms]` when its last worm goes
+- A code action for `unused_variable` and `unused_function`: prefix the name
+  with an underscore, which is the fix those lints already print in their
+  help. It renames the declaration and every write of the name, because
+  prefixing the declaration alone would leave an assignment pointing at a name
+  nothing declares, which is a global and a worse bug than the warning
+- `prefer_const`, a lint for a local that nothing reassigns. Off by default,
+  because `const` is larvae's own reading of Luau and a codebase of ordinary
+  `local` would report on nearly every line the first time it ran. It leaves
+  alone what cannot take `const`: a declaration with no initialiser, a
+  `local function`, a `for` variable, and a multi name declaration where one
+  of the names is reassigned
+- `[lint.options.prefer_const] mutated_tables_stay_local` keeps `local` on a
+  binding the file mutates through a field, `t.x = 1` or `table.insert(t, 1)`.
+  Off by default, because `const` is correct there: Luau enforces it against
+  reassignment of the name and says nothing about the value
+- Two LSP paths for worms, wired and empty. `textDocument/codeAction` is
+  advertised and answers with a list, and `larvae/definitions` is a request of
+  larvae's own for the type definitions a worm supplies. Neither carries
+  anything yet: `crates/larvae/src/lsp/extend.rs` is the seam, so the work
+  that fills them touches one file. The capability is advertised now because
+  an editor decides at initialize whether to ever ask
+- `[fmt] function_call` and `[fmt] function_declaration` lay out the two lists
+  between parentheses. `expand` takes `when-needed`, which is the layout larvae
+  always had, `always`, and `never`. `indent` gives the levels an opened item
+  takes. Both default to the layout larvae already wrote
+- `[fmt] function_call.style = "hug-last"` keeps the arguments on the line of
+  the call and opens the last one, where that argument is a table, a function,
+  or a string carrying its own newlines. The arguments before it do not break,
+  so a long list of them runs past `column_width`, which is why `one-per-line`
+  stays the default
+
+### Changed
+
+- A worm is a table, never a string. `xml = "owner/repo@0.1.0"` is refused
+  with a message that prints the table to write instead. The version is a key
+  of its own now, so `install` can tell a pin from a range without splitting a
+  string and a reader can see what is pinned
+- A version says whether the project moves. `"^"` takes the newest release on
+  every install and is what `add` writes, `"^0.1.0"` follows what semver calls
+  compatible, and `"0.1.0"` holds that release
+- `larvae worm update` is gone. The version now says whether a project wants
+  to move, and a command that bumps a pin the user wrote undoes the pin
+- Installing is a step and not a side effect. A command no longer downloads a
+  missing worm; it names it once and carries on. The editor still skips in
+  silence, because it answers a keystroke
+- An unused `local function` reports `unused_function` and not
+  `unused_variable`. The Luau compiler separates the two, and it separates
+  them by the declaring form and not the value, so `local f = function() end`
+  is still `unused_variable`. Each name carries its own level, so a project
+  that keeps unused helpers while still wanting unused locals reported can now
+  say so. Both read `[lint.options.unused_variable]`. On the same corpus, 44
+  of 206 reports moved to the new name and none were lost
+
+### Fixed
+
+- A file a worm claims can be required. `require("@app/widget")` where the
+  project holds `widget.luaux` found no module and warned about a require that
+  is correct, because the resolver looked only for `.luau` and `.lua`. A
+  claimed file is a module: the pipeline turns it into Luau in the output, so
+  the require resolves at runtime. A claimed file beside a `.luau` of the same
+  name is ambiguous, as two `.luau` files would be
+- No command downloads a worm any more. `larvae process` still did, and it
+  passed the version through unresolved, so a worm pinned at `^` asked GitHub
+  for a release tagged `v^`
+- `larvae worm remove` no longer fails with "Directory not empty". NTFS
+  through FUSE reports a directory as not empty right after its last file was
+  unlinked, so the tree comes apart from the bottom and the last step retries
+- A global `function f() end` that no line reads now reports
+  `unused_function`. It is dead code, a global belongs to the script that runs
+  it, and both selene and the Luau compiler report it. Larvae reported nothing
+  once the `unscoped_variables` fix below stopped it reporting the wrong thing
+- `function f() end` no longer reports `unscoped_variables`. The statement
+  creates a global the same way `f = 1` does, and the two do not read the
+  same way: neither selene nor the Luau compiler reports the declaration, and
+  a Roblox script defines its callbacks with it. On a 400 file corpus this
+  removed 10 of 29 reports. The name a global function declares is still
+  defined for the file, so `undefined_variable` stays quiet where it is called
+- A native worm loads on Windows. A worm is built one time and released for
+  every platform, so its manifest names `luaux-worm` while the Windows zip
+  holds `luaux-worm.exe`. Larvae knew that rule in the place that runs a worm
+  and not in the two places that read its bytes, so loading stopped at
+  "The system cannot find the file specified" before the rule ever ran. Every
+  reader now resolves the entry through one function
+- A worm installed from cargo keeps the `.exe` that cargo built. It was copied
+  to the bare name the manifest gives, which left Windows a file it does not
+  run, and it disagreed with the release channel, which ships the extension.
+  The write side and the read side now spell the file the same way
 
 ## 0.4.0 - 2026-08-18
 

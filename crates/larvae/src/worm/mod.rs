@@ -10,6 +10,7 @@ and the config layer do not know which form they speak to.
 pub mod ctx;
 pub mod fetch;
 pub mod host;
+pub mod known;
 pub mod luau;
 pub mod manifest;
 pub mod native;
@@ -17,6 +18,7 @@ pub mod nodes;
 pub mod pool;
 pub mod proto;
 pub mod registry;
+pub mod version;
 
 use std::path::Path;
 
@@ -110,7 +112,7 @@ impl Worm {
                 })?;
 
                 Backend::Native(Box::new(native::NativeWorm::load(
-                    &native_entry(dir, &manifest.entry),
+                    &entry_path(dir, &manifest.entry),
                     &manifest.name,
                 )?))
             }
@@ -128,7 +130,7 @@ impl Worm {
         let manifest =
             Manifest::parse(&text).with_context(|| format!("in {}", crate::ui::rel(&path)))?;
 
-        let entry = dir.join(&manifest.entry);
+        let entry = entry_path(dir, &manifest.entry);
         let artifact = std::fs::read(&entry)
             .with_context(|| format!("cannot read {}", crate::ui::rel(&entry)))?;
 
@@ -144,7 +146,7 @@ impl Worm {
         let manifest =
             Manifest::parse(&text).with_context(|| format!("in {}", crate::ui::rel(&path)))?;
 
-        let entry = dir.join(&manifest.entry);
+        let entry = entry_path(dir, &manifest.entry);
         let artifact = std::fs::read(&entry)
             .with_context(|| format!("cannot read {}", crate::ui::rel(&entry)))?;
 
@@ -340,28 +342,81 @@ impl Worm {
         }
         .with_context(|| format!("worm `{}`", self.manifest.name))
     }
+
+    /*
+    The code actions this worm offers over a byte range of one file.
+
+    Every form answers, and a form that has nothing to offer answers with an
+    empty list. The editor asks on a keystroke, so a worm without actions must
+    cost a reply and not an error.
+    */
+    pub fn code_actions(&mut self, source: &str, span: (u32, u32)) -> Result<proto::ActionsReply> {
+        match &mut self.backend {
+            Backend::Native(worm) => worm.actions(source, span),
+
+            Backend::Wasm(worm) => worm.actions(source, span),
+
+            Backend::Luau(worm) => worm.actions(source, span),
+        }
+        .with_context(|| format!("worm `{}`", self.manifest.name))
+    }
+
+    /*
+    The Luau type definitions this worm supplies for the code of the project.
+
+    A worm that teaches larvae a new kind of module states what that module
+    is. A worm that makes a data file requirable is the case this exists for:
+    `require("./items.json")` has a type, the worm knows it, and neither
+    larvae nor luau-lsp can work it out alone.
+    */
+    pub fn definitions(&mut self) -> Result<proto::DefinitionsReply> {
+        match &mut self.backend {
+            Backend::Native(worm) => worm.definitions(),
+
+            Backend::Wasm(worm) => worm.definitions(),
+
+            Backend::Luau(worm) => worm.definitions(),
+        }
+        .with_context(|| format!("worm `{}`", self.manifest.name))
+    }
 }
 
 /*
-The path of the entry of a native worm.
+The path of the artifact of a worm.
 
-Windows runs a file by its extension, and a manifest written on unix names
-the entry without one. When the named file is absent and a sibling with
-`.exe` exists, larvae takes the sibling. Thus one manifest serves every
-platform, and a platform zip can still name an exact file.
+Windows runs a file by its extension, and a manifest written on unix names the
+entry without one. A worm is built once and released for every platform, so
+one manifest says `demo-worm` while the Windows zip holds `demo-worm.exe`.
+When the named file is absent and a sibling with `.exe` is there, larvae takes
+the sibling. Thus one manifest serves every platform, and a platform zip can
+still name an exact file.
+
+Every reader of the artifact goes through here. An earlier larvae resolved the
+name in one place and read the bytes in two others, so a native worm on
+Windows failed at the read with "The system cannot find the file specified"
+before the resolution ever ran.
+
+The rule does not ask which platform this is. A file named `demo-worm.exe`
+beside a manifest that names `demo-worm` came from a Windows build wherever it
+is read, and the fallback needs the named file to be absent before it looks.
+Asking `cfg!(windows)` here would leave the branch untested on the machines
+that run the tests, which is how the defect above reached a release.
 */
-fn native_entry(dir: &Path, entry: &str) -> std::path::PathBuf {
-    let plain = dir.join(entry);
+pub(super) fn entry_path(dir: &Path, entry: &str) -> std::path::PathBuf {
+    let named = dir.join(entry);
 
-    if cfg!(windows) && !plain.exists() {
-        let exe = dir.join(format!("{entry}.exe"));
-
-        if exe.exists() {
-            return exe;
-        }
+    if named.exists() {
+        return named;
     }
 
-    plain
+    let exe = dir.join(format!("{entry}.exe"));
+
+    match exe.exists() {
+        true => exe,
+
+        // The named file is the one to report as missing.
+        false => named,
+    }
 }
 
 /*
@@ -539,5 +594,82 @@ claims = [".x"]
         let err = Worm::load(dir.path()).err().unwrap();
 
         assert!(format!("{err:#}").contains("worm.toml"), "{err:#}");
+    }
+}
+
+#[cfg(test)]
+mod windows_entry {
+    use super::*;
+
+    /// A worm directory as a Windows release leaves it: the entry carries `.exe`.
+    fn worm_dir(entry_in_manifest: &str, file_on_disk: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("a temp dir");
+
+        std::fs::write(
+            dir.path().join(MANIFEST),
+            format!(
+                "name = \"demo\"\napi = 1\nform = \"native\"\nentry = \"{entry_in_manifest}\"\n\n[frontend]\nclaims = [\".demo\"]\n"
+            ),
+        )
+        .expect("the manifest writes");
+
+        std::fs::write(dir.path().join(file_on_disk), b"MZ\x90\x00 not a real exe")
+            .expect("the artifact writes");
+
+        dir
+    }
+
+    /*
+    A manifest names the entry without an extension and Windows ships it with
+    one.
+
+    A worm is built once and released for every platform, so its manifest names
+    `demo-worm` while the Windows zip holds `demo-worm.exe`. Reading the name
+    as written finds no file there, and the worm fails to load with "The system
+    cannot find the file specified".
+    */
+    #[test]
+    fn read_parts_finds_the_exe_when_the_manifest_names_no_extension() {
+        let dir = worm_dir("demo-worm", "demo-worm.exe");
+
+        let (manifest, artifact) =
+            Worm::read_parts(dir.path()).expect("the worm reads with the .exe on disk");
+
+        assert_eq!(manifest.entry, "demo-worm");
+        assert!(!artifact.is_empty(), "the bytes feed the cache epoch");
+    }
+
+    /// The name as written still wins where the file is really there.
+    #[test]
+    fn the_named_file_is_taken_before_any_sibling() {
+        let dir = worm_dir("demo-worm", "demo-worm");
+        std::fs::write(dir.path().join("demo-worm.exe"), b"the wrong one").unwrap();
+
+        let (_, artifact) = Worm::read_parts(dir.path()).expect("the worm reads");
+
+        assert_ne!(artifact, b"the wrong one", "the sibling won over the name");
+    }
+
+    /// A manifest that names the exe outright keeps working.
+    #[test]
+    fn a_manifest_that_names_the_extension_is_left_alone() {
+        let dir = worm_dir("demo-worm.exe", "demo-worm.exe");
+
+        assert!(Worm::read_parts(dir.path()).is_ok());
+    }
+
+    /// A missing artifact still reports the name the manifest gave.
+    #[test]
+    fn a_worm_with_no_artifact_still_names_what_it_wanted() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        std::fs::write(
+            dir.path().join(MANIFEST),
+            "name = \"demo\"\napi = 1\nform = \"native\"\nentry = \"demo-worm\"\n\n[frontend]\nclaims = [\".demo\"]\n",
+        )
+        .unwrap();
+
+        let err = Worm::read_parts(dir.path()).expect_err("there is no artifact");
+
+        assert!(format!("{err:#}").contains("demo-worm"), "{err:#}");
     }
 }

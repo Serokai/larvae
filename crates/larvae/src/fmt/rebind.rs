@@ -22,15 +22,21 @@ use std::collections::HashMap;
 use crate::syntax::ast::*;
 use crate::syntax::lexer::Tok;
 
-use super::config::RequireBinding;
+use super::config::{PreferConst, RequireBinding};
 
 /// Maps a keyword token index to the keyword that must replace it.
 pub type Rebindings = HashMap<u32, &'static str>;
 
-pub fn plan(src: &str, toks: &[Tok], chunk: &Chunk, mode: RequireBinding) -> Rebindings {
+pub fn plan(
+    src: &str,
+    toks: &[Tok],
+    chunk: &Chunk,
+    mode: RequireBinding,
+    prefer: &PreferConst,
+) -> Rebindings {
     let mut out = Rebindings::new();
 
-    if mode == RequireBinding::Preserve {
+    if mode == RequireBinding::Preserve && !prefer.enabled {
         return out;
     }
 
@@ -38,16 +44,36 @@ pub fn plan(src: &str, toks: &[Tok], chunk: &Chunk, mode: RequireBinding) -> Reb
     Only `const` needs the resolution, and the resolution is a whole extra
     walk of the file. So the safe direction does not pay for it.
     */
-    let names = match mode {
-        RequireBinding::Const => Some(crate::lint::scope::resolve(src, toks, chunk)),
+    let names = match mode == RequireBinding::Const || prefer.enabled {
+        true => Some(crate::lint::scope::resolve(src, toks, chunk)),
 
-        _ => None,
+        false => None,
     };
 
     let mut locals = Vec::new();
     collect(chunk, &mut locals);
 
-    for local in locals {
+    /*
+    `prefer_const` runs first, and it covers every declaration rather than
+    only the ones that hold a require. A require binding that it already
+    turned into `const` needs nothing from the pass below.
+    */
+    if prefer.enabled {
+        let names = names.as_ref().expect("resolved for const");
+        let mutated = match prefer.mutated_tables_stay_local {
+            true => mutated_bindings(src, toks, chunk, names),
+
+            false => std::collections::HashSet::new(),
+        };
+
+        for local in &locals {
+            if takes_const(local, names, &mutated) {
+                out.insert(local.keyword.start, "const");
+            }
+        }
+    }
+
+    for local in &locals {
         let Some(binding) = single_require_binding(src, toks, local) else {
             continue;
         };
@@ -80,6 +106,123 @@ pub fn plan(src: &str, toks: &[Tok], chunk: &Chunk, mode: RequireBinding) -> Reb
 }
 
 /*
+Reports if this declaration can become `const`.
+
+Three rules, and each one is a place where the swap would not compile or
+would not apply. Luau needs an initialiser, so a declaration with no value
+stays. `const` binds the declaration and not one name inside it, so every
+name has to be free of later assignment. And a declaration already saying
+`const` needs nothing.
+
+The rules are the ones the `prefer_const` lint reports on, because the lint
+and this option describe the same shape.
+*/
+fn takes_const(
+    local: &Local,
+    names: &crate::lint::scope::Names<'_>,
+    mutated: &std::collections::HashSet<usize>,
+) -> bool {
+    if local.is_const || local.values.is_empty() {
+        return false;
+    }
+
+    local.names.iter().all(|binding| {
+        names
+            .by_token
+            .get(&binding.name.start)
+            .and_then(|&i| names.bindings.get(i).map(|b| (i, b)))
+            .is_some_and(|(i, b)| b.writes.is_empty() && !mutated.contains(&i))
+    })
+}
+
+/*
+The bindings the file changes through a field or a `table` function.
+
+`t.x = 1` and `table.insert(t, 1)` leave the binding itself alone, so the
+resolver records no write for either. A project that wants a mutated table to
+keep `local` needs them found, and this is the walk that finds them. It is the
+same rule as `[lint.options.prefer_const]`, so the two answer alike.
+*/
+fn mutated_bindings(
+    src: &str,
+    toks: &[Tok],
+    chunk: &Chunk,
+    names: &crate::lint::scope::Names<'_>,
+) -> std::collections::HashSet<usize> {
+    let mut out = std::collections::HashSet::new();
+    // The linter already walks a chunk into these three lists; one walk serves both.
+    let (exprs, stmts, _) = crate::lint::ctx::flatten(chunk);
+
+    let text = |span: TokSpan| toks[span.start as usize].text(src);
+
+    let mut mark = |root: Option<TokSpan>| {
+        if let Some(span) = root
+            && let Some(&index) = names.read_of.get(&span.start)
+        {
+            out.insert(index);
+        }
+    };
+
+    for stmt in &stmts {
+        let Stmt::Assign(n) = stmt else {
+            continue;
+        };
+
+        for target in &n.targets {
+            if matches!(target, Expr::Index { .. }) {
+                mark(root_name(target));
+            }
+        }
+    }
+
+    for expr in &exprs {
+        let Expr::Call { func, args, .. } = expr else {
+            continue;
+        };
+
+        let Expr::Index {
+            object,
+            key: IndexKey::Field(name),
+            ..
+        } = func.as_ref()
+        else {
+            continue;
+        };
+
+        let Expr::Name(base) = object.as_ref() else {
+            continue;
+        };
+
+        if text(*base) != "table"
+            || !matches!(text(*name), "insert" | "remove" | "sort" | "clear" | "move")
+        {
+            continue;
+        }
+
+        let CallArgs::Paren(list) = args else {
+            continue;
+        };
+
+        if let Some(Expr::Name(name)) = list.first() {
+            mark(Some(*name));
+        }
+    }
+
+    out
+}
+
+/// The name an index chain starts from: `t` in `t.a.b[c]`.
+fn root_name(e: &Expr) -> Option<TokSpan> {
+    match e {
+        Expr::Name(span) => Some(*span),
+
+        Expr::Index { object, .. } => root_name(object),
+
+        _ => None,
+    }
+}
+
+/*
 Returns the name that a `local X = require(...)` binds, when it is exactly
 that.
 
@@ -88,7 +231,11 @@ and the `non_const_require` lint: one name, one value, no type annotation. A
 multi binding cannot be const one name at a time, and an annotated local
 states something that the author cared about.
 */
-fn single_require_binding<'a>(src: &str, toks: &[Tok], local: &'a Local) -> Option<&'a Binding> {
+pub(super) fn single_require_binding<'a>(
+    src: &str,
+    toks: &[Tok],
+    local: &'a Local,
+) -> Option<&'a Binding> {
     let ([binding], [value]) = (local.names.as_slice(), local.values.as_slice()) else {
         return None;
     };
@@ -119,7 +266,7 @@ The walk is written out and does not go through the shared `Visit` trait.
 That trait hands a callback a reference whose lifetime is the visit call and
 not the tree, so the collector cannot store those references.
 */
-fn collect<'a>(chunk: &'a Chunk, out: &mut Vec<&'a Local>) {
+pub(super) fn collect<'a>(chunk: &'a Chunk, out: &mut Vec<&'a Local>) {
     block(&chunk.block, out);
 }
 

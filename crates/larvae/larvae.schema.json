@@ -810,51 +810,20 @@
       }
     },
     "fmt": {
-      "description": "Formatter settings for `larvae fmt`. Every stylua option under its own name, so a stylua.toml can move in here whole, plus the ones stylua does not have. A stylua.toml left in the project is still read, and these keys layer over it.\n\n[Formatting reference \u2192](https://larvae-luau.github.io/docs/reference/formatting)",
+      "description": "Formatter settings for `larvae fmt`. Every stylua option under its own name, so a stylua.toml can move in here whole, plus the ones stylua does not have. A stylua.toml left in the project is still read, and these keys layer over it.\n\n[Formatting reference →](https://larvae-luau.github.io/docs/reference/formatting)",
       "type": "object",
       "additionalProperties": {
         "type": "object",
         "description": "The format options of one worm, under its key. Run `larvae self code` to name and describe them here."
       },
       "properties": {
-        "column_width": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 120,
-          "description": "The width to fit lines into. A line only breaks when it has to.\n\n[column_width \u2192](https://larvae-luau.github.io/docs/reference/formatting#column-width)"
-        },
-        "line_endings": {
+        "block_newline_gaps": {
           "enum": [
-            "unix",
-            "windows"
-          ],
-          "default": "unix",
-          "description": "The newline written out.\n\n[line_endings \u2192](https://larvae-luau.github.io/docs/reference/formatting#line-endings)"
-        },
-        "indent_type": {
-          "enum": [
-            "tabs",
-            "spaces"
-          ],
-          "default": "tabs",
-          "description": "What one level of indentation is made of.\n\n[indent_type \u2192](https://larvae-luau.github.io/docs/reference/formatting#indent-type)"
-        },
-        "indent_width": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 4,
-          "description": "Spaces per level, and the width a tab is assumed to display as when measuring a line.\n\n[indent_width \u2192](https://larvae-luau.github.io/docs/reference/formatting#indent-width)"
-        },
-        "quote_style": {
-          "enum": [
-            "auto-prefer-double",
-            "auto-prefer-single",
-            "force-double",
-            "force-single",
+            "never",
             "preserve"
           ],
-          "default": "auto-prefer-double",
-          "description": "Where a string literal's quotes come from. The auto pair switches when the other quote needs fewer escapes; \"preserve\" leaves every literal exactly as written.\n\n[quote_style \u2192](https://larvae-luau.github.io/docs/reference/formatting#quote-style)"
+          "default": "never",
+          "description": "Whether a blank line the author left at the very start or end of a block survives.\n\n[block_newline_gaps →](https://larvae-luau.github.io/docs/reference/formatting#block-newline-gaps)"
         },
         "call_parentheses": {
           "enum": [
@@ -866,17 +835,7 @@
             "as-needed"
           ],
           "default": "always",
-          "description": "Whether a call with one string or table argument keeps its parentheses. \"input\" keeps whatever the author wrote. \"as-needed\" is the same setting as \"none\" under the name Biome and Prettier use. Both drop the parentheses only where Luau allows the bare form, which is one string or one table; a single identifier keeps them, because `h a` is a syntax error.\n\n[call_parentheses \u2192](https://larvae-luau.github.io/docs/reference/formatting#call-parentheses)"
-        },
-        "space_after_function_names": {
-          "enum": [
-            "never",
-            "definitions",
-            "calls",
-            "always"
-          ],
-          "default": "never",
-          "description": "Where a space goes between a function name and its parentheses.\n\n[space_after_function_names \u2192](https://larvae-luau.github.io/docs/reference/formatting#space-after-function-names)"
+          "description": "Whether a call with one string or table argument keeps its parentheses. \"input\" keeps whatever the author wrote. \"as-needed\" is the same setting as \"none\" under the name Biome and Prettier use. Both drop the parentheses only where Luau allows the bare form, which is one string or one table; a single identifier keeps them, because `h a` is a syntax error.\n\n[call_parentheses →](https://larvae-luau.github.io/docs/reference/formatting#call-parentheses)"
         },
         "collapse_simple_statement": {
           "enum": [
@@ -886,62 +845,92 @@
             "always"
           ],
           "default": "never",
-          "description": "Which one-line bodies may stay on one line.\n\n[collapse_simple_statement \u2192](https://larvae-luau.github.io/docs/reference/formatting#collapse-simple-statement)"
+          "description": "Which one-line bodies may stay on one line.\n\n[collapse_simple_statement →](https://larvae-luau.github.io/docs/reference/formatting#collapse-simple-statement)"
         },
-        "block_newline_gaps": {
+        "column_width": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 120,
+          "description": "The width to fit lines into. A line only breaks when it has to.\n\n[column_width →](https://larvae-luau.github.io/docs/reference/formatting#column-width)"
+        },
+        "enabled": {
+          "type": "boolean",
           "enum": [
-            "never",
-            "preserve"
+            true,
+            false
           ],
-          "default": "never",
-          "description": "Whether a blank line the author left at the very start or end of a block survives.\n\n[block_newline_gaps \u2192](https://larvae-luau.github.io/docs/reference/formatting#block-newline-gaps)"
+          "default": true,
+          "description": "Whether `larvae fmt` changes this project at all. `false` leaves every file as it is, `--check` included, and the editor gets a formatter with no edits. This is for a project that wants larvae for its lints and its requires and keeps another formatter.\n\n[enabled →](https://larvae-luau.github.io/docs/reference/formatting#enabled)"
         },
-        "sort_requires": {
+        "exclude": {
+          "$ref": "#/$defs/exclude",
+          "description": "Paths `larvae fmt` walks past, as globs relative to the project root, ex: [\"Packages/**\"]. Naming a directory is enough. A file named on the command line is still formatted, since naming it is saying you meant it.\n\n[exclude →](https://larvae-luau.github.io/docs/reference/formatting#exclude)"
+        },
+        "final_newline": {
+          "type": "boolean",
+          "enum": [
+            true,
+            false
+          ],
+          "default": true,
+          "description": "Whether the file ends with a newline. On by default. POSIX defines a line as text up to a newline, so a file without a final one ends in something that is not a line. This covers the single trailing newline only. Larvae removes whitespace at the end of every line whatever this says.\n\n[final_newline →](https://larvae-luau.github.io/docs/reference/formatting#final-newline)"
+        },
+        "function_call": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Sort the run of requires at the top of a file.\n\n[sort_requires \u2192](https://larvae-luau.github.io/docs/reference/formatting#sort-requires)",
+          "description": "How the argument list of a call is laid out.\n\n[function_call →](https://larvae-luau.github.io/docs/reference/formatting#function-call)",
           "properties": {
-            "enabled": {
-              "type": "boolean",
+            "expand": {
               "enum": [
-                true,
-                false
+                "when-needed",
+                "always",
+                "never"
               ],
-              "default": false,
-              "description": "\n\n[sort_requires.enabled \u2192](https://larvae-luau.github.io/docs/reference/formatting#sort-requires-enabled)"
+              "default": "when-needed",
+              "description": "When the argument list is opened over several lines. \"when-needed\" opens it only where the line does not fit, which is what larvae has always done. \"always\" opens every one. \"never\" holds it on one line, where a value inside it can still open and the line can run past \"column_width\".\n\n[function_call.expand →](https://larvae-luau.github.io/docs/reference/formatting#function-call-expand)"
             },
-            "grouping": {
+            "style": {
               "enum": [
-                "flat",
-                "by-kind"
+                "one-per-line",
+                "hug-last"
               ],
-              "default": "flat",
-              "description": "\"flat\" is one sorted run, which is what stylua does. \"by-kind\" puts aliases, then absolute, then relative, with a blank line between each.\n\n[sort_requires.grouping \u2192](https://larvae-luau.github.io/docs/reference/formatting#sort-requires-grouping)"
+              "default": "one-per-line",
+              "description": "The shape of an opened argument list. \"one-per-line\" gives every argument a line of its own. \"hug-last\" keeps the arguments on the line of the call and opens the last one, which applies where that argument is a table, a function, or a string carrying its own newlines. The arguments before it do not break, so a long list of them runs past \"column_width\".\n\n[function_call.style →](https://larvae-luau.github.io/docs/reference/formatting#function-call-style)"
+            },
+            "indent": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 1,
+              "description": "The indent levels an opened argument takes. 0 puts it at the column of the bracket.\n\n[function_call.indent →](https://larvae-luau.github.io/docs/reference/formatting#function-call-indent)"
             }
           }
         },
-        "require_binding": {
-          "enum": [
-            "preserve",
-            "const",
-            "local"
-          ],
-          "default": "preserve",
-          "description": "Selects which keyword binds a required module. Luau enforces \"const\", so a name that the file reassigns keeps \"local\" and does not become a syntax error. \"preserve\" keeps each declaration as written.\n\n[require_binding \u2192](https://larvae-luau.github.io/docs/reference/formatting#require-binding)"
-        },
-        "semicolons": {
-          "enum": [
-            "never",
-            "as-needed",
-            "always"
-          ],
-          "default": "never",
-          "description": "Whether a statement ends with a semicolon. Luau requires one only before a statement opening with \"(\", and larvae emits that one whatever this says. \"never\" and \"as-needed\" therefore name the same output; both are accepted.\n\n[semicolons \u2192](https://larvae-luau.github.io/docs/reference/formatting#semicolons)"
+        "function_declaration": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "How the parameter list of a declaration is laid out.\n\n[function_declaration →](https://larvae-luau.github.io/docs/reference/formatting#function-declaration)",
+          "properties": {
+            "expand": {
+              "enum": [
+                "when-needed",
+                "always",
+                "never"
+              ],
+              "default": "when-needed",
+              "description": "When the parameter list is opened over several lines. \"when-needed\" opens it only where the line does not fit, which is what larvae has always done. \"always\" opens every one. \"never\" holds it on one line, where a value inside it can still open and the line can run past \"column_width\".\n\n[function_declaration.expand →](https://larvae-luau.github.io/docs/reference/formatting#function-declaration-expand)"
+            },
+            "indent": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 1,
+              "description": "The indent levels an opened parameter takes. 0 puts it at the column of the bracket.\n\n[function_declaration.indent →](https://larvae-luau.github.io/docs/reference/formatting#function-declaration-indent)"
+            }
+          }
         },
         "if_expression": {
           "type": "object",
           "additionalProperties": false,
-          "description": "How an \"if ... then ... else ...\" expression is laid out. Luau has an if expression and stylua has no option for it, so a long one runs off to the right.\n\n[if_expression \u2192](https://larvae-luau.github.io/docs/reference/formatting#if-expression)",
+          "description": "How an \"if ... then ... else ...\" expression is laid out. Luau has an if expression and stylua has no option for it, so a long one runs off to the right.\n\n[if_expression →](https://larvae-luau.github.io/docs/reference/formatting#if-expression)",
           "properties": {
             "expand": {
               "enum": [
@@ -950,13 +939,13 @@
                 "when-large"
               ],
               "default": "never",
-              "description": "When the expression is opened over several lines. \"never\" keeps it on one line where it fits, which is what larvae has always done. \"always\" opens every one. \"when-large\" opens one wider than \"width\".\n\n[if_expression.expand \u2192](https://larvae-luau.github.io/docs/reference/formatting#if-expression-expand)"
+              "description": "When the expression is opened over several lines. \"never\" keeps it on one line where it fits, which is what larvae has always done. \"always\" opens every one. \"when-large\" opens one wider than \"width\".\n\n[if_expression.expand →](https://larvae-luau.github.io/docs/reference/formatting#if-expression-expand)"
             },
             "width": {
               "type": "integer",
               "minimum": 0,
               "default": 60,
-              "description": "The width at which \"when-large\" opens an expression. It also governs a nested expression in every mode, so an if inside an if waits until it earns the room on its own.\n\n[if_expression.width \u2192](https://larvae-luau.github.io/docs/reference/formatting#if-expression-width)"
+              "description": "The width at which \"when-large\" opens an expression. It also governs a nested expression in every mode, so an if inside an if waits until it earns the room on its own.\n\n[if_expression.width →](https://larvae-luau.github.io/docs/reference/formatting#if-expression-width)"
             },
             "style": {
               "enum": [
@@ -964,7 +953,7 @@
                 "leading"
               ],
               "default": "block",
-              "description": "The shape of an opened expression. \"block\" puts the value below its keyword, in the shape of an if statement. \"leading\" starts the line with the keyword and takes its value: \"if bar\" / \"then a\" / \"else b\".\n\n[if_expression.style \u2192](https://larvae-luau.github.io/docs/reference/formatting#if-expression-style)"
+              "description": "The shape of an opened expression. \"block\" puts the value below its keyword, in the shape of an if statement. \"leading\" starts the line with the keyword and takes its value: \"if bar\" / \"then a\" / \"else b\".\n\n[if_expression.style →](https://larvae-luau.github.io/docs/reference/formatting#if-expression-style)"
             },
             "placement": {
               "enum": [
@@ -972,25 +961,187 @@
                 "next-line"
               ],
               "default": "same-line",
-              "description": "Where the \"if\" sits once the expression is opened. \"same-line\" keeps it on the line of the binding. \"next-line\" ends the line after \"=\" and starts the \"if\" below.\n\n[if_expression.placement \u2192](https://larvae-luau.github.io/docs/reference/formatting#if-expression-placement)"
+              "description": "Where the \"if\" sits once the expression is opened. \"same-line\" keeps it on the line of the binding. \"next-line\" ends the line after \"=\" and starts the \"if\" below.\n\n[if_expression.placement →](https://larvae-luau.github.io/docs/reference/formatting#if-expression-placement)"
             },
             "indent": {
               "type": "integer",
               "minimum": 0,
               "default": 1,
-              "description": "The indent levels between a keyword line and the value below it. 0 puts the value at the column of its keyword.\n\n[if_expression.indent \u2192](https://larvae-luau.github.io/docs/reference/formatting#if-expression-indent)"
+              "description": "The indent levels between a keyword line and the value below it. 0 puts the value at the column of its keyword.\n\n[if_expression.indent →](https://larvae-luau.github.io/docs/reference/formatting#if-expression-indent)"
             }
           }
+        },
+        "include": {
+          "$ref": "#/$defs/exclude",
+          "description": "Paths `larvae fmt` reads even when an exclude matches them, as globs relative to the project root. This list wins over the `[fmt]` exclude and over the root lists.\n\n[include →](https://larvae-luau.github.io/docs/reference/formatting#include)"
+        },
+        "indent_type": {
+          "enum": [
+            "tabs",
+            "spaces"
+          ],
+          "default": "tabs",
+          "description": "What one level of indentation is made of.\n\n[indent_type →](https://larvae-luau.github.io/docs/reference/formatting#indent-type)"
+        },
+        "indent_width": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 4,
+          "description": "Spaces per level, and the width a tab is assumed to display as when measuring a line.\n\n[indent_width →](https://larvae-luau.github.io/docs/reference/formatting#indent-width)"
+        },
+        "line_endings": {
+          "enum": [
+            "unix",
+            "windows"
+          ],
+          "default": "unix",
+          "description": "The newline written out.\n\n[line_endings →](https://larvae-luau.github.io/docs/reference/formatting#line-endings)"
+        },
+        "magic_trailing_comma": {
+          "type": "boolean",
+          "enum": [
+            true,
+            false
+          ],
+          "default": true,
+          "description": "A trailing comma the author left in a table means \"keep this expanded\", so line breaking becomes something an author decides per table rather than something width alone decides. Tables only: Luau rejects `f(a, b,)`, so a call has no trailing comma to read.\n\n[magic_trailing_comma →](https://larvae-luau.github.io/docs/reference/formatting#magic-trailing-comma)"
+        },
+        "prefer_const": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Turns a `local` that nothing reassigns into a `const`. The same rule the `prefer_const` lint reports, with the formatter making the edit. Off by default: it rewrites a keyword, which is a bigger step than moving spaces.\n\n[prefer_const →](https://larvae-luau.github.io/docs/reference/formatting#prefer-const)",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "enum": [
+                true,
+                false
+              ],
+              "default": false,
+              "description": "Make the change.\n\n[prefer_const.enabled →](https://larvae-luau.github.io/docs/reference/formatting#prefer-const-enabled)"
+            },
+            "mutated_tables_stay_local": {
+              "type": "boolean",
+              "enum": [
+                true,
+                false
+              ],
+              "default": false,
+              "description": "Keep `local` on a binding the file mutates through a field, `t.x = 1` or `table.insert(t, 1)`. Off by default, because `const` is correct there: Luau enforces it against reassignment of the name and says nothing about the value. The same choice as [lint.options.prefer_const].\n\n[prefer_const.mutated_tables_stay_local →](https://larvae-luau.github.io/docs/reference/formatting#prefer-const-mutated-tables-stay-local)"
+            }
+          }
+        },
+        "quote_style": {
+          "enum": [
+            "auto-prefer-double",
+            "auto-prefer-single",
+            "force-double",
+            "force-single",
+            "preserve"
+          ],
+          "default": "auto-prefer-double",
+          "description": "Where a string literal's quotes come from. The auto pair switches when the other quote needs fewer escapes; \"preserve\" leaves every literal exactly as written.\n\n[quote_style →](https://larvae-luau.github.io/docs/reference/formatting#quote-style)"
+        },
+        "recommended": {
+          "type": "boolean",
+          "enum": [
+            true,
+            false
+          ],
+          "description": "Whether larvae's own defaults apply, or only the options this project wrote. Absent and `true` both mean the defaults apply. `false` starts from a base that changes as little as possible: `magic_trailing_comma`, `space_inside_braces` and `trailing_comma` go off, and the project turns back on what it wants. Every other default is either stylua's or a setting that does nothing until a project asks for it, so `false` does not move it. A `stylua.toml` states the style of the project already, so it is the base wherever one exists.\n\n[recommended →](https://larvae-luau.github.io/docs/reference/formatting#recommended)"
+        },
+        "require_binding": {
+          "enum": [
+            "preserve",
+            "const",
+            "local"
+          ],
+          "default": "preserve",
+          "description": "Selects which keyword binds a required module. Luau enforces \"const\", so a name that the file reassigns keeps \"local\" and does not become a syntax error. \"preserve\" keeps each declaration as written.\n\n[require_binding →](https://larvae-luau.github.io/docs/reference/formatting#require-binding)"
+        },
+        "semicolons": {
+          "enum": [
+            "never",
+            "as-needed",
+            "always"
+          ],
+          "default": "never",
+          "description": "Whether a statement ends with a semicolon. Luau requires one only before a statement opening with \"(\", and larvae emits that one whatever this says. \"never\" and \"as-needed\" therefore name the same output; both are accepted.\n\n[semicolons →](https://larvae-luau.github.io/docs/reference/formatting#semicolons)"
+        },
+        "sort_requires": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Sort the run of requires at the top of a file.\n\n[sort_requires →](https://larvae-luau.github.io/docs/reference/formatting#sort-requires)",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "enum": [
+                true,
+                false
+              ],
+              "default": false,
+              "description": "\n\n[sort_requires.enabled →](https://larvae-luau.github.io/docs/reference/formatting#sort-requires-enabled)"
+            },
+            "grouping": {
+              "enum": [
+                "flat",
+                "by-kind"
+              ],
+              "default": "flat",
+              "description": "\"flat\" is one sorted run, which is what stylua does. \"by-kind\" puts aliases, then absolute, then relative, with a blank line between each.\n\n[sort_requires.grouping →](https://larvae-luau.github.io/docs/reference/formatting#sort-requires-grouping)"
+            }
+          }
+        },
+        "space_after_function_names": {
+          "enum": [
+            "never",
+            "definitions",
+            "calls",
+            "always"
+          ],
+          "default": "never",
+          "description": "Where a space goes between a function name and its parentheses.\n\n[space_after_function_names →](https://larvae-luau.github.io/docs/reference/formatting#space-after-function-names)"
+        },
+        "space_inside_braces": {
+          "type": "boolean",
+          "enum": [
+            true,
+            false
+          ],
+          "default": true,
+          "description": "`{ a }` rather than `{a}`, which is the Luau convention.\n\n[space_inside_braces →](https://larvae-luau.github.io/docs/reference/formatting#space-inside-braces)"
+        },
+        "space_inside_brackets": {
+          "type": "boolean",
+          "enum": [
+            true,
+            false
+          ],
+          "default": false,
+          "description": "`t[ k ]` rather than `t[k]`.\n\n[space_inside_brackets →](https://larvae-luau.github.io/docs/reference/formatting#space-inside-brackets)"
+        },
+        "space_inside_parens": {
+          "type": "boolean",
+          "enum": [
+            true,
+            false
+          ],
+          "default": false,
+          "description": "`f( a )` rather than `f(a)`.\n\n[space_inside_parens →](https://larvae-luau.github.io/docs/reference/formatting#space-inside-parens)"
+        },
+        "syntax": {
+          "type": "string",
+          "description": "Accepted from stylua and ignored. larvae formats Luau and only Luau, which is what every value of this asks for here.\n\n[syntax →](https://larvae-luau.github.io/docs/reference/formatting#syntax)"
         },
         "table_types": {
           "type": "object",
           "additionalProperties": false,
-          "description": "How a table type is laid out, in every position a type takes: an alias, an annotation, a parameter, a return type, and a :: assertion. A table wider than \"width\" opens with one field per line.\n\n[table_types \u2192](https://larvae-luau.github.io/docs/reference/formatting#table-types)",
+          "description": "How a table type is laid out, in every position a type takes: an alias, an annotation, a parameter, a return type, and a :: assertion. A table wider than \"width\" opens with one field per line.\n\n[table_types →](https://larvae-luau.github.io/docs/reference/formatting#table-types)",
           "properties": {
             "enabled": {
               "type": "boolean",
               "default": true,
-              "description": "Off keeps the one-line replay, byte for byte what larvae wrote before.\n\n[table_types.enabled \u2192](https://larvae-luau.github.io/docs/reference/formatting#table-types-enabled)",
+              "description": "Off keeps the one-line replay, byte for byte what larvae wrote before.\n\n[table_types.enabled →](https://larvae-luau.github.io/docs/reference/formatting#table-types-enabled)",
               "enum": [
                 true,
                 false
@@ -1000,7 +1151,7 @@
               "type": "integer",
               "minimum": 0,
               "default": 60,
-              "description": "The width at which a table type opens over several lines. The measure is the flat form of one table alone, so a short table nested in a long one keeps its line.\n\n[table_types.width \u2192](https://larvae-luau.github.io/docs/reference/formatting#table-types-width)"
+              "description": "The width at which a table type opens over several lines. The measure is the flat form of one table alone, so a short table nested in a long one keeps its line.\n\n[table_types.width →](https://larvae-luau.github.io/docs/reference/formatting#table-types-width)"
             },
             "separator": {
               "enum": [
@@ -1008,54 +1159,9 @@
                 "semicolon"
               ],
               "default": "comma",
-              "description": "The separator between fields, in both layouts. Luau reads both.\n\n[table_types.separator \u2192](https://larvae-luau.github.io/docs/reference/formatting#table-types-separator)"
+              "description": "The separator between fields, in both layouts. Luau reads both.\n\n[table_types.separator →](https://larvae-luau.github.io/docs/reference/formatting#table-types-separator)"
             }
           }
-        },
-        "final_newline": {
-          "type": "boolean",
-          "enum": [
-            true,
-            false
-          ],
-          "default": true,
-          "description": "Whether the file ends with a newline. On by default. POSIX defines a line as text up to a newline, so a file without a final one ends in something that is not a line. This covers the single trailing newline only. Larvae removes whitespace at the end of every line whatever this says.\n\n[final_newline \u2192](https://larvae-luau.github.io/docs/reference/formatting#final-newline)"
-        },
-        "magic_trailing_comma": {
-          "type": "boolean",
-          "enum": [
-            true,
-            false
-          ],
-          "default": true,
-          "description": "A trailing comma the author left in a table means \"keep this expanded\", so line breaking becomes something an author decides per table rather than something width alone decides. Tables only: Luau rejects `f(a, b,)`, so a call has no trailing comma to read.\n\n[magic_trailing_comma \u2192](https://larvae-luau.github.io/docs/reference/formatting#magic-trailing-comma)"
-        },
-        "space_inside_parens": {
-          "type": "boolean",
-          "enum": [
-            true,
-            false
-          ],
-          "default": false,
-          "description": "`f( a )` rather than `f(a)`.\n\n[space_inside_parens \u2192](https://larvae-luau.github.io/docs/reference/formatting#space-inside-parens)"
-        },
-        "space_inside_brackets": {
-          "type": "boolean",
-          "enum": [
-            true,
-            false
-          ],
-          "default": false,
-          "description": "`t[ k ]` rather than `t[k]`.\n\n[space_inside_brackets \u2192](https://larvae-luau.github.io/docs/reference/formatting#space-inside-brackets)"
-        },
-        "space_inside_braces": {
-          "type": "boolean",
-          "enum": [
-            true,
-            false
-          ],
-          "default": true,
-          "description": "`{ a }` rather than `{a}`, which is the Luau convention.\n\n[space_inside_braces \u2192](https://larvae-luau.github.io/docs/reference/formatting#space-inside-braces)"
         },
         "trailing_comma": {
           "type": "boolean",
@@ -1064,19 +1170,16 @@
             false
           ],
           "default": true,
-          "description": "A table that broke over several lines keeps a trailing comma on its last field.\n\n[trailing_comma \u2192](https://larvae-luau.github.io/docs/reference/formatting#trailing-comma)"
+          "description": "A table that broke over several lines keeps a trailing comma on its last field.\n\n[trailing_comma →](https://larvae-luau.github.io/docs/reference/formatting#trailing-comma)"
         },
-        "exclude": {
-          "$ref": "#/$defs/exclude",
-          "description": "Paths `larvae fmt` walks past, as globs relative to the project root, ex: [\"Packages/**\"]. Naming a directory is enough. A file named on the command line is still formatted, since naming it is saying you meant it.\n\n[exclude \u2192](https://larvae-luau.github.io/docs/reference/formatting#exclude)"
-        },
-        "include": {
-          "$ref": "#/$defs/exclude",
-          "description": "Paths `larvae fmt` reads even when an exclude matches them, as globs relative to the project root. This list wins over the `[fmt]` exclude and over the root lists.\n\n[include \u2192](https://larvae-luau.github.io/docs/reference/formatting#include)"
-        },
-        "syntax": {
-          "type": "string",
-          "description": "Accepted from stylua and ignored. larvae formats Luau and only Luau, which is what every value of this asks for here.\n\n[syntax \u2192](https://larvae-luau.github.io/docs/reference/formatting#syntax)"
+        "unused_imports": {
+          "enum": [
+            "ignore",
+            "underscore",
+            "remove"
+          ],
+          "default": "ignore",
+          "description": "What to do with a required module that nothing uses. \"ignore\" leaves it as written. \"underscore\" renames it to `_Name`, which keeps the module and silences the lint. \"remove\" deletes the declaration.\n\nThe default is \"ignore\" for a reason worth knowing: `require` runs a module the first time a file asks for it, so a module can do its work by being required at all, and deleting the line stops that work while the file still compiles. A name that only a type reads counts as used, so `const jecs = require(\"@pkg/jecs\")` with `type C = jecs.Component` below it survives both modes. A name that already opens with `_` is left alone, and a statement inside a `fmt off` region is never removed.\n\n[unused_imports →](https://larvae-luau.github.io/docs/reference/formatting#unused-imports)"
         }
       }
     },
@@ -1092,6 +1195,26 @@
         "description": "options and config are two names for one table, so only one of them can be written."
       },
       "properties": {
+        "enabled": {
+          "type": "boolean",
+          "enum": [
+            true,
+            false
+          ],
+          "default": true,
+          "description": "Whether `larvae lint` reports on this project at all. `false` reports nothing, exits zero, and clears the diagnostics in the editor. This is for a project that wants larvae for its formatter and its requires and keeps another linter."
+        },
+        "recommended": {
+          "type": "boolean",
+          "enum": [
+            true,
+            false
+          ],
+          "description": "Whether a lint larvae recommends is on without this project saying so. Absent and `true` both mean the default levels apply. `false` starts every lint at `allow`, so the project gets the lints it names under `[lint.rules]` and no others. A level the project wrote always wins in either state."
+        },
+        "groups": {
+          "$ref": "#/$defs/lint_groups"
+        },
         "std": {
           "default": "roblox",
           "description": "Which globals exist before a file runs. Anything else is undefined_variable.",
@@ -1146,10 +1269,11 @@
     "lint_level": {
       "enum": [
         "allow",
+        "info",
         "warn",
         "deny"
       ],
-      "description": "\"allow\" is off, \"warn\" is reported and leaves the exit code alone, \"deny\" is reported and fails the run."
+      "description": "\"allow\" is off. \"info\" and \"warn\" are both reported and both leave the exit code alone; they differ in what they ask of the reader, and an editor draws an info as a hint and a warning as a squiggle. \"deny\" is reported and fails the run."
     },
     "lint_rules": {
       "description": "How loudly each lint speaks. A lint keeps its own default until it is named here. A name not listed below is a worm's lint, declared in that worm's [lints] and levelled here the same way.",
@@ -1165,358 +1289,160 @@
         "almost_swapped": {
           "enum": [
             "allow",
+            "info",
             "warn",
             "deny"
           ],
           "description": "Two assignments that look like a swap but overwrite one of the values. Default: warn."
         },
-        "compare_nan": {
+        "and_or_conditional": {
           "enum": [
             "allow",
+            "info",
             "warn",
             "deny"
           ],
-          "description": "Comparing against nan, which is never equal to anything including itself. Default: warn."
-        },
-        "constant_table_comparison": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "Comparing against a table literal, which compares identity and is always false. Default: warn."
-        },
-        "divide_by_zero": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "Dividing by a literal zero. Default: warn."
-        },
-        "duplicate_keys": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "A table key written twice, where only the last one survives. Default: warn."
-        },
-        "ifs_same_cond": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "An elseif repeating a condition already tested, which can never run. Default: warn."
-        },
-        "if_same_then_else": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "Two branches of the same if with identical bodies. Default: warn."
-        },
-        "suspicious_reverse_loop": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "A numeric for counting down without a negative step, which never runs. Default: warn."
-        },
-        "type_check_inside_call": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "A comparison inside type(), where it belongs outside. Default: warn."
-        },
-        "unbalanced_assignments": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "More names than values, or more values than names. Default: warn."
-        },
-        "zero_step_loop": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "A numeric for whose step is zero, so the counter never moves. Default: warn."
-        },
-        "bad_string_escape": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "An escape sequence the language does not define. Default: warn."
-        },
-        "mismatched_arg_count": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "Calling a function in this file with the wrong number of arguments. Default: warn."
-        },
-        "must_use": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "Calling a pure function and discarding what it returned. Default: warn."
+          "description": "`cond and a or b` used as a value. The decision hides inside an expression, where an if statement states one case per branch. Off by default: the form is ordinary Lua and it is correct for every truthy middle. Default: allow."
         },
         "bad_comment_directive": {
           "enum": [
             "allow",
+            "info",
             "warn",
             "deny"
           ],
           "description": "A --! directive that Luau does not know, or one that comes after the code it should govern. Default: warn."
         },
+        "bad_string_escape": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "An escape sequence the language does not define. Default: warn."
+        },
         "builtin_global_write": {
           "enum": [
             "allow",
+            "info",
             "warn",
             "deny"
           ],
           "description": "An assignment over a standard global, which every later script sees. Default: warn."
         },
+        "builtin_shadowed": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A local that takes the name of a standard global, such as `local table = {}`. The library is unreachable for the rest of the scope, and the failure lands at the first line that wanted it. Default: warn."
+        },
+        "collapsible_if": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "An if that holds one if and nothing else. The two conditions are one `and` apart, and the nesting says they are not. Default: allow."
+        },
+        "compare_nan": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "Comparing against nan, which is never equal to anything including itself. Default: warn."
+        },
         "comparison_precedence": {
           "enum": [
             "allow",
+            "info",
             "warn",
             "deny"
           ],
           "description": "not a == b, or a chain like a < b < c, which does not group the way it reads. Default: warn."
         },
-        "duplicate_function": {
+        "constant_condition": {
           "enum": [
             "allow",
+            "info",
             "warn",
             "deny"
           ],
-          "description": "Two functions of the same name in one scope, where the first is discarded. Default: warn."
+          "description": "A condition that is a literal, so the branch is decided before the program runs. Only nil and false are false in Luau, so `if 0 then` and `if \"\" then` both pass. `while true do` and `repeat ... until false` are exempt, because both are standard loops. Default: warn."
         },
-        "duplicate_local": {
+        "constant_table_comparison": {
           "enum": [
             "allow",
+            "info",
             "warn",
             "deny"
           ],
-          "description": "One local statement or parameter list that declares the same name twice. Default: warn."
-        },
-        "format_string": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "A format string that string.format or os.date rejects at runtime. Default: warn."
-        },
-        "implicit_return": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "A function that returns a value on one path and falls off the end on another. The lint is off by default, because a lookup that returns nil when it finds nothing is idiomatic Luau. Default: warn."
-        },
-        "misleading_and_or": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "cond and false or b, which always gives b because the middle is never truthy. Default: warn."
-        },
-        "number_literal_overflow": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "A hexadecimal or binary literal wider than 64 bits, which is truncated. Default: warn."
-        },
-        "placeholder_read": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "Reading _, the name that says a value is discarded. Default: warn."
-        },
-        "table_operations": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "A table.insert or table.remove whose index or argument count is wrong. Default: warn."
-        },
-        "uninitialized_local": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "A local declared with no value and never assigned, so every read is nil. Default: warn."
-        },
-        "unknown_type": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "Comparing type(x) against a string that type() never returns. Default: warn."
-        },
-        "undefined_variable": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "A name nothing declares, which is nil at runtime. Default: deny."
-        },
-        "unscoped_variables": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "An assignment with no local, which creates a global. Default: warn."
-        },
-        "unused_variable": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "A name declared and never read. Default: warn. Tunable under [lint.options.unused_variable]."
-        },
-        "shadowing": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "A name that hides another still in scope. Default: warn."
-        },
-        "global_usage": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "Reaching into _G, which is shared with every other script. Default: warn."
+          "description": "Comparing against a table literal, which compares identity and is always false. Default: warn."
         },
         "deprecated": {
           "enum": [
             "allow",
+            "info",
             "warn",
             "deny"
           ],
           "description": "A function that still works but has been replaced. Default: warn. Extend it under [lint.options.deprecated]."
         },
-        "restricted_module_paths": {
+        "divide_by_zero": {
           "enum": [
             "allow",
+            "info",
             "warn",
             "deny"
           ],
-          "description": "Requiring a module the project has ruled out. Default: warn, and quiet until [lint.options.restricted_module_paths] names something."
+          "description": "Dividing by a literal zero. Default: warn."
         },
-        "high_cyclomatic_complexity": {
+        "duplicate_function": {
           "enum": [
             "allow",
+            "info",
             "warn",
             "deny"
           ],
-          "description": "A function with more branches than anyone can hold at once. Default: allow. Threshold under [lint.options.high_cyclomatic_complexity]."
+          "description": "Two functions of the same name in one scope, where the first is discarded. Default: warn."
         },
-        "manual_table_clone": {
+        "duplicate_keys": {
           "enum": [
             "allow",
+            "info",
             "warn",
             "deny"
           ],
-          "description": "A loop that copies a table, which table.clone does in one call. Default: warn."
+          "description": "A table key written twice, where only the last one survives. Default: warn."
         },
-        "roblox_incorrect_color3_new_bounds": {
+        "duplicate_local": {
           "enum": [
             "allow",
+            "info",
             "warn",
             "deny"
           ],
-          "description": "Color3.new given a channel over 1, where the scale is 0 to 1. Default: warn."
+          "description": "One local statement or parameter list that declares the same name twice. Default: warn."
         },
-        "roblox_suspicious_udim2_new": {
+        "else_after_return": {
           "enum": [
             "allow",
+            "info",
             "warn",
             "deny"
           ],
-          "description": "UDim2.new given two arguments, where it takes four. Default: warn."
-        },
-        "roblox_manual_fromscale_or_fromoffset": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "A UDim2.new that fromScale or fromOffset says more clearly. Default: warn."
-        },
-        "non_const_require": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "A required module bound with local, where const says it never changes. The lint skips a name that the file reassigns, because const would then be a syntax error. Default: allow."
-        },
-        "unreachable_code": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "Statements after a return, break or continue, which never run. Default: warn."
-        },
-        "self_assignment": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "Assigning a value to itself, which does nothing. Default: warn."
-        },
-        "string_concat_in_loop": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "Building a string by concatenation in a loop, which is quadratic. Default: warn."
-        },
-        "loop_invariant_call": {
-          "enum": [
-            "allow",
-            "warn",
-            "deny"
-          ],
-          "description": "A call inside a loop whose result cannot change between iterations. Default: warn."
+          "description": "An else after a branch that returns, breaks or continues. The else costs a level of indent and buys nothing. Every branch must end in the jump, because an elseif that falls through still needs the else. Default: allow."
         },
         "empty_if": {
           "enum": [
             "allow",
+            "info",
             "warn",
             "deny"
           ],
@@ -1525,14 +1451,151 @@
         "empty_loop": {
           "enum": [
             "allow",
+            "info",
             "warn",
             "deny"
           ],
           "description": "A loop body with nothing in it. Default: warn."
         },
+        "format_string": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A format string that string.format or os.date rejects at runtime. Default: warn."
+        },
+        "global_usage": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "Reaching into _G, which is shared with every other script. Default: warn."
+        },
+        "high_cyclomatic_complexity": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A function with more branches than anyone can hold at once. Default: allow. Threshold under [lint.options.high_cyclomatic_complexity]."
+        },
+        "if_expression_assignment": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "`if cond then a else b` used as a value. Off by default, and it has to stay off: misleading_and_or names this exact form as the repair, so a default that reported would report the fix larvae asked for. Default: allow."
+        },
+        "if_same_then_else": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "Two branches of the same if with identical bodies. Default: warn."
+        },
+        "ifs_same_cond": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "An elseif repeating a condition already tested, which can never run. Default: warn."
+        },
+        "ignored_pcall_result": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A pcall or xpcall used as a statement. It catches the error and discards it, so the failure leaves no trace at all. Default: warn."
+        },
+        "implicit_any_local": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A local declared with no value and no type, so what it holds is decided by whatever assigns it first. In a file with no `--!strict` directive Luau accepts any later assignment of any type, which is the implicit `any` this names. A local that nothing ever assigns is left to `uninitialized_local`, which says the more urgent thing about the same line. The only lint larvae denies by default, because the fix is an annotation and an annotation changes no behaviour. Default: deny."
+        },
+        "implicit_any_parameter": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A parameter with no type, so what the function takes is decided by each caller. The sibling of implicit_any_local, on the other side of the call. Off by default: most Luau carries no annotations, so a warn default would report hundreds of times on the first run. Default: allow."
+        },
+        "implicit_return": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A function that returns a value on one path and falls off the end on another. The lint is off by default, because a lookup that returns nil when it finds nothing is idiomatic Luau. Default: warn."
+        },
+        "length_as_condition": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "#t used as a condition. A length is a number and every number is true in Luau, so the guard does nothing and the branch runs every time. Default: deny."
+        },
+        "loop_invariant_call": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A call inside a loop whose result cannot change between iterations. Default: warn."
+        },
+        "manual_table_clone": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A loop that copies a table, which table.clone does in one call. Default: warn."
+        },
+        "misleading_and_or": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "cond and false or b, which always gives b because the middle is never truthy. Default: warn."
+        },
+        "mismatched_arg_count": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "Calling a function in this file with the wrong number of arguments. Default: warn."
+        },
         "mixed_table": {
           "enum": [
             "allow",
+            "info",
             "warn",
             "deny"
           ],
@@ -1541,18 +1604,254 @@
         "multiple_statements": {
           "enum": [
             "allow",
+            "info",
             "warn",
             "deny"
           ],
           "description": "More than one statement on a line. Default: warn."
         },
+        "must_use": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "Calling a pure function and discarding what it returned. Default: warn."
+        },
+        "negated_condition": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "An if with a negated condition and an else. Dropping the not and swapping the bodies states the same thing in the order a reader expects. Default: allow."
+        },
+        "non_const_require": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A required module bound with local, where const says it never changes. The lint skips a name that the file reassigns, because const would then be a syntax error. Default: allow."
+        },
+        "number_literal_overflow": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A hexadecimal or binary literal wider than 64 bits, which is truncated. Default: warn."
+        },
         "parenthese_conditions": {
           "enum": [
             "allow",
+            "info",
             "warn",
             "deny"
           ],
           "description": "Parentheses around a condition, which Luau does not need. Default: warn."
+        },
+        "placeholder_read": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "Reading _, the name that says a value is discarded. Default: warn."
+        },
+        "prefer_const": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A local that nothing reassigns, which `const` states outright. Off by default: `const` is larvae's own reading of Luau and not every project writes it, so a codebase of ordinary `local` would report on nearly every line the first time it ran. Tune it under [lint.options.prefer_const]. Default: allow."
+        },
+        "restricted_globals": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "Reading a global the project has ruled out. Silent until the project fills in [lint.options.restricted_globals], so the default level costs nothing. Each entry is a name and the reason a reader is shown. Default: warn."
+        },
+        "restricted_module_paths": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "Requiring a module the project has ruled out. Default: warn, and quiet until [lint.options.restricted_module_paths] names something."
+        },
+        "roblox_incorrect_color3_new_bounds": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "Color3.new given a channel over 1, where the scale is 0 to 1. Default: warn."
+        },
+        "roblox_manual_fromscale_or_fromoffset": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A UDim2.new that fromScale or fromOffset says more clearly. Default: warn."
+        },
+        "roblox_suspicious_udim2_new": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "UDim2.new given two arguments, where it takes four. Default: warn."
+        },
+        "self_assignment": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "Assigning a value to itself, which does nothing. Default: warn."
+        },
+        "shadowing": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A name that hides another still in scope. Default: warn."
+        },
+        "string_concat_in_loop": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "Building a string by concatenation in a loop, which is quadratic. Default: warn."
+        },
+        "suspicious_reverse_loop": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A numeric for counting down without a negative step, which never runs. Default: warn."
+        },
+        "table_operations": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A table.insert or table.remove whose index or argument count is wrong. Default: warn."
+        },
+        "type_check_inside_call": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A comparison inside type(), where it belongs outside. Default: warn."
+        },
+        "unbalanced_assignments": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "More names than values, or more values than names. Default: warn."
+        },
+        "undefined_variable": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A name nothing declares, which is nil at runtime. Default: deny."
+        },
+        "uninitialized_local": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A local declared with no value and never assigned, so every read is nil. Default: warn."
+        },
+        "unknown_type": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "Comparing type(x) against a string that type() never returns. Default: warn."
+        },
+        "unreachable_code": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "Statements after a return, break or continue, which never run. Default: warn."
+        },
+        "unscoped_variables": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "An assignment with no local, which creates a global. Default: warn."
+        },
+        "unused_function": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A `local function` that nothing calls. The Luau compiler separates this from an unused variable and separates it by the declaring form, so `local f = function() end` is `unused_variable` and `local function f() end` is this. Both read [lint.options.unused_variable]. Default: warn."
+        },
+        "unused_variable": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A name declared and never read. Default: warn. Tunable under [lint.options.unused_variable]."
+        },
+        "zero_step_loop": {
+          "enum": [
+            "allow",
+            "info",
+            "warn",
+            "deny"
+          ],
+          "description": "A numeric for whose step is zero, so the counter never moves. Default: warn."
         }
       }
     },
@@ -1563,6 +1862,66 @@
         "type": "object"
       },
       "properties": {
+        "deprecated": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "additional": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Names the project has deprecated of its own, as old = \"what to use instead\"."
+            }
+          }
+        },
+        "high_cyclomatic_complexity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maximum_complexity": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 40,
+              "description": "Branches a function may have before it is reported. selene's default, kept so a project moving over gets the same answers."
+            }
+          }
+        },
+        "prefer_const": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mutated_tables_stay_local": {
+              "type": "boolean",
+              "enum": [
+                true,
+                false
+              ],
+              "default": false,
+              "description": "Keep `local` on a binding the file mutates through a field, such as `t.x = 1` or `table.insert(t, 1)`. Off by default, because `const` is correct there: Luau enforces it against reassignment of the name and says nothing about the value, so `const t = {}` then `t.x = 1` compiles. Turn it on where `local` is read as \"this one changes\"."
+            }
+          }
+        },
+        "restricted_globals": {
+          "type": "object",
+          "description": "Globals this project rules out, as `name = \"why\"`. The reason is the message a reader gets, so a bare list of names would report \"this is restricted\" and leave them guessing.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "restricted_module_paths": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "paths": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Require paths the project forbids, as path = \"why\"."
+            }
+          }
+        },
         "unused_variable": {
           "type": "object",
           "additionalProperties": false,
@@ -1591,44 +1950,6 @@
               "description": "Names exempted, as a regular expression."
             }
           }
-        },
-        "high_cyclomatic_complexity": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "maximum_complexity": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 40,
-              "description": "Branches a function may have before it is reported. selene's default, kept so a project moving over gets the same answers."
-            }
-          }
-        },
-        "deprecated": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "additional": {
-              "type": "object",
-              "additionalProperties": {
-                "type": "string"
-              },
-              "description": "Names the project has deprecated of its own, as old = \"what to use instead\"."
-            }
-          }
-        },
-        "restricted_module_paths": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "paths": {
-              "type": "object",
-              "additionalProperties": {
-                "type": "string"
-              },
-              "description": "Require paths the project forbids, as path = \"why\"."
-            }
-          }
         }
       }
     },
@@ -1640,120 +1961,112 @@
       "description": "Worms, extensions loaded from a GitHub release. A worm is Luau source or a wasm32 module in a zip carrying a worm.toml. The key names the worm and has to match `name` in its worm.toml, since it is also what namespaces the worm's rules and its settings. (M3)",
       "type": "object",
       "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Where the worm comes from, plus anything the project wants to say about it. Name repo and version, or path, never both.",
         "oneOf": [
           {
-            "type": "string",
-            "description": "owner/repo@version, ex: \"luau-xml/worm@0.1.0\". The short form, and what almost every worm uses."
+            "required": [
+              "repo",
+              "version"
+            ]
           },
           {
+            "required": [
+              "path"
+            ]
+          },
+          {
+            "required": [
+              "cargo"
+            ]
+          }
+        ],
+        "properties": {
+          "repo": {
+            "type": "string",
+            "description": "owner/repo on GitHub."
+          },
+          "version": {
+            "type": "string",
+            "description": "Which release to install. \"^\" takes the newest on every install, which is what `larvae worm add` writes. A number such as \"0.1.0\" holds that one release and never moves. A range such as \"^0.1.0\" follows the newest release semver calls compatible. A leading v is accepted and dropped."
+          },
+          "asset": {
+            "type": "string",
+            "description": "Release asset to fetch. Defaults to <key>-worm.zip, then worm.zip. Means nothing with path, which is not a release."
+          },
+          "path": {
+            "type": "string",
+            "description": "A directory on disk instead of a release. Not how a worm ships, but how its author runs it before publishing."
+          },
+          "run_order": {
+            "description": "Where this worm's rules sit relative to larvae's own. \"before\" means larvae's rules see this worm's output. An explicit slot number wins over both this and what the worm declared.",
+            "anyOf": [
+              {
+                "enum": [
+                  "before",
+                  "after"
+                ]
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "rules": {
+            "type": "object",
+            "description": "Which of this worm's rules are on, by name. They live under the worm rather than in [rules] so a worm declaring const_requires cannot shadow the builtin.",
+            "additionalProperties": {
+              "type": [
+                "boolean",
+                "object"
+              ]
+            }
+          },
+          "config": {
+            "$ref": "#/$defs/worm_config"
+          },
+          "inherit_lints": {
+            "type": "boolean",
+            "enum": [
+              true,
+              false
+            ],
+            "description": "Run the lints of larvae on the files this worm claims. It overrides what the worm declared in its worm.toml."
+          },
+          "inherit": {
             "type": "object",
             "additionalProperties": false,
-            "description": "Where the worm comes from, plus anything the project wants to say about it. Name repo and version, or path, never both.",
-            "oneOf": [
-              {
-                "required": [
-                  "repo",
-                  "version"
-                ]
-              },
-              {
-                "required": [
-                  "path"
-                ]
-              },
-              {
-                "required": [
-                  "cargo"
-                ]
-              }
-            ],
+            "description": "Which inherited lints and format options apply inside the files of this worm. Inheritance takes everything unless this table states less.",
             "properties": {
-              "repo": {
-                "type": "string",
-                "description": "owner/repo on GitHub."
+              "lints_only": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The only lints of larvae that run in the files of this worm."
               },
-              "version": {
-                "type": "string",
-                "description": "Release tag to pin, without a leading v."
+              "lints_except": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The lints of larvae that do not run in the files of this worm."
               },
-              "asset": {
-                "type": "string",
-                "description": "Release asset to fetch. Defaults to <key>-worm.zip, then worm.zip. Means nothing with path, which is not a release."
-              },
-              "path": {
-                "type": "string",
-                "description": "A directory on disk instead of a release. Not how a worm ships, but how its author runs it before publishing."
-              },
-              "run_order": {
-                "description": "Where this worm's rules sit relative to larvae's own. \"before\" means larvae's rules see this worm's output. An explicit slot number wins over both this and what the worm declared.",
-                "anyOf": [
-                  {
-                    "enum": [
-                      "before",
-                      "after"
-                    ]
-                  },
-                  {
-                    "type": "integer"
-                  }
-                ]
-              },
-              "rules": {
-                "type": "object",
-                "description": "Which of this worm's rules are on, by name. They live under the worm rather than in [rules] so a worm declaring const_requires cannot shadow the builtin.",
-                "additionalProperties": {
-                  "type": [
-                    "boolean",
-                    "object"
-                  ]
-                }
-              },
-              "config": {
-                "$ref": "#/$defs/worm_config"
-              },
-              "inherit_lints": {
-                "type": "boolean",
-                "enum": [
-                  true,
-                  false
-                ],
-                "description": "Run the lints of larvae on the files this worm claims. It overrides what the worm declared in its worm.toml."
-              },
-              "inherit": {
-                "type": "object",
-                "additionalProperties": false,
-                "description": "Which inherited lints and format options apply inside the files of this worm. Inheritance takes everything unless this table states less.",
-                "properties": {
-                  "lints_only": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    },
-                    "description": "The only lints of larvae that run in the files of this worm."
-                  },
-                  "lints_except": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    },
-                    "description": "The lints of larvae that do not run in the files of this worm."
-                  },
-                  "fmt_except": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    },
-                    "description": "The format options that do not apply in the files of this worm. An option named here keeps its own default there."
-                  }
-                }
-              },
-              "cargo": {
-                "type": "string",
-                "description": "A crate on crates.io that ships the worm as its binary, ex: \"luaux-worm@0.1.0\". cargo install builds it from source on this machine, so one crate serves every platform. Excludes repo, path, and asset; the version can sit here after @ or in the version key."
+              "fmt_except": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The format options that do not apply in the files of this worm. An option named here keeps its own default there."
               }
             }
+          },
+          "cargo": {
+            "type": "string",
+            "description": "A crate on crates.io that ships the worm as its binary, ex: \"luaux-worm@0.1.0\". cargo install builds it from source on this machine, so one crate serves every platform. Excludes repo, path, and asset; the version can sit here after @ or in the version key."
           }
-        ]
+        }
       }
     },
     "bundle": {
@@ -1866,6 +2179,37 @@
           ],
           "default": false,
           "description": "On serves only the files that a worm claims, so stock luau-lsp can own the plain Luau. Off serves every Luau file, which is what larvae always did."
+        }
+      }
+    },
+    "lint_groups": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A level for a whole kind of lint. It sits between `recommended` and [lint.rules]: a name in [lint.rules] always wins, and a group covers every lint the project did not name. Groups live here and not inside [lint.rules], because a table there already means the lints of a worm of that name.",
+      "properties": {
+        "correctness": {
+          "$ref": "#/$defs/lint_level",
+          "description": "The code cannot do what it says: it throws, it hangs, or a line of it is dead. Every lint of this kind that [lint.rules] does not name takes this level."
+        },
+        "suspicious": {
+          "$ref": "#/$defs/lint_level",
+          "description": "Probably wrong, and a human decides. Every lint of this kind that [lint.rules] does not name takes this level."
+        },
+        "style": {
+          "$ref": "#/$defs/lint_level",
+          "description": "A matter of how the code reads. Every lint of this kind that [lint.rules] does not name takes this level."
+        },
+        "complexity": {
+          "$ref": "#/$defs/lint_level",
+          "description": "More shape than the job needs. Every lint of this kind that [lint.rules] does not name takes this level."
+        },
+        "performance": {
+          "$ref": "#/$defs/lint_level",
+          "description": "Correct, and it costs more than it has to. Every lint of this kind that [lint.rules] does not name takes this level."
+        },
+        "roblox": {
+          "$ref": "#/$defs/lint_level",
+          "description": "A Roblox data type used in a way that does not hold. Every lint of this kind that [lint.rules] does not name takes this level."
         }
       }
     }

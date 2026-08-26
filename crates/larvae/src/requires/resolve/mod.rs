@@ -39,14 +39,15 @@ pub struct Resolver<'a> {
     pub quote: char,
     pub strict: bool,
     /*
-    The file extensions that front-end worms claim, dots included.
+    The extensions a worm front-end claims, without the dot.
 
-    A require may name a claimed file outright, `require("./config.json")`,
-    because a data file has no extensionless spelling. The worm lowers the
-    file to Luau in the output tree, so the emitted require drops the
-    extension and lands on the lowered module.
+    A claimed file is a module. `require("@app/widget")` where the project
+    holds `widget.luaux` has to find it, because the pipeline turns that file
+    into `widget.luau` in the output and the require then resolves at runtime.
+    Without these the resolver sees no module and warns about a require that
+    is correct.
     */
-    pub claimed: Vec<String>,
+    pub claimed: &'a [String],
 }
 
 /// The context for one file, computed once
@@ -74,7 +75,7 @@ pub struct FileCtx<'a> {
 impl<'a> FileCtx<'a> {
     pub fn new(path: &'a Path, mounts: &MountTable, target: Target, style: IndexingStyle) -> Self {
         let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-        let is_init = script_instance_name(file_name).is_none();
+        let is_init = script_instance_name(file_name, mounts.claimed()).is_none();
         let dir = path.parent().unwrap_or(Path::new("")).to_owned();
 
         Self {
@@ -82,7 +83,7 @@ impl<'a> FileCtx<'a> {
             required: std::cell::RefCell::default(),
             dm: mounts.dm_of(path),
             is_init,
-            kind: script_kind(file_name),
+            kind: script_kind(file_name, mounts.claimed()),
             dir,
             target,
             style,
