@@ -1431,6 +1431,7 @@ fn every_advertised_provider_answers() {
         "documentSymbolProvider" => Some("textDocument/documentSymbol"),
         "codeActionProvider" => Some("textDocument/codeAction"),
         "definitionProvider" => Some("textDocument/definition"),
+        "workspaceSymbolProvider" => Some("workspace/symbol"),
         "referencesProvider" => Some("textDocument/references"),
         "documentHighlightProvider" => Some("textDocument/documentHighlight"),
         "renameProvider" => Some("textDocument/rename"),
@@ -1837,4 +1838,60 @@ fn signature_help_and_hover_are_on_by_default() {
 
     assert!(server.lsp.signature_help.enabled);
     assert!(server.lsp.hover.enabled);
+}
+
+// --- workspace/symbol ------------------------------------------------------
+
+/// The picker opens with an empty query, and a project dump is not an answer.
+#[test]
+fn an_empty_workspace_query_answers_with_nothing() {
+    let server = Server::default();
+    let result = server.workspace_symbols(&json!({ "query": "" }));
+
+    assert_eq!(result, json!([]));
+}
+
+/// A search finds a symbol in a file the editor never opened.
+#[test]
+fn a_workspace_search_reaches_the_whole_project() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+
+    std::fs::write(
+        dir.path().join("thing.luau"),
+        "local function getPlayerName()\n\treturn \"a\"\nend\n\nreturn getPlayerName\n",
+    )
+    .expect("writes");
+
+    let mut server = Server {
+        root: Some(dir.path().to_path_buf()),
+        ..Default::default()
+    };
+
+    server.reindex();
+
+    let result = server.workspace_symbols(&json!({ "query": "getPlayer" }));
+    let list = result.as_array().expect("a list");
+
+    assert_eq!(list.len(), 1, "{result}");
+    assert_eq!(list[0]["name"], "getPlayerName");
+    assert!(
+        list[0]["location"]["uri"]
+            .as_str()
+            .expect("a uri")
+            .ends_with("thing.luau"),
+        "{result}"
+    );
+}
+
+/// A server with no root indexes nothing rather than walking the cwd.
+#[test]
+fn no_root_indexes_nothing() {
+    let mut server = Server::default();
+
+    server.reindex();
+
+    assert_eq!(
+        server.workspace_symbols(&json!({ "query": "anything" })),
+        json!([])
+    );
 }

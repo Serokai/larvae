@@ -342,6 +342,61 @@ impl Server {
 }
 
 impl Server {
+    /*
+    Build the project symbol index.
+
+    A build with no root is an empty index rather than a walk of whatever
+    directory the server happens to sit in.
+    */
+    pub(super) fn reindex(&mut self) {
+        self.symbols = match self.root.as_deref() {
+            Some(root) => super::workspace::Index::build(root, &self.excluded),
+
+            None => super::workspace::Index::default(),
+        };
+    }
+
+    /*
+    Search the project for a symbol by name.
+
+    The index reads the tree as it was last saved, so an unsaved rename
+    answers with the old name until the file is written. That is the same
+    bargain every editor makes with a project wide search, and the
+    alternative is a re-parse of every open buffer on each keystroke.
+    */
+    pub(super) fn workspace_symbols(&self, params: &Value) -> Value {
+        let query = params["query"].as_str().unwrap_or_default();
+
+        // The picker opens with an empty query, and a project dump is not an answer.
+        if query.is_empty() {
+            return json!([]);
+        }
+
+        let out: Vec<Value> = self
+            .symbols
+            .search(query, 256)
+            .into_iter()
+            .filter_map(|found| {
+                let uri = super::uri::uri_of_path(&found.path)?;
+
+                Some(json!({
+                    "name": found.name,
+                    "kind": found.kind,
+                    "containerName": found.container,
+                    "location": {
+                        "uri": uri,
+                        "range": {
+                            "start": { "line": found.range.0, "character": 0 },
+                            "end": { "line": found.range.1, "character": 0 },
+                        },
+                    },
+                }))
+            })
+            .collect();
+
+        json!(out)
+    }
+
     /// The signature of the call the caret sits in; the analyzer alone knows it
     pub(super) fn signature_help(&self, params: &Value) -> Value {
         if !self.lsp.signature_help.enabled {
