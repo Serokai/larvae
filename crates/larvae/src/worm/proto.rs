@@ -1405,3 +1405,69 @@ mod flags_in_a_claimed_file {
         assert!(render(src, vec![(start, end)], Vec::new()).contains("local m = { 1, 0 }"));
     }
 }
+
+/*
+The span map a worm returns with lowered source.
+
+Each pair maps a byte range of the generated text onto the byte range of
+the original that produced it. The host applies the map to every outgoing
+position, diagnostics and hover ranges alike, so the user sees their own
+file and never the lowering. One format, applied in one place.
+*/
+#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
+pub struct SpanMap(pub Vec<(u32, u32, u32, u32)>);
+
+impl SpanMap {
+    /*
+    A generated span, mapped back onto the original.
+
+    The narrowest generated range that contains the span answers. A span
+    outside every pair maps to nothing, and the caller drops the position
+    rather than point at the wrong text.
+    */
+    pub fn to_original(&self, span: (u32, u32)) -> Option<(u32, u32)> {
+        self.0
+            .iter()
+            .filter(|(gs, ge, _, _)| *gs <= span.0 && span.1 <= *ge)
+            .min_by_key(|(gs, ge, _, _)| ge - gs)
+            .map(|(_, _, os, oe)| (*os, *oe))
+    }
+}
+
+/// The reply to `lsp_load`: lowered source with its maps
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct LspLoadReply {
+    pub source: String,
+    #[serde(default)]
+    pub span_map: SpanMap,
+    /*
+    The byte ranges of the original that this worm owns.
+
+    A mixed file is plain Luau outside these spans. The host routes a
+    request inside a claimed span through the worm's response hooks, and
+    a request outside them takes the default path.
+    */
+    #[serde(default)]
+    pub claims: Vec<(u32, u32)>,
+}
+
+/// One declaration a worm injects, `.d.luau` text under a name
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct LspDeclaration {
+    pub name: String,
+    pub source: String,
+}
+
+#[cfg(test)]
+mod span_map_tests {
+    use super::SpanMap;
+
+    #[test]
+    fn the_narrowest_containing_pair_answers() {
+        let map = SpanMap(vec![(0, 100, 0, 50), (10, 20, 5, 9)]);
+
+        assert_eq!(map.to_original((12, 15)), Some((5, 9)));
+        assert_eq!(map.to_original((0, 90)), Some((0, 50)));
+        assert_eq!(map.to_original((150, 160)), None);
+    }
+}

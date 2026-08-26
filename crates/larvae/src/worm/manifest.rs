@@ -123,6 +123,32 @@ pub struct Frontend {
     pub inherit_lints: bool,
 }
 
+/*
+What a worm does for the language server, declared so gating never runs
+worm code. A worm that resolves answers tier 1: the requires it claims,
+lowered source with a span map. Declarations are tier 2: .d.luau text the
+analyzer loads. Respond lists the tier 3 transforms, by request kind.
+*/
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LspDecl {
+    /// This worm answers lsp_resolve and lsp_load for the specs it claims
+    #[serde(default)]
+    pub resolve: bool,
+    /// This worm answers lsp_declarations with .d.luau text at load
+    #[serde(default)]
+    pub declarations: bool,
+    /// The request kinds this worm transforms: hover, completions, diagnostics
+    #[serde(default)]
+    pub respond: Vec<String>,
+}
+
+impl LspDecl {
+    pub fn is_empty(&self) -> bool {
+        !self.resolve && !self.declarations && self.respond.is_empty()
+    }
+}
+
 /// One lint that a worm declares, so `[lint.rules]` can set its level by name
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -250,6 +276,9 @@ pub struct Manifest {
     /// The settings this worm takes in `[worms.<name>.config]`
     #[serde(default)]
     pub options: BTreeMap<String, OptionDecl>,
+    /// What this worm does for the language server, see [`LspDecl`]
+    #[serde(default)]
+    pub lsp: LspDecl,
     /*
     The format options this worm adds to the `[fmt]` table of larvae.
 
@@ -277,6 +306,20 @@ impl Manifest {
     }
 
     fn validate(&self) -> Result<()> {
+        /*
+        The LSP hooks run on the analyzer's hot path, resident and
+        synchronous. The luau and wasm forms spin an interpreter per call,
+        which that path cannot afford, so a manifest that declares [lsp]
+        on those forms is refused at load and not at the first request.
+        */
+        if !self.lsp.is_empty() && self.form != Form::Native {
+            bail!(
+                "worm `{}`: [lsp] hooks need the native form; the {:?} form cannot answer them",
+                self.name,
+                self.form
+            );
+        }
+
         if self.name.is_empty() {
             bail!("worm.toml: name is empty");
         }
@@ -310,9 +353,9 @@ impl Manifest {
             );
         }
 
-        if self.frontend.is_none() && !self.has_rules() {
+        if self.frontend.is_none() && !self.has_rules() && self.lsp.is_empty() {
             bail!(
-                "worm `{}` declares neither a frontend nor any rules, so it would never run",
+                "worm `{}` declares no frontend, no rules, and no [lsp] hooks, so it would never run",
                 self.name
             );
         }

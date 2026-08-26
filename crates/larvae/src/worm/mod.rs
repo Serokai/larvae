@@ -293,6 +293,52 @@ impl Worm {
         }
         .with_context(|| format!("worm `{}`", self.manifest.name))
     }
+
+    /*
+    The LSP hooks run on the analyzer's hot path, so only the resident
+    native form answers them. A luau or wasm worm that declares [lsp] in
+    its manifest is refused at load, not here, so this arm is for the
+    manifest that lied.
+    */
+    pub fn lsp_resolve(&mut self, from: &str, spec: &str) -> Result<Option<String>> {
+        match &mut self.backend {
+            Backend::Native(worm) => worm.lsp_resolve(from, spec),
+
+            _ => anyhow::bail!("only a native worm answers the lsp hooks"),
+        }
+        .with_context(|| format!("worm `{}`", self.manifest.name))
+    }
+
+    pub fn lsp_load(&mut self, path: &str) -> Result<proto::LspLoadReply> {
+        match &mut self.backend {
+            Backend::Native(worm) => worm.lsp_load(path),
+
+            _ => anyhow::bail!("only a native worm answers the lsp hooks"),
+        }
+        .with_context(|| format!("worm `{}`", self.manifest.name))
+    }
+
+    pub fn lsp_declarations(&mut self) -> Result<Vec<proto::LspDeclaration>> {
+        match &mut self.backend {
+            Backend::Native(worm) => worm.lsp_declarations(),
+
+            _ => anyhow::bail!("only a native worm answers the lsp hooks"),
+        }
+        .with_context(|| format!("worm `{}`", self.manifest.name))
+    }
+
+    pub fn lsp_respond(
+        &mut self,
+        kind: &str,
+        response_json: &str,
+    ) -> Result<Option<serde_json::Value>> {
+        match &mut self.backend {
+            Backend::Native(worm) => worm.lsp_respond(kind, response_json),
+
+            _ => anyhow::bail!("only a native worm answers the lsp hooks"),
+        }
+        .with_context(|| format!("worm `{}`", self.manifest.name))
+    }
 }
 
 /*

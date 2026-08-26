@@ -117,6 +117,7 @@ impl Spec {
 }
 
 /// The worms this build runs, shared across every worker
+#[derive(Clone)]
 pub struct Pool {
     build: u64,
     specs: Vec<Arc<Spec>>,
@@ -287,6 +288,93 @@ impl Pool {
     }
 
     /// Ask a worm for the findings of one file, on the instance of this thread
+    /*
+    The first claiming worm that resolves the spec answers; the rest pass.
+
+    The order is the order of the pool, which is the order of the config,
+    so a project that installs two resolving worms decides precedence by
+    writing them in order.
+    */
+    pub fn lsp_resolve(&self, from: &str, spec: &str) -> Option<String> {
+        for index in self.lsp_resolvers() {
+            if let Ok(Some(path)) = self.with_worm(index, |worm, _| worm.lsp_resolve(from, spec)) {
+                return Some(path);
+            }
+        }
+
+        None
+    }
+
+    /// The lowered module from the worm that owns the path
+    pub fn lsp_load(&self, index: usize, path: &str) -> Result<super::proto::LspLoadReply> {
+        self.with_worm(index, |worm, _| worm.lsp_load(path))
+    }
+
+    /// Every declaration of every declaring worm, in pool order
+    pub fn lsp_declarations(&self) -> Vec<super::proto::LspDeclaration> {
+        let mut out = Vec::new();
+
+        for index in 0..self.specs().len() {
+            if !self.specs()[index].manifest.lsp.declarations {
+                continue;
+            }
+
+            if let Ok(mut decls) = self.with_worm(index, |worm, _| worm.lsp_declarations()) {
+                out.append(&mut decls);
+            }
+        }
+
+        out
+    }
+
+    /// One response through every worm that transforms this kind, in order
+    pub fn lsp_respond(&self, kind: &str, response: serde_json::Value) -> serde_json::Value {
+        let mut current = response;
+
+        for index in 0..self.specs().len() {
+            if !self.specs()[index]
+                .manifest
+                .lsp
+                .respond
+                .iter()
+                .any(|k| k == kind)
+            {
+                continue;
+            }
+
+            let json = current.to_string();
+
+            if let Ok(Some(next)) = self.with_worm(index, |worm, _| worm.lsp_respond(kind, &json)) {
+                current = next;
+            }
+        }
+
+        current
+    }
+
+    /// The lowered source from the first resolver worm that loads the path
+    pub fn lsp_load_any(&self, path: &str) -> Option<super::proto::LspLoadReply> {
+        for index in self.lsp_resolvers() {
+            if let Ok(reply) = self.lsp_load(index, path) {
+                return Some(reply);
+            }
+        }
+
+        None
+    }
+
+    /// The indexes of the worms that answer tier-1 resolution
+    fn lsp_resolvers(&self) -> Vec<usize> {
+        (0..self.specs().len())
+            .filter(|i| self.specs()[*i].manifest.lsp.resolve)
+            .collect()
+    }
+
+    /// True when any worm declares any LSP hook
+    pub fn has_lsp_hooks(&self) -> bool {
+        self.specs().iter().any(|s| !s.manifest.lsp.is_empty())
+    }
+
     pub fn lint(&self, index: usize, source: &str) -> Result<super::proto::LintReply> {
         self.with_worm(index, |worm, _spec| worm.lint(source))
     }
