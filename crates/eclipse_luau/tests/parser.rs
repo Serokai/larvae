@@ -430,7 +430,10 @@ fn declarations_parse_in_definitions_mode() {
                \t[string]: any\n\
                end\n";
     let lexed = eclipse_luau::lexer::lex(src).unwrap();
-    let opts = eclipse_luau::parser::ParseOptions { definitions: true };
+    let opts = eclipse_luau::parser::ParseOptions {
+        definitions: true,
+        ..Default::default()
+    };
 
     let chunk = eclipse_luau::parser::parse_with(src, &lexed.toks, opts).expect("parses");
 
@@ -482,7 +485,10 @@ fn the_vendored_global_types_parse_and_round_trip() {
 
     let src = std::fs::read_to_string(path).expect("the vendored types exist");
     let lexed = eclipse_luau::lexer::lex(&src).expect("lexes");
-    let opts = eclipse_luau::parser::ParseOptions { definitions: true };
+    let opts = eclipse_luau::parser::ParseOptions {
+        definitions: true,
+        ..Default::default()
+    };
     let chunk = match eclipse_luau::parser::parse_with(&src, &lexed.toks, opts) {
         Ok(chunk) => chunk,
 
@@ -502,4 +508,47 @@ fn the_vendored_global_types_parse_and_round_trip() {
         eclipse_luau::printer::print_chunk(&src, &lexed.toks, &chunk),
         src
     );
+}
+
+/*
+The depth guard follows the option, so a consumer with deeper generated
+code raises the limit and the same source parses. The deep parse runs on
+a thread with a stack to match, which is the usage the option documents:
+past the default, the stack budget belongs to the caller. Zero refuses
+the first statement, which pins that there is no unlimited setting.
+*/
+#[test]
+fn max_depth_follows_the_option() {
+    let src = format!("return {}1{}\n", "(".repeat(400), ")".repeat(400));
+    let toks = eclipse_luau::lexer::lex(&src).unwrap().toks;
+
+    let default = eclipse_luau::parser::parse(&src, &toks);
+    assert!(default.is_err(), "400 levels beat the default guard");
+    assert!(
+        default.unwrap_err().message.contains("nests too deeply"),
+        "the refusal names the reason"
+    );
+
+    let deep = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || {
+            let toks = eclipse_luau::lexer::lex(&src).unwrap().toks;
+            let opts = eclipse_luau::parser::ParseOptions {
+                max_depth: 2_000,
+                ..Default::default()
+            };
+
+            eclipse_luau::parser::parse_with(&src, &toks, opts).is_ok()
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+    assert!(deep, "the raised limit parses the same source");
+
+    let zero = eclipse_luau::parser::ParseOptions {
+        max_depth: 0,
+        ..Default::default()
+    };
+    let toks = eclipse_luau::lexer::lex("return 1\n").unwrap().toks;
+    assert!(eclipse_luau::parser::parse_with("return 1\n", &toks, zero).is_err());
 }

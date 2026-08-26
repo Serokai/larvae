@@ -15,15 +15,16 @@ use crate::lexer::{Tok, TokKind};
 mod expr;
 mod stmt;
 mod types;
+
 #[derive(Debug)]
 pub struct ParseError {
     pub offset: usize,
     pub message: String,
 }
 
-/// The nesting limit. It is deep enough for real code, and shallow enough to
-/// protect the stack. The crash class of darklua does not exist here.
-const MAX_DEPTH: u32 = 180;
+/// The default nesting limit. It is deep enough for real code, and shallow
+/// enough to protect the stack on any thread that parses.
+pub const DEFAULT_MAX_DEPTH: u32 = 180;
 const UNARY_PRIORITY: u8 = 12;
 
 /*
@@ -33,10 +34,30 @@ How a parse reads the source.
 off for ordinary source, because Luau itself accepts a declaration only
 in a definitions file, and a parser that quietly accepted one in a
 normal module would bless code the compiler refuses.
+
+`max_depth` bounds the nesting of the recursive descent. Pathological
+nesting is then a clean error and never a crash, which is the guarantee
+this crate makes. The default holds that guarantee on every thread. A
+consumer with deeper generated code can raise the limit, and the stack
+budget then becomes that consumer's: a debug build spends several
+kilobytes of stack per level, so a raised limit belongs on a thread
+built with a stack to match, ex: `std::thread::Builder::stack_size`.
+A limit of zero refuses everything; there is no "unlimited", because an
+unbounded recursion is the crash this field exists to prevent.
 */
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct ParseOptions {
     pub definitions: bool,
+    pub max_depth: u32,
+}
+
+impl Default for ParseOptions {
+    fn default() -> Self {
+        Self {
+            definitions: false,
+            max_depth: DEFAULT_MAX_DEPTH,
+        }
+    }
 }
 
 impl ParseOptions {
@@ -49,6 +70,7 @@ impl ParseOptions {
 
         Self {
             definitions: name.ends_with(".d.luau") || name.ends_with(".d.lua"),
+            ..Self::default()
         }
     }
 }
@@ -211,7 +233,7 @@ impl<'a> Parser<'a> {
     fn enter(&mut self) -> Result<(), ParseError> {
         self.depth += 1;
 
-        if self.depth > MAX_DEPTH {
+        if self.depth > self.options.max_depth {
             return Err(self.err("expression or statement nests too deeply"));
         }
 
