@@ -72,9 +72,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
-        with:
           ref: ${{ needs.verify.outputs.tag }}
+          submodules: true
       - uses: dtolnay/rust-toolchain@stable
         if: ${{ !contains(matrix.target, 'musl') }}
         with:
@@ -151,9 +150,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
-        with:
           ref: ${{ needs.verify.outputs.tag }}
+          submodules: true
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # The verify job already proved the tag equals the Cargo.toml version,
