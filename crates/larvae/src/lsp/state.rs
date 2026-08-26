@@ -67,6 +67,10 @@ impl Server {
             false => None,
         };
 
+        if let Some(project) = &project {
+            self.lsp = project.lsp.clone();
+        }
+
         match FmtConfig::discover(&root, project.as_ref().and_then(|c| c.fmt.as_ref())) {
             Ok(cfg) => self.fmt = cfg,
 

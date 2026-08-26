@@ -666,3 +666,55 @@ fn a_config_change_reports_the_break_again() {
         "the reload reports the break"
     );
 }
+
+// --- the [lsp] table ------------------------------------------------------
+
+#[test]
+fn claim_only_publishes_empty_for_a_plain_luau_file() {
+    let mut server = server_with("local unused = 1\nreturn 1\n");
+    server.lsp = crate::config::lsp::LspConfig {
+        enabled: true,
+        claim_only: true,
+    };
+
+    let diags = published(&server, "file:///t.luau");
+
+    assert_eq!(diags.as_array().map(Vec::len), Some(0), "{diags}");
+}
+
+#[test]
+fn claim_only_declines_formatting_and_symbols_for_a_plain_luau_file() {
+    let mut server = server_with("local x={a=1}\nreturn x\n");
+    server.lsp = crate::config::lsp::LspConfig {
+        enabled: true,
+        claim_only: true,
+    };
+
+    assert_eq!(server.format("file:///t.luau").unwrap(), Value::Null);
+    assert_eq!(server.symbols("file:///t.luau"), serde_json::json!([]));
+}
+
+#[test]
+fn a_disabled_server_advertises_no_capabilities() {
+    let mut server = server_with("return 1\n");
+    server.lsp = crate::config::lsp::LspConfig {
+        enabled: false,
+        claim_only: false,
+    };
+
+    let mut out = Vec::new();
+    server
+        .handle(
+            &message("initialize", Some(1), serde_json::json!({})),
+            &mut out,
+        )
+        .unwrap();
+
+    let text = String::from_utf8_lossy(&out);
+
+    assert!(
+        text.contains("\"capabilities\":{}"),
+        "empty capabilities: {text}"
+    );
+    assert!(!text.contains("documentFormattingProvider"), "{text}");
+}

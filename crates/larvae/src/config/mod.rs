@@ -10,6 +10,7 @@ use serde::Deserialize;
 pub mod bundle;
 pub mod check;
 mod excludes;
+pub mod lsp;
 pub mod minify;
 mod overrides;
 mod process;
@@ -98,6 +99,10 @@ pub struct Config {
     /// Tuning for `generator = "dense"`, see [`minify`]
     #[serde(default)]
     pub minify: minify::MinifyConfig,
+
+    /// The editor server, see [`lsp`]
+    #[serde(default)]
+    pub lsp: lsp::LspConfig,
 
     // Parsed so the error can name the new location and not say "unknown key".
     #[serde(default)]

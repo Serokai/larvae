@@ -12,8 +12,25 @@ use super::uri::path_of_uri;
 use super::{Server, rpc};
 
 impl Server {
+    /// Reports if the `[lsp]` mode leaves this file to another server
+    fn declines(&self, uri: &str) -> bool {
+        if !self.lsp.enabled {
+            return true;
+        }
+
+        if !self.lsp.claim_only {
+            return false;
+        }
+
+        !path_of_uri(uri).is_some_and(|p| self.worms.frontend_for(&p).is_some())
+    }
+
     /// One edit that replaces the whole document; a formatter produces this
     pub(super) fn format(&self, uri: &str) -> Result<Value> {
+        if self.declines(uri) {
+            return Ok(Value::Null);
+        }
+
         let Some(src) = self.documents.get(uri) else {
             return Ok(Value::Null);
         };
@@ -71,6 +88,10 @@ impl Server {
     module.
     */
     pub(super) fn symbols(&self, uri: &str) -> Value {
+        if self.declines(uri) {
+            return json!([]);
+        }
+
         let Some(src) = self.documents.get(uri) else {
             return json!([]);
         };

@@ -80,6 +80,9 @@
     "minify": {
       "$ref": "#/$defs/minify"
     },
+    "lsp": {
+      "$ref": "#/$defs/lsp"
+    },
     "check": {
       "$ref": "#/$defs/check"
     },
@@ -1838,6 +1841,31 @@
           },
           "description": "Extra entry points, as paths relative to the project root. A module in this list is never reported as unused.",
           "default": []
+        }
+      }
+    },
+    "lsp": {
+      "description": "How `larvae lsp`, the editor server, behaves.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "enum": [
+            true,
+            false
+          ],
+          "default": true,
+          "description": "Off answers every request with nothing, so another server owns the files."
+        },
+        "claim_only": {
+          "type": "boolean",
+          "enum": [
+            true,
+            false
+          ],
+          "default": false,
+          "description": "On serves only the files that a worm claims, so stock luau-lsp can own the plain Luau. Off serves every Luau file, which is what larvae always did."
         }
       }
     }

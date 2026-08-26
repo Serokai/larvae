@@ -348,3 +348,30 @@ fn every_boolean_states_its_two_values() {
         "these boolean entries need \"enum\": [true, false]: {bare:#?}"
     );
 }
+
+/// The same guarantee for [lsp]: the schema and the config cannot drift.
+#[test]
+fn lsp_keys_match_the_config() {
+    let schema = schema();
+    let documented = keys(&schema["$defs"]["lsp"]["properties"]);
+
+    let real: BTreeSet<String> = toml::Value::try_from(larvae::config::lsp::LspConfig::default())
+        .expect("the config serializes")
+        .as_table()
+        .expect("a table")
+        .keys()
+        .cloned()
+        .collect();
+
+    assert_eq!(
+        documented.difference(&real).collect::<Vec<_>>(),
+        Vec::<&String>::new(),
+        "the schema offers [lsp] keys that do not exist"
+    );
+
+    assert_eq!(
+        real.difference(&documented).collect::<Vec<_>>(),
+        Vec::<&String>::new(),
+        "the config has [lsp] keys the schema does not offer"
+    );
+}

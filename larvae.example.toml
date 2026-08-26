@@ -296,6 +296,15 @@ column_span = 120                        # break the line near this column, so l
 rename_variables = false                 # short local names while minifying; same rule as [rules] rename_variables
 
 
+# --- lsp ---------------------------------------------------------------------
+# The editor server. Claim-only mode serves the files of worms and stays
+# quiet on plain Luau, so stock luau-lsp can own those documents.
+
+[lsp]
+enabled = true
+claim_only = false
+
+
 # --- profiles ----------------------------------------------------------------
 # The same keys the root has, merged over it when --profile <name> is passed.
 # Tables merge per key, arrays and scalars are replaced whole.

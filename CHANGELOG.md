@@ -4,6 +4,26 @@ Notable changes land here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow
 [semver](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- `[lsp]`, the table for the editor server. `enabled = false` answers every
+  request with nothing, so another server owns the files. `claim_only =
+  true` serves only the files that worms claim, empty diagnostics and
+  declined requests for the rest, so stock luau-lsp can own the plain Luau
+  of a project while larvae serves the claimed files beside it
+
+### Changed
+
+- The syntax layer lives in its own crate, `eclipse_luau`: the lexer, the
+  parser, the AST, the require scanner, the lossless printer, and the dense
+  re-emitter, with byte ranges as the identity of every node and the
+  round-trip guarantee as a fuzz target. larvae re-exports it as
+  `larvae::syntax`, so nothing changes for larvae itself; any other tool
+  can now parse Luau with the same parser. Criterion benches ship with the
+  crate, a full_moon comparison behind a feature
+
 ## 0.4.0 - 2026-08-18
 
 ### Fixed

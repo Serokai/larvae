@@ -76,6 +76,8 @@ struct Server {
     worm_stamp: Vec<(std::path::PathBuf, Option<std::time::SystemTime>, u64)>,
     /// `shutdown` sets this, so a later `exit` is clean and not abrupt
     shutting_down: bool,
+    /// The `[lsp]` table of the project; the default serves every Luau file
+    lsp: crate::config::lsp::LspConfig,
 }
 
 impl Default for Server {
@@ -89,6 +91,7 @@ impl Default for Server {
             worms: no_worms(),
             worm_stamp: Vec::new(),
             shutting_down: false,
+            lsp: Default::default(),
         }
     }
 }
@@ -100,7 +103,19 @@ impl Server {
             "initialize" => {
                 self.initialize(&message.params, out)?;
 
-                self.reply(message, out, capabilities())?;
+                /*
+                `[lsp] enabled = false` answers with no capabilities, so the
+                editor sends nothing further and another server owns the
+                files. The reply still comes, because a silent server looks
+                crashed and the editor restarts it.
+                */
+                let caps = match self.lsp.enabled {
+                    true => capabilities(),
+
+                    false => serde_json::json!({ "capabilities": {} }),
+                };
+
+                self.reply(message, out, caps)?;
             }
 
             "shutdown" => {

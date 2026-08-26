@@ -43,6 +43,20 @@ impl Server {
             .as_deref()
             .and_then(|p| self.worms.frontend_for(p).map(|index| (p, index)));
 
+        /*
+        Claim-only mode serves the files of worms and stays quiet on the
+        rest, so stock luau-lsp can own the plain Luau of the project. The
+        publish is empty and not skipped, for the same reason as an
+        excluded file: a skip keeps old squiggles on screen.
+        */
+        if (!self.lsp.enabled || self.lsp.claim_only) && claimed.is_none() {
+            return rpc::notify(
+                out,
+                "textDocument/publishDiagnostics",
+                json!({ "uri": uri, "diagnostics": [] }),
+            );
+        }
+
         let diagnostics = match claimed {
             Some((path, index)) => self.claimed_diagnostics(path, index, src, &lines),
 
