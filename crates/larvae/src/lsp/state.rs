@@ -69,6 +69,7 @@ impl Server {
 
         if let Some(project) = &project {
             self.lsp = project.lsp.clone();
+            self.aliases = project.alias_map();
         }
 
         /*

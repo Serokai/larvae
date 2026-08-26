@@ -338,6 +338,14 @@ fn closing_a_document_drops_it_and_clears_its_diagnostics() {
     );
 }
 
+/*
+A method larvae does not answer gets an error, not silence.
+
+`signatureHelp` is the example because larvae does not advertise it and does
+not answer it. It was `rename` until rename shipped, which is the shape of
+this test working: a method named here has to be one the server truly lacks,
+so the case has to move as the server grows.
+*/
 #[test]
 fn an_unsupported_request_is_answered_with_an_error() {
     let mut server = Server::default();
@@ -345,12 +353,23 @@ fn an_unsupported_request_is_answered_with_an_error() {
 
     server
         .handle(
-            &message("textDocument/rename", Some(9), json!({})),
+            &message("textDocument/signatureHelp", Some(9), json!({})),
             &mut out,
         )
         .unwrap();
 
     assert!(String::from_utf8(out).unwrap().contains("is not supported"));
+}
+
+/// The method above must stay one the server does not advertise.
+#[test]
+fn the_unsupported_example_is_really_unsupported() {
+    let caps = capabilities(true);
+
+    assert!(
+        caps["capabilities"]["signatureHelpProvider"].is_null(),
+        "signatureHelp is advertised now, so the test above needs a new example"
+    );
 }
 
 /// A reply to a notification is a protocol error
@@ -1345,5 +1364,302 @@ fn a_local_preamble_still_ends_where_the_import_goes() {
     assert_eq!(
         import["additionalTextEdits"][0]["range"]["start"]["line"], 2,
         "the import must land after the preamble, not inside the guard"
+    );
+}
+
+// --- the parity requests, through the router -------------------------------
+
+/// Drive one request through the dispatch and give back the parsed reply.
+fn ask(server: &mut Server, method: &str, params: Value) -> Value {
+    let mut out = Vec::new();
+
+    server
+        .handle(&message(method, Some(77), params), &mut out)
+        .expect("the dispatch answers");
+
+    let text = String::from_utf8(out).expect("utf8");
+    let body = text
+        .split("\r\n\r\n")
+        .nth(1)
+        .unwrap_or_else(|| panic!("no body in {text}"));
+
+    let reply: Value = serde_json::from_str(body).expect("json");
+
+    assert!(
+        reply.get("error").is_none(),
+        "an editor must not see a failure from {method}: {reply}"
+    );
+
+    reply["result"].clone()
+}
+
+fn at(line: u32, character: u32) -> Value {
+    json!({
+        "textDocument": { "uri": "file:///t.luau" },
+        "position": { "line": line, "character": character },
+    })
+}
+
+/*
+Every advertised capability has a dispatch arm behind it.
+
+A capability the server claims and does not answer is worse than one it
+never claimed: the editor asks on every keystroke and logs a failure each
+time. This walks the advertised list rather than naming each one, so a
+capability added without a handler fails here.
+*/
+#[test]
+fn every_advertised_provider_answers() {
+    let caps = capabilities(false);
+    let caps = caps["capabilities"].as_object().expect("a table");
+
+    let method_of = |provider: &str| match provider {
+        "documentFormattingProvider" => Some("textDocument/formatting"),
+        "documentSymbolProvider" => Some("textDocument/documentSymbol"),
+        "codeActionProvider" => Some("textDocument/codeAction"),
+        "definitionProvider" => Some("textDocument/definition"),
+        "referencesProvider" => Some("textDocument/references"),
+        "documentHighlightProvider" => Some("textDocument/documentHighlight"),
+        "renameProvider" => Some("textDocument/rename"),
+        "foldingRangeProvider" => Some("textDocument/foldingRange"),
+        "selectionRangeProvider" => Some("textDocument/selectionRange"),
+        "documentLinkProvider" => Some("textDocument/documentLink"),
+        "colorProvider" => Some("textDocument/documentColor"),
+        "hoverProvider" => Some("textDocument/hover"),
+        "completionProvider" => Some("textDocument/completion"),
+        _ => None,
+    };
+
+    for key in caps.keys() {
+        if !key.ends_with("Provider") {
+            continue;
+        }
+
+        let method = method_of(key).unwrap_or_else(|| {
+            panic!("{key} is advertised and this test does not know its method")
+        });
+
+        let mut server = server_with("local x = 1\nreturn x\n");
+
+        // The call panics on an error reply, which is the assertion.
+        let _ = ask(
+            &mut server,
+            method,
+            json!({
+                "textDocument": { "uri": "file:///t.luau" },
+                "position": { "line": 1, "character": 7 },
+                "positions": [{ "line": 1, "character": 7 }],
+                "context": { "includeDeclaration": true, "diagnostics": [] },
+                "newName": "y",
+                "range": {
+                    "start": { "line": 0, "character": 0 },
+                    "end": { "line": 0, "character": 1 },
+                },
+            }),
+        );
+    }
+}
+
+/// Goto definition lands on the declaration, through the protocol.
+#[test]
+fn a_definition_request_points_at_the_declaration() {
+    let mut server = server_with("local widget = 1\nreturn widget\n");
+    let result = ask(&mut server, "textDocument/definition", at(1, 8));
+
+    assert_eq!(result["range"]["start"]["line"], 0);
+    assert_eq!(result["range"]["start"]["character"], 6);
+    assert_eq!(result["uri"], "file:///t.luau");
+}
+
+/// A shadowed name resolves to the binding the scope walk chose, not the text.
+#[test]
+fn a_definition_request_respects_shadowing() {
+    let src = "local x = 1\ndo\n\tlocal x = 2\n\tprint(x)\nend\nprint(x)\n";
+    let mut server = server_with(src);
+
+    let inner = ask(&mut server, "textDocument/definition", at(3, 8));
+    let outer = ask(&mut server, "textDocument/definition", at(5, 6));
+
+    assert_eq!(inner["range"]["start"]["line"], 2, "the inner x");
+    assert_eq!(outer["range"]["start"]["line"], 0, "the outer x");
+}
+
+#[test]
+fn a_references_request_lists_every_use() {
+    let mut server = server_with("local x = 1\nprint(x)\nprint(x)\n");
+
+    let result = ask(
+        &mut server,
+        "textDocument/references",
+        json!({
+            "textDocument": { "uri": "file:///t.luau" },
+            "position": { "line": 0, "character": 6 },
+            "context": { "includeDeclaration": true },
+        }),
+    );
+
+    let list = result.as_array().expect("a list");
+
+    assert_eq!(list.len(), 3, "the declaration and two reads: {result}");
+}
+
+/// A highlight tags the declaration as a write and each use as a read.
+#[test]
+fn a_highlight_request_tags_reads_and_writes() {
+    let mut server = server_with("local x = 1\nx = 2\nprint(x)\n");
+    let result = ask(&mut server, "textDocument/documentHighlight", at(0, 6));
+
+    let list = result.as_array().expect("a list");
+    let kinds: Vec<u64> = list.iter().filter_map(|h| h["kind"].as_u64()).collect();
+
+    assert!(kinds.contains(&3), "a write is kind 3: {result}");
+    assert!(kinds.contains(&2), "a read is kind 2: {result}");
+}
+
+#[test]
+fn a_rename_request_edits_every_use() {
+    let mut server = server_with("local x = 1\nprint(x)\n");
+
+    let result = ask(
+        &mut server,
+        "textDocument/rename",
+        json!({
+            "textDocument": { "uri": "file:///t.luau" },
+            "position": { "line": 0, "character": 6 },
+            "newName": "widget",
+        }),
+    );
+
+    let edits = result["changes"]["file:///t.luau"]
+        .as_array()
+        .expect("edits for this file");
+
+    assert_eq!(edits.len(), 2, "{result}");
+    assert_eq!(edits[0]["newText"], "widget");
+}
+
+/// A reserved word is refused, because the edit would not compile.
+#[test]
+fn a_rename_to_a_keyword_is_refused() {
+    let mut server = server_with("local x = 1\nprint(x)\n");
+
+    let result = ask(
+        &mut server,
+        "textDocument/rename",
+        json!({
+            "textDocument": { "uri": "file:///t.luau" },
+            "position": { "line": 0, "character": 6 },
+            "newName": "end",
+        }),
+    );
+
+    assert!(result.is_null(), "a keyword must not be accepted: {result}");
+}
+
+#[test]
+fn a_folding_request_finds_the_function_body() {
+    let src = "local function f()\n\tlocal a = 1\n\treturn a\nend\nreturn f\n";
+    let mut server = server_with(src);
+    let result = ask(
+        &mut server,
+        "textDocument/foldingRange",
+        json!({ "textDocument": { "uri": "file:///t.luau" } }),
+    );
+
+    let list = result.as_array().expect("a list");
+
+    assert!(
+        list.iter()
+            .any(|r| r["startLine"] == 0 && r["endLine"] == 3),
+        "{result}"
+    );
+}
+
+/// The chain grows outward, which is what the protocol asks of it.
+#[test]
+fn a_selection_range_request_returns_a_growing_chain() {
+    let mut server = server_with("local x = 1\nprint(x + 2)\n");
+    let result = ask(
+        &mut server,
+        "textDocument/selectionRange",
+        json!({
+            "textDocument": { "uri": "file:///t.luau" },
+            "positions": [{ "line": 1, "character": 6 }],
+        }),
+    );
+
+    let mut node = result[0].clone();
+    let mut seen = 0;
+
+    while !node.is_null() {
+        seen += 1;
+
+        let parent = node["parent"].clone();
+
+        if !parent.is_null() {
+            // A parent must start no later and end no earlier than its child.
+            assert!(
+                parent["range"]["start"]["line"].as_u64()
+                    <= node["range"]["start"]["line"].as_u64(),
+                "the chain does not grow: {result}"
+            );
+        }
+
+        node = parent;
+    }
+
+    assert!(seen >= 2, "a chain needs more than one step: {result}");
+}
+
+/// A Color3 written out in full gets a swatch, with the channels the editor wants.
+#[test]
+fn a_document_color_request_finds_a_literal_colour() {
+    let mut server = server_with("local red = Color3.fromRGB(255, 0, 0)\nreturn red\n");
+    let result = ask(
+        &mut server,
+        "textDocument/documentColor",
+        json!({ "textDocument": { "uri": "file:///t.luau" } }),
+    );
+
+    let list = result.as_array().expect("a list");
+
+    assert_eq!(list.len(), 1, "{result}");
+    assert_eq!(list[0]["color"]["red"], 1.0);
+    assert_eq!(list[0]["color"]["green"], 0.0);
+}
+
+/// A colour whose channels are not literals cannot be known, so no swatch.
+#[test]
+fn a_computed_colour_gets_no_swatch() {
+    let mut server = server_with("local c = Color3.fromRGB(n, 0, 0)\nreturn c\n");
+    let result = ask(
+        &mut server,
+        "textDocument/documentColor",
+        json!({ "textDocument": { "uri": "file:///t.luau" } }),
+    );
+
+    assert_eq!(result.as_array().expect("a list").len(), 0, "{result}");
+}
+
+/// The outline is a tree, so a nested function is a child and not a sibling.
+#[test]
+fn the_document_symbol_reply_nests() {
+    let src = "local function outer()\n\tlocal function inner()\n\tend\n\n\treturn inner\nend\n\nreturn outer\n";
+    let mut server = server_with(src);
+
+    let result = ask(
+        &mut server,
+        "textDocument/documentSymbol",
+        json!({ "textDocument": { "uri": "file:///t.luau" } }),
+    );
+
+    let list = result.as_array().expect("a list");
+    let outer = list.iter().find(|s| s["name"] == "outer").expect("outer");
+
+    let children = outer["children"].as_array().expect("children");
+
+    assert!(
+        children.iter().any(|c| c["name"] == "inner"),
+        "inner must nest under outer: {result}"
     );
 }

@@ -35,6 +35,7 @@ mod diagnostics;
 pub mod extend;
 mod features;
 pub mod navigate;
+mod parity;
 mod state;
 pub mod structure;
 #[cfg(test)]
@@ -101,6 +102,8 @@ struct Server {
     shutting_down: bool,
     /// The `[lsp]` table of the project; the default serves every Luau file
     lsp: crate::config::lsp::LspConfig,
+    /// `[aliases]`, so a document link resolves a require the way the build does
+    aliases: HashMap<String, String>,
     /// The analyzer behind the seam, when the binary provides one.
     /// A cell, because a publish borrows the server shared.
     analysis: std::cell::RefCell<Option<Box<dyn analysis::Analysis>>>,
@@ -118,6 +121,7 @@ impl Default for Server {
             worm_stamp: Vec::new(),
             shutting_down: false,
             lsp: Default::default(),
+            aliases: HashMap::new(),
             analysis: std::cell::RefCell::new(None),
         }
     }
@@ -252,8 +256,80 @@ impl Server {
                 self.reply(message, out, result)?;
             }
 
+            /*
+            The requests larvae answers from its own parser.
+
+            Each one replies even when it has nothing, because an error and
+            an empty answer read the same to a user and differently to an
+            editor, which logs a failure and can stop asking.
+            */
+            "textDocument/definition" => {
+                let result = self.definition(&message.params);
+
+                self.reply(message, out, result)?;
+            }
+
+            "textDocument/references" => {
+                let result = self.references(&message.params);
+
+                self.reply(message, out, result)?;
+            }
+
+            "textDocument/documentHighlight" => {
+                let result = self.highlights(&message.params);
+
+                self.reply(message, out, result)?;
+            }
+
+            "textDocument/rename" => {
+                let result = self.rename(&message.params);
+
+                self.reply(message, out, result)?;
+            }
+
+            "textDocument/foldingRange" => {
+                let result = self.folding_ranges(&message.params);
+
+                self.reply(message, out, result)?;
+            }
+
+            "textDocument/selectionRange" => {
+                let result = self.selection_ranges(&message.params);
+
+                self.reply(message, out, result)?;
+            }
+
+            "textDocument/documentLink" => {
+                let result = self.links(&message.params);
+
+                self.reply(message, out, result)?;
+            }
+
+            "textDocument/documentColor" => {
+                let result = self.colors(&message.params);
+
+                self.reply(message, out, result)?;
+            }
+
+            "textDocument/colorPresentation" => {
+                let result = self.color_presentation(&message.params);
+
+                self.reply(message, out, result)?;
+            }
+
             "textDocument/documentSymbol" => {
-                let symbols = self.symbols(&uri_of(&message.params));
+                let uri = uri_of(&message.params);
+
+                /*
+                An excluded or claimed file answers with nothing, and that
+                rule lives with the flat version. So the decline is asked
+                first and the tree is built only for a file larvae serves.
+                */
+                let symbols = match self.symbols(&uri) {
+                    Value::Array(list) if list.is_empty() => json!([]),
+
+                    _ => self.symbol_tree(&uri),
+                };
 
                 self.reply(message, out, symbols)?;
             }
@@ -328,6 +404,21 @@ fn capabilities(analysis: bool) -> Value {
         later needs the client to be told and to agree to re register.
         */
         "codeActionProvider": true,
+        /*
+        These nine come from larvae's own parser and scope resolution, so
+        they are advertised whether or not the binary carries an analyzer.
+        A capability that appears later needs the client to be told and to
+        agree to re register, and most do not, so the answer at initialize
+        has to be the true one.
+        */
+        "definitionProvider": true,
+        "referencesProvider": true,
+        "documentHighlightProvider": true,
+        "renameProvider": true,
+        "foldingRangeProvider": true,
+        "selectionRangeProvider": true,
+        "documentLinkProvider": { "resolveProvider": false },
+        "colorProvider": true,
     });
 
     /*
