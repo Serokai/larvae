@@ -25,10 +25,18 @@ pub mod analysis;
 pub mod rpc;
 
 mod actions;
+/*
+The three modules below answer a request from larvae's own parser, with no
+Luau analyzer behind them. They are `pub` so the tests inside them run and
+so nothing reads as dead where the analyzer feature is off.
+*/
+pub mod decorate;
 mod diagnostics;
 pub mod extend;
 mod features;
+pub mod navigate;
 mod state;
+pub mod structure;
 #[cfg(test)]
 mod tests;
 mod uri;
