@@ -459,6 +459,28 @@ fn info(dir: &Path) -> Result<ExitCode> {
         eprintln!("  lint       {name} (default {:?})", decl.default);
     }
 
+    if !m.lsp.is_empty() {
+        let mut parts = Vec::new();
+
+        if m.lsp.resolve {
+            parts.push("resolve".to_string());
+        }
+
+        if m.lsp.declarations {
+            parts.push("declarations".to_string());
+        }
+
+        if !m.lsp.respond.is_empty() {
+            parts.push(format!("respond({})", m.lsp.respond.join(", ")));
+        }
+
+        if m.lsp.serves_luau {
+            parts.push("serves plain Luau".to_string());
+        }
+
+        eprintln!("  lsp        {}", parts.join(", "));
+    }
+
     if m.rules.is_empty() {
         eprintln!("  rules      none, so it takes no run_order slot");
     } else {
