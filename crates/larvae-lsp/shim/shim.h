@@ -61,6 +61,28 @@ typedef struct {
 /* Completions at a byte offset. Returns how many, writes at most cap. */
 size_t larvae_completions(LarvaeSession* s, const char* path, uint32_t byte, LarvaeCompletion* out, size_t cap);
 
+/* Where a name is declared.
+
+   Line and character, and not a byte offset, because the answer often names
+   a module the caller has no text for. Those are the units the protocol
+   wants anyway, so nothing converts on either side.
+
+   `path` is the module the declaration sits in, and it belongs to the
+   session until the next call. */
+typedef struct {
+    const char* path;
+    uint32_t start_line;
+    uint32_t start_character;
+    uint32_t end_line;
+    uint32_t end_character;
+} LarvaeLocation;
+
+/* The declaration of whatever sits at a byte offset. 1 on success. */
+int larvae_definition(LarvaeSession* s, const char* path, uint32_t byte, LarvaeLocation* out);
+
+/* The declaration of the TYPE of whatever sits at a byte offset. 1 on success. */
+int larvae_type_definition(LarvaeSession* s, const char* path, uint32_t byte, LarvaeLocation* out);
+
 #ifdef __cplusplus
 }
 #endif

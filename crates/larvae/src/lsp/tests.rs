@@ -1410,7 +1410,8 @@ capability added without a handler fails here.
 */
 #[test]
 fn every_advertised_provider_answers() {
-    let caps = capabilities(false);
+    // `true` so the analyzer-only providers are walked as well.
+    let caps = capabilities(true);
     let caps = caps["capabilities"].as_object().expect("a table");
 
     let method_of = |provider: &str| match provider {
@@ -1426,6 +1427,7 @@ fn every_advertised_provider_answers() {
         "documentLinkProvider" => Some("textDocument/documentLink"),
         "colorProvider" => Some("textDocument/documentColor"),
         "hoverProvider" => Some("textDocument/hover"),
+        "typeDefinitionProvider" => Some("textDocument/typeDefinition"),
         "completionProvider" => Some("textDocument/completion"),
         _ => None,
     };
@@ -1662,4 +1664,107 @@ fn the_document_symbol_reply_nests() {
         children.iter().any(|c| c["name"] == "inner"),
         "inner must nest under outer: {result}"
     );
+}
+
+// --- the editor settings blob ----------------------------------------------
+
+/*
+The editor can speak, and the project wins where both do.
+
+The extension sends its `larvae-lsp` section at initialize and again on every
+change. Until the server read it, every editor setting it mirrors did
+nothing, including the `useConst` one the config doc promises.
+*/
+#[test]
+fn an_editor_setting_reaches_the_server() {
+    let mut server = Server::default();
+    let mut out = Vec::new();
+
+    server
+        .handle(
+            &message(
+                "initialize",
+                Some(1),
+                json!({
+                    "initializationOptions": {
+                        "settings": {
+                            "larvae-lsp": {
+                                "claimOnly": true,
+                                "completion": { "imports": { "useConst": false } },
+                            }
+                        }
+                    }
+                }),
+            ),
+            &mut out,
+        )
+        .expect("initializes");
+
+    assert!(server.lsp.claim_only, "claimOnly did not reach the server");
+    assert!(
+        !server.lsp.completion.imports.use_const,
+        "useConst did not reach the server"
+    );
+}
+
+/// A later change replaces what the editor said before.
+#[test]
+fn a_configuration_change_replaces_the_blob() {
+    let mut server = Server::default();
+    let mut out = Vec::new();
+
+    server.editor = json!({ "larvae-lsp": { "claimOnly": true } });
+
+    server.apply_editor_settings();
+
+    assert!(server.lsp.claim_only);
+
+    server
+        .handle(
+            &message(
+                "workspace/didChangeConfiguration",
+                None,
+                json!({ "settings": { "larvae-lsp": { "claimOnly": false } } }),
+            ),
+            &mut out,
+        )
+        .expect("handles");
+
+    assert!(!server.lsp.claim_only, "the change did not take");
+}
+
+/*
+A setting the server does not know is ignored, not refused.
+
+luau-lsp ships about ninety settings and the extension mirrors the names, so
+a server that failed on an unknown id would fail on every editor ahead of it.
+*/
+#[test]
+fn an_unknown_setting_is_ignored() {
+    let mut server = Server {
+        editor: json!({
+            "larvae-lsp": {
+                "inlayHints": { "parameterNames": "all" },
+                "somethingNobodyShipped": 7,
+                "completion": { "imports": { "useConst": false } },
+            }
+        }),
+        ..Default::default()
+    };
+
+    server.apply_editor_settings();
+
+    // The one it knows still lands.
+    assert!(!server.lsp.completion.imports.use_const);
+}
+
+/// An empty blob leaves the defaults alone.
+#[test]
+fn no_editor_settings_changes_nothing() {
+    let mut server = Server::default();
+    let before = (server.lsp.enabled, server.lsp.claim_only);
+
+    server.apply_editor_settings();
+
+    assert_eq!((server.lsp.enabled, server.lsp.claim_only), before);
 }

@@ -46,14 +46,57 @@ impl Server {
             return Value::Null;
         };
 
-        let Some(span) = navigate::definition(src, byte) else {
+        /*
+        The local answer first, because it needs no type checker and it is
+        exact. A name that comes through a require, a method on an imported
+        table, or a global from the definitions has no local declaration, and
+        only the analyzer can follow it.
+        */
+        if let Some(span) = navigate::definition(src, byte) {
+            return json!({
+                "uri": params["textDocument"]["uri"],
+                "range": lines.range(src, span),
+            });
+        }
+
+        let Some(path) = params["textDocument"]["uri"].as_str().and_then(path_of_uri) else {
             return Value::Null;
         };
 
-        json!({
-            "uri": params["textDocument"]["uri"],
-            "range": lines.range(src, span),
-        })
+        let found = self
+            .analysis
+            .borrow_mut()
+            .as_mut()
+            .and_then(|a| a.definition(&path, byte));
+
+        match found {
+            Some(at) => location(&at),
+
+            None => Value::Null,
+        }
+    }
+
+    /// Goto the declaration of the type, which only the analyzer knows
+    pub(super) fn type_definition(&self, params: &Value) -> Value {
+        let Some((_, _, byte)) = self.at(params) else {
+            return Value::Null;
+        };
+
+        let Some(path) = params["textDocument"]["uri"].as_str().and_then(path_of_uri) else {
+            return Value::Null;
+        };
+
+        let found = self
+            .analysis
+            .borrow_mut()
+            .as_mut()
+            .and_then(|a| a.type_definition(&path, byte));
+
+        match found {
+            Some(at) => location(&at),
+
+            None => Value::Null,
+        }
     }
 
     /// Find references, for a binding this file declares
@@ -296,4 +339,24 @@ impl Server {
 
         json!(out)
     }
+}
+
+/*
+An analyzer location in protocol shape.
+
+The analyzer answers in line and character already, because the target is
+often a module the server has no text for. So nothing converts here.
+*/
+fn location(at: &super::analysis::AnalysisLocation) -> Value {
+    let Some(uri) = super::uri::uri_of_path(&at.path) else {
+        return Value::Null;
+    };
+
+    json!({
+        "uri": uri,
+        "range": {
+            "start": { "line": at.start.0, "character": at.start.1 },
+            "end": { "line": at.end.0, "character": at.end.1 },
+        },
+    })
 }

@@ -84,9 +84,52 @@ fn install() -> Result<ExitCode> {
         ui::print_success(&format!("Installed larvae to {}", target.display()));
     }
 
+    install_server(&me, &bin_dir);
     add_to_path(&bin_dir);
 
     Ok(ExitCode::SUCCESS)
+}
+
+/*
+Put `larvae-lsp` beside `larvae`, when the release shipped one.
+
+The editor extension looks for the server next to the binary it resolved, so
+a release that installs one and not the other gives a user the fallback
+server: lint and format, no hover, no completion. That reads as larvae being
+worse than luau-lsp rather than as a missing file.
+
+A silent skip is right when the file is not there. The server is a separate
+artifact, `larvae lsp` still runs the same server without the analyzer, and a
+user who installed the CLI alone has not done anything wrong.
+*/
+fn install_server(me: &Path, bin_dir: &Path) {
+    let name = format!("larvae-lsp{}", std::env::consts::EXE_SUFFIX);
+
+    let Some(source) = me.parent().map(|dir| dir.join(&name)) else {
+        return;
+    };
+
+    if !source.is_file() {
+        return;
+    }
+
+    let target = bin_dir.join(&name);
+
+    if paths::same_file(&source, &target) {
+        return;
+    }
+
+    match replace_exe(&source, &target) {
+        Ok(()) => ui::print_success(&format!("Installed larvae-lsp to {}", target.display())),
+
+        /*
+        A failure here does not fail the install. The CLI is on disk and
+        works, and the message says what the user lost.
+        */
+        Err(e) => eprintln!(
+            "note: could not install larvae-lsp, the editor falls back to `larvae lsp`: {e:#}"
+        ),
+    }
 }
 
 /*

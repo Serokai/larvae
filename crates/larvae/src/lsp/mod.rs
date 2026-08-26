@@ -104,6 +104,14 @@ struct Server {
     lsp: crate::config::lsp::LspConfig,
     /// `[aliases]`, so a document link resolves a require the way the build does
     aliases: HashMap<String, String>,
+    /*
+    The settings blob the editor sent, kept whole.
+
+    The extension mirrors luau-lsp's ids, and the server knows only some of
+    them. To keep the blob rather than the parsed few means a later feature
+    reads its own setting without the editor having to send it again.
+    */
+    editor: Value,
     /// The analyzer behind the seam, when the binary provides one.
     /// A cell, because a publish borrows the server shared.
     analysis: std::cell::RefCell<Option<Box<dyn analysis::Analysis>>>,
@@ -122,6 +130,7 @@ impl Default for Server {
             shutting_down: false,
             lsp: Default::default(),
             aliases: HashMap::new(),
+            editor: Value::Null,
             analysis: std::cell::RefCell::new(None),
         }
     }
@@ -167,6 +176,11 @@ impl Server {
             broken.
             */
             "workspace/didChangeConfiguration" => {
+                // The editor sends the whole blob again, so the server takes it again.
+                if !message.params["settings"].is_null() {
+                    self.editor = message.params["settings"].clone();
+                }
+
                 self.load_config(out)?;
 
                 for uri in self.documents.keys().cloned().collect::<Vec<_>>() {
@@ -265,6 +279,12 @@ impl Server {
             */
             "textDocument/definition" => {
                 let result = self.definition(&message.params);
+
+                self.reply(message, out, result)?;
+            }
+
+            "textDocument/typeDefinition" => {
+                let result = self.type_definition(&message.params);
 
                 self.reply(message, out, result)?;
             }
@@ -428,6 +448,8 @@ fn capabilities(analysis: bool) -> Value {
     */
     if analysis {
         caps["hoverProvider"] = json!(true);
+        // Only the frontend knows where a type was declared.
+        caps["typeDefinitionProvider"] = json!(true);
         caps["completionProvider"] = json!({ "triggerCharacters": [".", ":", "\""] });
     }
 

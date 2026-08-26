@@ -28,7 +28,42 @@ impl Server {
                     .and_then(path_of_uri)
             });
 
+        /*
+        The editor settings arrive before the config load, so the project
+        wins where both speak. The extension sends them at initialize and
+        again on every change, which is the contract the config doc states.
+        */
+        self.editor = params["initializationOptions"]["settings"].clone();
+
         self.load_config(out)
+    }
+
+    /*
+    Read the `larvae-lsp` settings the editor sent.
+
+    The project file wins wherever it names the same thing, so these apply
+    first and `load_config` writes over them. That order is the whole rule:
+    a setting in the repo is shared by everyone who opens it, and a setting
+    in the editor belongs to one person on one machine.
+
+    An id the server does not know is ignored. luau-lsp ships about ninety
+    settings and the extension mirrors the names, so a server that refused
+    an unknown one would fail on every editor that is ahead of it.
+    */
+    pub(super) fn apply_editor_settings(&mut self) {
+        let settings = &self.editor["larvae-lsp"];
+
+        if let Some(on) = settings["enabled"].as_bool() {
+            self.lsp.enabled = on;
+        }
+
+        if let Some(on) = settings["claimOnly"].as_bool() {
+            self.lsp.claim_only = on;
+        }
+
+        if let Some(on) = settings["completion"]["imports"]["useConst"].as_bool() {
+            self.lsp.completion.imports.use_const = on;
+        }
     }
 
     /*
@@ -43,6 +78,8 @@ impl Server {
     the zero config case and raises nothing.
     */
     pub(super) fn load_config(&mut self, out: &mut impl Write) -> Result<()> {
+        self.apply_editor_settings();
+
         // The load of the worms takes `&mut self`, so the root arrives as a copy.
         let Some(root) = self.root.clone() else {
             return Ok(());

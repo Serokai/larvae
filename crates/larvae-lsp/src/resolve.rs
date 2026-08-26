@@ -148,14 +148,6 @@ fn as_module_file(path: &Path) -> Option<PathBuf> {
     None
 }
 
-/*
-The Roblox global types, vendored beside the crate and refreshed by the
-nightly. The session loads them at start, so the DataModel exists for
-inference, and the service list for auto-imports reads from the same
-text, so the two cannot disagree.
-*/
-const GLOBAL_TYPES: &str = include_str!("../types/globalTypes.d.luau");
-
 #[cfg(test)]
 mod game_requires {
     use super::*;

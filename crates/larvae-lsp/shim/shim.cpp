@@ -126,6 +126,7 @@ struct LarvaeSession
     std::vector<std::string> diagStorage;
     std::vector<std::string> completionStorage;
     std::string hoverStorage;
+    std::string locationStorage;
 
     LarvaeSession()
         : frontend(&files, &configs, options())
@@ -269,6 +270,174 @@ const char* larvae_hover(LarvaeSession* s, const char* path, uint32_t byte)
 
     s->hoverStorage = Luau::toString(*type, opts);
     return s->hoverStorage.c_str();
+}
+
+
+/*
+Fill a location from a module name and a Luau span.
+
+The path string lives on the session, which is the same rule every other
+string here follows: it stays valid until the next call and Rust copies
+what it keeps.
+*/
+static int fillLocation(LarvaeSession* s, const std::string& module, const Luau::Location& at, LarvaeLocation* out)
+{
+    s->locationStorage = module;
+
+    out->path = s->locationStorage.c_str();
+    out->start_line = at.begin.line;
+    out->start_character = at.begin.column;
+    out->end_line = at.end.line;
+    out->end_character = at.end.column;
+
+    return 1;
+}
+
+/*
+Where the name at a position is declared.
+
+Three shapes answer, and they cover what a reader clicks. A local resolves
+to its own declaration, which the AST carries outright. A require resolves
+to the module it names, because a click on the string is a click on the
+file. Everything else asks the type: a function or a table field carries the
+location it was defined at, which is how a click on a method reaches the
+module that wrote it.
+
+A name with no answer returns 0 rather than a guess. A wrong jump costs a
+reader more than no jump, because they have to work out where they landed.
+*/
+int larvae_definition(LarvaeSession* s, const char* path, uint32_t byte, LarvaeLocation* out)
+{
+    auto it = s->open.find(path);
+    if (it == s->open.end())
+        return 0;
+
+    try
+    {
+        s->frontend.check(path);
+    }
+    catch (const std::exception&)
+    {
+        return 0;
+    }
+
+    Luau::ModulePtr module = s->frontend.moduleResolver.getModule(path);
+    const Luau::SourceModule* source = s->frontend.getSourceModule(path);
+    if (!module || !source)
+        return 0;
+
+    LineIndex lines(it->second);
+    Luau::Position position = lines.positionOf(byte);
+
+    std::vector<Luau::AstNode*> ancestry = Luau::findAstAncestryOfPosition(*source, position);
+    if (ancestry.empty())
+        return 0;
+
+    Luau::AstNode* node = ancestry.back();
+
+    // A local names its own declaration, and the AST already holds it.
+    if (auto* local = node->as<Luau::AstExprLocal>())
+        return fillLocation(s, path, local->local->location, out);
+
+    /*
+    A click inside a require string opens the module it names. The resolver
+    answered that question once already, and the module map holds the
+    answer, so nothing here re-resolves a path.
+    */
+    if (auto* text = node->as<Luau::AstExprConstantString>())
+    {
+        for (Luau::AstNode* up : ancestry)
+        {
+            auto* call = up->as<Luau::AstExprCall>();
+            if (!call)
+                continue;
+
+            auto* callee = call->func->as<Luau::AstExprGlobal>();
+            if (!callee || callee->name != "require")
+                continue;
+
+            if (!s->files.resolve)
+                return 0;
+
+            std::string spec(text->value.data, text->value.size);
+            const char* target = s->files.resolve(s->files.userdata, path, spec.c_str());
+            if (!target)
+                return 0;
+
+            return fillLocation(s, target, Luau::Location{}, out);
+        }
+    }
+
+    /*
+    Everything else asks the type where it came from. A function type
+    carries its definition location, which reaches a method or a field
+    declared in another module.
+    */
+    std::optional<Luau::TypeId> type = Luau::findTypeAtPosition(*module, *source, position);
+    if (!type)
+        return 0;
+
+    if (auto* fn = Luau::get<Luau::FunctionType>(Luau::follow(*type)))
+    {
+        if (fn->definition)
+        {
+            // The module name is absent for a function this file declares.
+            const std::string& where = fn->definition->definitionModuleName
+                ? *fn->definition->definitionModuleName
+                : std::string(path);
+
+            return fillLocation(s, where, fn->definition->definitionLocation, out);
+        }
+    }
+
+    return 0;
+}
+
+/*
+Where the type of the name at a position is declared.
+
+This is the other jump a reader wants: not the value, the shape of it. A
+table type carries the location it was defined at, and a class type carries
+its own.
+*/
+int larvae_type_definition(LarvaeSession* s, const char* path, uint32_t byte, LarvaeLocation* out)
+{
+    auto it = s->open.find(path);
+    if (it == s->open.end())
+        return 0;
+
+    try
+    {
+        s->frontend.check(path);
+    }
+    catch (const std::exception&)
+    {
+        return 0;
+    }
+
+    Luau::ModulePtr module = s->frontend.moduleResolver.getModule(path);
+    const Luau::SourceModule* source = s->frontend.getSourceModule(path);
+    if (!module || !source)
+        return 0;
+
+    LineIndex lines(it->second);
+    std::optional<Luau::TypeId> type = Luau::findTypeAtPosition(*module, *source, lines.positionOf(byte));
+    if (!type)
+        return 0;
+
+    Luau::TypeId followed = Luau::follow(*type);
+
+    if (auto* table = Luau::get<Luau::TableType>(followed))
+    {
+        // An empty name means the table was written here, not imported.
+        const std::string& where =
+            table->definitionModuleName.empty() ? std::string(path) : table->definitionModuleName;
+
+        if (table->definitionLocation != Luau::Location{})
+            return fillLocation(s, where, table->definitionLocation, out);
+    }
+
+    return 0;
 }
 
 size_t larvae_completions(LarvaeSession* s, const char* path, uint32_t byte, LarvaeCompletion* out, size_t cap)

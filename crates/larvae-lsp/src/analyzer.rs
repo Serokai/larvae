@@ -20,6 +20,14 @@ use std::path::{Path, PathBuf};
 
 use crate::resolve::resolve_spec;
 
+/*
+The Roblox global types, vendored beside the crate and refreshed by the
+nightly. The session loads them at start, so the DataModel exists for
+inference, and the service list for auto-imports reads from the same
+text, so the two cannot disagree.
+*/
+const GLOBAL_TYPES: &str = include_str!("../types/globalTypes.d.luau");
+
 use larvae::lsp::analysis::{Analysis, AnalysisCompletion, AnalysisDiag, ModuleHooks};
 
 #[repr(C)]
@@ -28,6 +36,15 @@ struct RawDiag {
     end: u32,
     severity: u8,
     message: *const c_char,
+}
+
+#[repr(C)]
+struct RawLocation {
+    path: *const c_char,
+    start_line: u32,
+    start_character: u32,
+    end_line: u32,
+    end_character: u32,
 }
 
 #[repr(C)]
@@ -42,6 +59,18 @@ type larvae_resolve_fn = extern "C" fn(*mut c_void, *const c_char, *const c_char
 type larvae_load_fn = extern "C" fn(*mut c_void, *const c_char) -> *const c_char;
 
 unsafe extern "C" {
+    fn larvae_definition(
+        s: *mut c_void,
+        path: *const c_char,
+        byte: u32,
+        out: *mut RawLocation,
+    ) -> i32;
+    fn larvae_type_definition(
+        s: *mut c_void,
+        path: *const c_char,
+        byte: u32,
+        out: *mut RawLocation,
+    ) -> i32;
     fn larvae_session_new() -> *mut c_void;
     fn larvae_set_definitions(s: *mut c_void, name: *const c_char, source: *const c_char) -> i32;
     fn larvae_session_free(s: *mut c_void);
@@ -220,7 +249,63 @@ impl Drop for LuauAnalysis {
     }
 }
 
+impl LuauAnalysis {
+    /*
+    One location question, asked of the shim.
+
+    Both questions have the same shape, so one helper spells the unsafe
+    part once. A zero reply means the frontend has no answer, which is the
+    honest result for a name it cannot follow.
+    */
+    fn locate(
+        &mut self,
+        ask: unsafe extern "C" fn(*mut c_void, *const c_char, u32, *mut RawLocation) -> i32,
+        path: &Path,
+        at: u32,
+    ) -> Option<larvae::lsp::analysis::AnalysisLocation> {
+        let key = self.key(path);
+
+        let mut raw = RawLocation {
+            path: std::ptr::null(),
+            start_line: 0,
+            start_character: 0,
+            end_line: 0,
+            end_character: 0,
+        };
+
+        let ok = unsafe { ask(self.session, key, at, &mut raw) };
+
+        if ok == 0 || raw.path.is_null() {
+            return None;
+        }
+
+        let target = unsafe { CStr::from_ptr(raw.path) }.to_str().ok()?;
+
+        Some(larvae::lsp::analysis::AnalysisLocation {
+            path: PathBuf::from(target),
+            start: (raw.start_line, raw.start_character),
+            end: (raw.end_line, raw.end_character),
+        })
+    }
+}
+
 impl Analysis for LuauAnalysis {
+    fn definition(
+        &mut self,
+        path: &Path,
+        at: u32,
+    ) -> Option<larvae::lsp::analysis::AnalysisLocation> {
+        self.locate(larvae_definition, path, at)
+    }
+
+    fn type_definition(
+        &mut self,
+        path: &Path,
+        at: u32,
+    ) -> Option<larvae::lsp::analysis::AnalysisLocation> {
+        self.locate(larvae_type_definition, path, at)
+    }
+
     fn set_mounts(&mut self, mounts: larvae::requires::datamodel::MountTable) {
         self.resolver.mounts = Some(mounts);
     }

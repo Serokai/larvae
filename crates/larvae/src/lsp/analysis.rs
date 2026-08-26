@@ -118,6 +118,20 @@ pub fn plain_view(src: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(out)
 }
 
+/*
+Where a declaration sits, in the units the protocol wants.
+
+Line and character, and not a byte offset, because the answer often names a
+module the server has no text for. To convert would mean reading that file
+only to count its lines.
+*/
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnalysisLocation {
+    pub path: std::path::PathBuf,
+    pub start: (u32, u32),
+    pub end: (u32, u32),
+}
+
 pub trait Analysis: Send {
     /// Install the module hooks; the server calls this once per worm load
     fn set_module_hooks(&mut self, hooks: ModuleHooks) {
@@ -167,6 +181,27 @@ pub trait Analysis: Send {
 
     /// Completions at a byte offset
     fn completions(&mut self, path: &Path, at: u32) -> Vec<AnalysisCompletion>;
+
+    /*
+    Where the name at a byte offset is declared.
+
+    This is the half that larvae's own resolver cannot answer. A local
+    resolves without a type checker, and `navigate` does that. A name that
+    comes through a require, a method on an imported table, or a global from
+    the definitions needs the frontend, and only the analyzer has one.
+    */
+    fn definition(&mut self, path: &Path, at: u32) -> Option<AnalysisLocation> {
+        let _ = (path, at);
+
+        None
+    }
+
+    /// Where the TYPE of the name at a byte offset is declared
+    fn type_definition(&mut self, path: &Path, at: u32) -> Option<AnalysisLocation> {
+        let _ = (path, at);
+
+        None
+    }
 
     /// Drop the cached state of one document and its dependents
     fn invalidate(&mut self, path: &Path);
