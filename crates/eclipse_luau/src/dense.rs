@@ -20,7 +20,7 @@ One pair keeps its newline: an expression, then a statement that opens with
 for the same reason in the other direction.
 */
 
-use crate::syntax::lexer::{self, Tok};
+use crate::lexer::{self, Tok};
 
 /// The dense text of one Luau source, broken near `column_span` columns
 pub fn dense(src: &str, column_span: usize) -> Result<String, String> {

@@ -9,7 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-larvae = { path = ".." }
+eclipse_luau = { path = "../../eclipse_luau" }
 
 [[bin]]
 name = "parse"

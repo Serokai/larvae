@@ -1,7 +1,7 @@
 /*!
 A recursive descent parser for the full Luau grammar, modeled on the
 official Parser.cpp. It produces the token span tree in
-[`crate::syntax::ast`].
+[`crate::ast`].
 
 The parser reads types for their extent, but it does not interpret them.
 That is intentional. A rule that needs type structure can parse the span
@@ -9,8 +9,8 @@ later. The recursion has a depth guard. So pathological nesting is a clean
 error and never a crash.
 */
 
-use crate::syntax::ast::*;
-use crate::syntax::lexer::{Tok, TokKind};
+use crate::ast::*;
+use crate::lexer::{Tok, TokKind};
 
 mod expr;
 mod stmt;

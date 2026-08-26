@@ -1,6 +1,6 @@
 //! Expressions: precedence climbing and the suffixed chain.
 
-use crate::syntax::lexer::TokKind;
+use crate::lexer::TokKind;
 
 use super::*;
 

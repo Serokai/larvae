@@ -16,7 +16,7 @@ pub mod project;
 pub mod requires;
 pub mod rules;
 pub mod schema;
-pub mod syntax;
+pub use eclipse_luau as syntax;
 pub mod sys;
 pub mod ui;
 pub mod worm;

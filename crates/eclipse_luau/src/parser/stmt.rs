@@ -1,6 +1,6 @@
 //! Statements, blocks, and the declaration forms.
 
-use crate::syntax::lexer::TokKind;
+use crate::lexer::TokKind;
 
 use super::*;
 

@@ -5,8 +5,8 @@ That is the retain-lines guarantee. It holds by construction, not through bug
 patches.
 */
 
-use crate::syntax::ast::*;
-use crate::syntax::lexer::Tok;
+use crate::ast::*;
+use crate::lexer::Tok;
 
 /// Prints a token range, with the trivia that sits between the tokens included.
 pub fn print_range(src: &str, toks: &[Tok], from: u32, to: u32, out: &mut String) {
@@ -113,9 +113,9 @@ fn nested_blocks(stmt: &Stmt) -> Vec<&Block> {
             .members
             .iter()
             .filter_map(|m| match m {
-                crate::syntax::ast::ClassMember::Method(f) => Some(&f.body.block),
+                crate::ast::ClassMember::Method(f) => Some(&f.body.block),
 
-                crate::syntax::ast::ClassMember::Field { .. } => None,
+                crate::ast::ClassMember::Field { .. } => None,
             })
             .collect(),
 

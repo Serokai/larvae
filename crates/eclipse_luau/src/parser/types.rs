@@ -1,6 +1,6 @@
 //! Type syntax. The parser consumes it for its extent and never interprets it.
 
-use crate::syntax::lexer::TokKind;
+use crate::lexer::TokKind;
 
 use super::*;
 

@@ -1,6 +1,6 @@
 //! Finds `require("...")` call sites in a token stream.
 
-use crate::syntax::lexer::{Tok, TokKind};
+use crate::lexer::{Tok, TokKind};
 
 #[derive(Debug, Clone, Copy)]
 pub struct RequireSite {
@@ -274,7 +274,7 @@ fn literal_name(src: &str, tok: &Tok) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::syntax::lexer::lex;
+    use crate::lexer::lex;
 
     fn spec(src: &str) -> Vec<String> {
         let toks = lex(src).unwrap().toks;
