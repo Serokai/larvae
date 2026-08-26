@@ -49,7 +49,9 @@ impl Server {
         publish is empty and not skipped, for the same reason as an
         excluded file: a skip keeps old squiggles on screen.
         */
-        if (!self.lsp.enabled || self.lsp.claim_only) && claimed.is_none() {
+        if (!self.lsp.enabled || (self.lsp.claim_only && !self.worms.lsp_serves_luau()))
+            && claimed.is_none()
+        {
             return rpc::notify(
                 out,
                 "textDocument/publishDiagnostics",

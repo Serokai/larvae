@@ -232,6 +232,16 @@ impl Server {
             return false;
         }
 
+        /*
+        A worm can declare that its hooks answer inside plain Luau files,
+        ex: the json worm resolving data requires written in .luau code.
+        Claim-only gating widens then, or installing the worm changes
+        nothing in the editor.
+        */
+        if self.worms.lsp_serves_luau() {
+            return false;
+        }
+
         !path_of_uri(uri).is_some_and(|p| self.worms.frontend_for(&p).is_some())
     }
 

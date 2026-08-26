@@ -166,6 +166,36 @@ impl Server {
     }
 
     /*
+    Say once when a worm widens claim-only serving, because the user wrote
+    that setting and the server is overriding it with a reason.
+    */
+    pub(super) fn notice_widened_serving(&self, out: &mut impl Write) -> Result<()> {
+        if !self.lsp.claim_only || !self.worms.lsp_serves_luau() {
+            return Ok(());
+        }
+
+        let names: Vec<&str> = self
+            .worms
+            .specs()
+            .iter()
+            .filter(|s| s.manifest.lsp.serves_luau)
+            .map(|s| s.manifest.name.as_str())
+            .collect();
+
+        rpc::notify(
+            out,
+            "window/showMessage",
+            json!({
+                "type": 3,
+                "message": format!(
+                    "larvae serves every Luau file here, although [lsp] claim_only is on: worm `{}` answers inside plain Luau",
+                    names.join("`, `")
+                ),
+            }),
+        )
+    }
+
+    /*
     Rebuild the pool when a worm changed on disk.
 
     A worm author rebuilds a path worm and expects the next keystroke to use

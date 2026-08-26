@@ -370,6 +370,11 @@ impl Pool {
             .collect()
     }
 
+    /// True when any worm declares that its hooks answer in plain Luau files
+    pub fn lsp_serves_luau(&self) -> bool {
+        self.specs().iter().any(|s| s.manifest.lsp.serves_luau)
+    }
+
     /// True when any worm declares any LSP hook
     pub fn has_lsp_hooks(&self) -> bool {
         self.specs().iter().any(|s| !s.manifest.lsp.is_empty())

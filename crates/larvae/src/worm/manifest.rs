@@ -141,11 +141,19 @@ pub struct LspDecl {
     /// The request kinds this worm transforms: hover, completions, diagnostics
     #[serde(default)]
     pub respond: Vec<String>,
+    /*
+    This worm's hooks answer inside plain Luau files, not only inside the
+    files it claims. The json worm is the example: the requires it
+    resolves are written in ordinary .luau code. Claim-only gating widens
+    for a project that loads such a worm, or the worm's whole value hides.
+    */
+    #[serde(default)]
+    pub serves_luau: bool,
 }
 
 impl LspDecl {
     pub fn is_empty(&self) -> bool {
-        !self.resolve && !self.declarations && self.respond.is_empty()
+        !self.resolve && !self.declarations && self.respond.is_empty() && !self.serves_luau
     }
 }
 
@@ -636,5 +644,23 @@ entry = "init.luau"
         .unwrap();
 
         assert!(err.to_string().contains("no [frontend]"), "{err}");
+    }
+}
+
+#[cfg(test)]
+mod serves_luau_tests {
+    use super::Manifest;
+
+    #[test]
+    fn a_worm_can_declare_that_it_serves_plain_luau() {
+        let m = Manifest::parse(concat!(
+            "name = \"data\"\napi = 1\nform = \"native\"\nentry = \"worm\"\n",
+            "[frontend]\nclaims = [\".json\"]\n",
+            "[lsp]\nresolve = true\nserves_luau = true\n",
+        ))
+        .unwrap();
+
+        assert!(m.lsp.serves_luau);
+        assert!(!m.lsp.is_empty());
     }
 }

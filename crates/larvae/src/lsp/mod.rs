@@ -119,6 +119,7 @@ impl Server {
         match message.method.as_str() {
             "initialize" => {
                 self.initialize(&message.params, out)?;
+                self.notice_widened_serving(out)?;
 
                 /*
                 `[lsp] enabled = false` answers with no capabilities, so the

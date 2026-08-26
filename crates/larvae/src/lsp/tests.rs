@@ -1061,3 +1061,39 @@ fn a_service_import_inserts_above_the_first_statement() {
     // A service the file already binds does not offer again.
     assert!(!items.iter().any(|i| i["label"] == "Players"));
 }
+
+/*
+The json worm's shape: its hooks answer inside plain Luau files, so
+claim-only gating widens when it loads, or installing the worm changes
+nothing in the editor.
+*/
+#[cfg(unix)]
+#[test]
+fn a_serving_worm_widens_claim_only_gating() {
+    let dir = tempfile::tempdir().unwrap();
+    lsp_worm_that(dir.path());
+
+    const SERVING: &str = r#"
+name = "data"
+api = 1
+form = "native"
+entry = "worm.py"
+
+[frontend]
+claims = [".fake"]
+
+[lsp]
+resolve = true
+serves_luau = true
+"#;
+
+    let mut server = server_with("local x={a=1}\nreturn x\n");
+    server.lsp = crate::config::lsp::LspConfig {
+        enabled: true,
+        claim_only: true,
+    };
+    server.worms = Pool::new(vec![spec(SERVING, dir.path())], 1);
+
+    // A plain Luau file formats although claim_only is on.
+    assert_ne!(server.format("file:///t.luau").unwrap(), Value::Null);
+}
