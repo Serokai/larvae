@@ -18,6 +18,8 @@ use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::path::{Path, PathBuf};
 
+use crate::resolve::resolve_spec;
+
 use larvae::lsp::analysis::{Analysis, AnalysisCompletion, AnalysisDiag, ModuleHooks};
 
 #[repr(C)]
@@ -73,6 +75,14 @@ struct ResolverState {
     load_buffer: Option<CString>,
     /// The worm hooks the server installs; consulted before default resolution
     hooks: Option<ModuleHooks>,
+    /*
+    The DataModel map of the project, for `@game`.
+
+    Absent until the server loads a config that describes one. A project with
+    no rojo project file and no `[requires.mounts]` has no DataModel, and
+    `@game` then resolves to nothing, which is the true answer.
+    */
+    mounts: Option<larvae::requires::datamodel::MountTable>,
 }
 
 extern "C" fn resolve_cb(
@@ -100,7 +110,7 @@ extern "C" fn resolve_cb(
             .map_or(std::ptr::null(), |c| c.as_ptr());
     }
 
-    match resolve_spec(Path::new(from.as_ref()), &spec) {
+    match resolve_spec(Path::new(from.as_ref()), &spec, state.mounts.as_ref()) {
         Some(path) => {
             let text = path.to_string_lossy().into_owned();
 
@@ -148,120 +158,6 @@ extern "C" fn load_cb(userdata: *mut c_void, path: *const c_char) -> *const c_ch
         Err(_) => std::ptr::null(),
     }
 }
-
-/*
-One require spec against the file that wrote it.
-
-An init file resolves `./` from the directory above its own, the same
-rule the pipeline's resolver holds. A directory answers its init file,
-so the frontend always receives a file it can load.
-*/
-fn resolve_spec(from: &Path, spec: &str) -> Option<PathBuf> {
-    let is_init = from
-        .file_stem()
-        .is_some_and(|s| s == "init" || s == "init.server" || s == "init.client");
-
-    let own_dir = from.parent()?;
-
-    let dot_base = match is_init {
-        true => own_dir.parent().unwrap_or(own_dir),
-
-        false => own_dir,
-    };
-
-    let joined = if let Some(rest) = spec.strip_prefix("@self/") {
-        own_dir.join(rest)
-    } else if spec.starts_with("./") || spec.starts_with("../") {
-        dot_base.join(spec)
-    } else if let Some(rest) = spec.strip_prefix('@') {
-        let (alias, tail) = match rest.split_once('/') {
-            Some((a, t)) => (a, Some(t)),
-
-            None => (rest, None),
-        };
-
-        let base = lookup_alias(own_dir, alias)?;
-
-        match tail {
-            Some(tail) => base.join(tail),
-
-            None => base,
-        }
-    } else {
-        return None;
-    };
-
-    as_module_file(&joined)
-}
-
-/// The aliases of the nearest .luaurc walking up from the requiring file
-fn lookup_alias(from_dir: &Path, alias: &str) -> Option<PathBuf> {
-    let want = alias.to_lowercase();
-
-    for dir in from_dir.ancestors() {
-        let path = dir.join(".luaurc");
-
-        if !path.exists() {
-            continue;
-        }
-
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-
-        let Ok(parsed) = json5::from_str::<serde_json::Value>(&text) else {
-            continue;
-        };
-
-        if let Some(aliases) = parsed.get("aliases").and_then(|a| a.as_object()) {
-            for (name, value) in aliases {
-                if name.to_lowercase() == want
-                    && let Some(target) = value.as_str()
-                {
-                    return Some(dir.join(target));
-                }
-            }
-        }
-    }
-
-    None
-}
-
-/// A path as the module file the frontend loads: itself, or its init file
-fn as_module_file(path: &Path) -> Option<PathBuf> {
-    if path.is_file() {
-        return Some(path.to_path_buf());
-    }
-
-    for ext in ["luau", "lua"] {
-        let with = path.with_extension(ext);
-
-        if with.is_file() {
-            return Some(with);
-        }
-    }
-
-    if path.is_dir() {
-        for name in ["init.luau", "init.lua"] {
-            let init = path.join(name);
-
-            if init.is_file() {
-                return Some(init);
-            }
-        }
-    }
-
-    None
-}
-
-/*
-The Roblox global types, vendored beside the crate and refreshed by the
-nightly. The session loads them at start, so the DataModel exists for
-inference, and the service list for auto-imports reads from the same
-text, so the two cannot disagree.
-*/
-const GLOBAL_TYPES: &str = include_str!("../types/globalTypes.d.luau");
-
 pub struct LuauAnalysis {
     session: *mut c_void,
     /// Owned by the session for its lifetime; the shim only borrows it
@@ -282,6 +178,7 @@ impl LuauAnalysis {
             resolve_buffer: None,
             load_buffer: None,
             hooks: None,
+            mounts: None,
         });
 
         let session = unsafe { larvae_session_new() };
@@ -324,6 +221,10 @@ impl Drop for LuauAnalysis {
 }
 
 impl Analysis for LuauAnalysis {
+    fn set_mounts(&mut self, mounts: larvae::requires::datamodel::MountTable) {
+        self.resolver.mounts = Some(mounts);
+    }
+
     fn services(&mut self) -> Vec<String> {
         if self.services.is_empty() {
             /*

@@ -7,6 +7,9 @@ repository = "https://github.com/larvae-luau/larvae"
 homepage = "https://github.com/larvae-luau/larvae"
 description = "The larvae language server, with Luau's analysis frontend behind a feature"
 
+[dev-dependencies]
+tempfile = "3"
+
 [dependencies]
 anyhow = "1"
 larvae = { path = "../larvae" }

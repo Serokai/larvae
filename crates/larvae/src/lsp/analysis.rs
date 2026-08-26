@@ -135,6 +135,20 @@ pub trait Analysis: Send {
         Vec::new()
     }
 
+    /*
+    Give the analyzer the DataModel map of the project.
+
+    `@game/...` is an absolute spec: it is rooted at the DataModel and reads
+    nothing from the file that writes it. So the resolver needs the map, and
+    it needs it for every file, not only the files a sourcemap covers.
+
+    A server without a map still resolves the relative forms, which is the
+    honest answer for a project that has no rojo project and no mounts.
+    */
+    fn set_mounts(&mut self, mounts: crate::requires::datamodel::MountTable) {
+        let _ = mounts;
+    }
+
     /// Load one .d.luau declaration into the global scope
     fn definitions(&mut self, name: &str, source: &str) -> bool {
         let _ = (name, source);

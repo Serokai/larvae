@@ -71,6 +71,41 @@ impl Server {
             self.lsp = project.lsp.clone();
         }
 
+        /*
+        The analyzer receives the DataModel map, so `@game` resolves.
+
+        The map is built the way the pipeline builds it, from the same two
+        sources: `[requires.mounts]` and the rojo project. So the editor and
+        `larvae process` answer one require the same way, which is the point
+        of reading it from the config rather than guessing.
+
+        A project with no config has no map, and a diagnostic about a broken
+        mount belongs to `larvae check` and not to a keystroke, so the
+        diagnostics of the build go nowhere here.
+        */
+        if let Some(analysis) = self.analysis.borrow_mut().as_mut() {
+            /*
+            A project with no larvae.toml still gets its mounts. The rojo
+            project file alone describes a DataModel, and a zero config
+            project is the common Roblox case.
+            */
+            let fallback = crate::config::Config::default();
+            let cfg = project.as_ref().unwrap_or(&fallback);
+
+            let rojo = crate::project::rojo::find_project(&root, cfg.rojo.project.as_deref())
+                .and_then(|path| crate::project::rojo::load(&path).ok());
+
+            // A broken mount is a `larvae check` diagnostic, not a keystroke one.
+            let mut ignored = Vec::new();
+
+            analysis.set_mounts(crate::pipeline::setup::mount_table(
+                &root,
+                cfg,
+                rojo.as_ref(),
+                &mut ignored,
+            ));
+        }
+
         match FmtConfig::discover(&root, project.as_ref().and_then(|c| c.fmt.as_ref())) {
             Ok(cfg) => self.fmt = cfg,
 

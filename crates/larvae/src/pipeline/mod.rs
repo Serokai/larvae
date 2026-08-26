@@ -4,7 +4,7 @@ mod file;
 mod frontend;
 mod output;
 pub mod roots;
-pub(crate) mod setup;
+pub mod setup;
 
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};

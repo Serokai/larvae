@@ -11,6 +11,9 @@ subcommand, which keeps a plain workspace build away from the C++.
 #[cfg(feature = "analyzer")]
 mod analyzer;
 
+// Pure path logic, so it compiles and tests without the vendored C++.
+mod resolve;
+
 fn main() -> std::process::ExitCode {
     #[cfg(feature = "analyzer")]
     let analysis =
