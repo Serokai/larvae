@@ -330,10 +330,11 @@ impl Worm {
     pub fn lsp_respond(
         &mut self,
         kind: &str,
+        context_json: &str,
         response_json: &str,
     ) -> Result<Option<serde_json::Value>> {
         match &mut self.backend {
-            Backend::Native(worm) => worm.lsp_respond(kind, response_json),
+            Backend::Native(worm) => worm.lsp_respond(kind, context_json, response_json),
 
             _ => anyhow::bail!("only a native worm answers the lsp hooks"),
         }

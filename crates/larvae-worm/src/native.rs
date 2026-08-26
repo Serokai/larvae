@@ -171,9 +171,10 @@ pub trait Handler {
     fn lsp_respond(
         &mut self,
         kind: &str,
+        context: &str,
         response: &str,
     ) -> Result<Option<serde_json::Value>, String> {
-        let _ = (kind, response);
+        let _ = (kind, context, response);
 
         Ok(None)
     }
@@ -298,6 +299,10 @@ enum Request {
     LspDeclarations {},
     LspRespond {
         kind: String,
+        /// The request as JSON: path, document text, and the cursor's byte
+        /// offset when the kind has one
+        #[serde(default)]
+        context: String,
         response: String,
     },
 }
@@ -407,15 +412,17 @@ fn answer(handler: &mut impl Handler, request: Request) -> Vec<u8> {
             })
         }),
 
-        Request::LspRespond { kind, response } => {
-            handler
-                .lsp_respond(&kind, &response)
-                .map(|next| match next {
-                    Some(json) => serde_json::json!({ "ok": true, "response": json }),
+        Request::LspRespond {
+            kind,
+            context,
+            response,
+        } => handler
+            .lsp_respond(&kind, &context, &response)
+            .map(|next| match next {
+                Some(json) => serde_json::json!({ "ok": true, "response": json }),
 
-                    None => serde_json::json!({ "ok": true }),
-                })
-        }
+                None => serde_json::json!({ "ok": true }),
+            }),
 
         Request::Manifest => match handler.manifest() {
             Some(text) => Ok(serde_json::json!({ "ok": true, "manifest": text })),

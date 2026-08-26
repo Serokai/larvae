@@ -57,6 +57,34 @@ fn import_insertion_line(src: &str) -> u32 {
     last_import_end
 }
 
+/*
+An offset of the original, moved onto the lowering by line.
+
+A front-end worm preserves line numbers by contract, so the line carries
+over whole, and the column clamps to the lowered line's length. Exact for
+the Luau between markup, and close enough at a markup boundary for the
+analyzer to anchor.
+*/
+fn lowered_offset(original: &str, lowered: &str, at: u32) -> u32 {
+    let head = &original[..(at as usize).min(original.len())];
+    let line = head.matches('\n').count();
+    let column = head.len() - head.rfind('\n').map(|n| n + 1).unwrap_or(0);
+
+    let mut start = 0usize;
+
+    for (i, text) in lowered.split_inclusive('\n').enumerate() {
+        if i == line {
+            let content = text.trim_end_matches('\n').len();
+
+            return (start + column.min(content)) as u32;
+        }
+
+        start += text.len();
+    }
+
+    lowered.len() as u32
+}
+
 /// The byte offset of the position in a request's params
 fn position_byte(src: &str, params: &Value) -> u32 {
     let line = params["position"]["line"].as_u64().unwrap_or(0) as u32;
@@ -88,28 +116,66 @@ impl Server {
             return Value::Null;
         };
 
-        if self.worms.frontend_for(&path).is_some() {
-            return Value::Null;
+        let at = position_byte(src, params);
+        let context = json!({ "path": path, "text": src, "offset": at });
+
+        /*
+        A claimed file gets both halves. The worm's respond hook answers
+        the markup, ex: the class behind a tag, and wins where it answers.
+        The Luau between the markup goes to the analyzer as the worm's
+        lowering, positions mapped by line, because a claimed front-end
+        preserves lines by contract.
+        */
+        if let Some(index) = self.worms.frontend_for(&path) {
+            let from_worm = self.worms.lsp_respond("hover", &context, Value::Null);
+
+            if !from_worm.is_null() {
+                return from_worm;
+            }
+
+            let Ok(outcome) = self.worms.compile(index, src) else {
+                return Value::Null;
+            };
+
+            if !outcome.ok {
+                return Value::Null;
+            }
+
+            let lowered = super::analysis::plain_view(&outcome.text);
+            let mut analysis = self.analysis.borrow_mut();
+
+            let Some(text) = analysis.as_mut().and_then(|a| {
+                a.open(&path, &lowered);
+
+                a.hover(&path, lowered_offset(src, &lowered, at))
+            }) else {
+                return Value::Null;
+            };
+
+            return json!({
+                "contents": { "kind": "markdown", "value": format!("```luau\n{text}\n```") }
+            });
         }
 
-        let at = position_byte(src, params);
-
+        let view = super::analysis::plain_view(src);
         let mut analysis = self.analysis.borrow_mut();
 
         let Some(text) = analysis.as_mut().and_then(|a| {
-            a.open(&path, src);
+            a.open(&path, &view);
 
             a.hover(&path, at)
         }) else {
             return Value::Null;
         };
 
+        drop(analysis);
+
         let hover = json!({
             "contents": { "kind": "markdown", "value": format!("```luau\n{text}\n```") }
         });
 
         // Tier 3: the worms that transform hovers see it before the editor.
-        self.worms.lsp_respond("hover", hover)
+        self.worms.lsp_respond("hover", &context, hover)
     }
 
     /// Completions at the cursor, from the analyzer behind the seam
@@ -128,19 +194,55 @@ impl Server {
             return json!([]);
         };
 
-        if self.worms.frontend_for(&path).is_some() {
-            return json!([]);
+        let at = position_byte(src, params);
+        let context = json!({ "path": path, "text": src, "offset": at });
+
+        /*
+        A claimed file's completions are the worm's markup answers plus
+        the analyzer's answers over the lowering, in one list.
+        */
+        if let Some(index) = self.worms.frontend_for(&path) {
+            let mut items = match self.worms.compile(index, src) {
+                Ok(outcome) if outcome.ok => {
+                    let lowered = super::analysis::plain_view(&outcome.text);
+                    let mut analysis = self.analysis.borrow_mut();
+
+                    analysis
+                        .as_mut()
+                        .map(|a| {
+                            a.open(&path, &lowered);
+
+                            a.completions(&path, lowered_offset(src, &lowered, at))
+                        })
+                        .unwrap_or_default()
+                }
+
+                _ => Vec::new(),
+            };
+
+            let base: Vec<Value> = items
+                .drain(..)
+                .map(|c| {
+                    json!({
+                        "label": c.label,
+                        "kind": c.kind,
+                        "detail": c.detail,
+                        "sortText": format!("5{}", c.label),
+                    })
+                })
+                .collect();
+
+            return self.worms.lsp_respond("completions", &context, json!(base));
         }
 
-        let at = position_byte(src, params);
-
+        let view = super::analysis::plain_view(src);
         let mut analysis = self.analysis.borrow_mut();
 
         let Some(analysis) = analysis.as_mut() else {
             return json!([]);
         };
 
-        analysis.open(&path, src);
+        analysis.open(&path, &view);
 
         /*
         The order the editor shows is the order these tiers spell. A
@@ -219,7 +321,8 @@ impl Server {
         }
 
         // Tier 3: the worms that transform completions see the list first.
-        self.worms.lsp_respond("completions", json!(items))
+        self.worms
+            .lsp_respond("completions", &context, json!(items))
     }
 
     /// Reports if the `[lsp]` mode leaves this file to another server

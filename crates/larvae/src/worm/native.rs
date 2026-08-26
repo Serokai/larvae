@@ -83,6 +83,9 @@ enum Request<'a> {
     /// Transform one response before the editor sees it
     LspRespond {
         kind: &'a str,
+        /// The request as JSON: the path, the document text, and the byte
+        /// offset of the cursor when the kind has one
+        context: &'a str,
         response: &'a str,
     },
     /*
@@ -357,10 +360,12 @@ impl NativeWorm {
     pub fn lsp_respond(
         &mut self,
         kind: &str,
+        context_json: &str,
         response_json: &str,
     ) -> Result<Option<serde_json::Value>> {
         let response = self.call(&Request::LspRespond {
             kind,
+            context: context_json,
             response: response_json,
         })?;
 

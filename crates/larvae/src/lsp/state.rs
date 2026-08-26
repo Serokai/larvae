@@ -157,7 +157,11 @@ impl Server {
             resolve: Box::new(move |from, spec| {
                 resolve_pool.lsp_resolve(&from.to_string_lossy(), spec)
             }),
-            load: Box::new(move |path| load_pool.lsp_load_any(path).map(|r| r.source)),
+            load: Box::new(move |path| {
+                load_pool
+                    .lsp_load_any(path)
+                    .map(|r| crate::lsp::analysis::plain_view(&r.source).into_owned())
+            }),
         });
 
         for decl in self.worms.lsp_declarations() {

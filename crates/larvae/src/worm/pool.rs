@@ -327,9 +327,22 @@ impl Pool {
         out
     }
 
-    /// One response through every worm that transforms this kind, in order
-    pub fn lsp_respond(&self, kind: &str, response: serde_json::Value) -> serde_json::Value {
+    /*
+    One response through every worm that transforms this kind, in order.
+
+    The context carries the request: the path, the document text, and the
+    cursor's byte offset when the kind has one. A worm that injects, ex:
+    tag completions inside its markup, reads the position from here; the
+    response alone cannot say where the cursor sits.
+    */
+    pub fn lsp_respond(
+        &self,
+        kind: &str,
+        context: &serde_json::Value,
+        response: serde_json::Value,
+    ) -> serde_json::Value {
         let mut current = response;
+        let context = context.to_string();
 
         for index in 0..self.specs().len() {
             if !self.specs()[index]
@@ -344,7 +357,9 @@ impl Pool {
 
             let json = current.to_string();
 
-            if let Ok(Some(next)) = self.with_worm(index, |worm, _| worm.lsp_respond(kind, &json)) {
+            if let Ok(Some(next)) =
+                self.with_worm(index, |worm, _| worm.lsp_respond(kind, &context, &json))
+            {
                 current = next;
             }
         }

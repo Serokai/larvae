@@ -900,7 +900,9 @@ fn a_worm_transforms_a_hover_response() {
         "contents": { "kind": "markdown", "value": "number" }
     });
 
-    let out = server.worms.lsp_respond("hover", hover);
+    let out = server
+        .worms
+        .lsp_respond("hover", &serde_json::json!({}), hover);
 
     assert_eq!(out["contents"]["value"], "number (via worm)", "{out}");
 }

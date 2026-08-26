@@ -98,7 +98,7 @@ impl Server {
             && let Some(path) = path.as_deref()
         {
             analysis.invalidate(path);
-            analysis.open(path, src);
+            analysis.open(path, &super::analysis::plain_view(src));
 
             for diag in analysis.check(path) {
                 diagnostics.push(json!({
@@ -112,7 +112,10 @@ impl Server {
         }
 
         // Tier 3: the worms that transform diagnostics see the list first.
-        let diagnostics = self.worms.lsp_respond("diagnostics", json!(diagnostics));
+        let context = json!({ "path": path, "text": src });
+        let diagnostics = self
+            .worms
+            .lsp_respond("diagnostics", &context, json!(diagnostics));
 
         rpc::notify(
             out,
