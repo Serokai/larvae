@@ -1046,7 +1046,9 @@ mod tests {
         let mut line = 0u32;
         let mut character = 0u32;
 
-        for group in data.chunks_exact(5) {
+        let (groups, _) = data.as_chunks::<5>();
+
+        for group in groups {
             let (delta_line, delta_start) = (group[0], group[1]);
 
             line += delta_line;
@@ -1304,7 +1306,9 @@ print(answer, Types, ok)
 
         assert!(!data.is_empty());
 
-        for group in data.chunks_exact(5) {
+        let (groups, _) = data.as_chunks::<5>();
+
+        for group in groups {
             assert!(
                 (group[3] as usize) < legend.types.len(),
                 "type index {} is out of the legend",
