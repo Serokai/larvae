@@ -289,7 +289,11 @@ fn native_pass(
     };
 
     if opts.validate_syntax
-        && let Err(e) = crate::syntax::parser::parse(src, &lexed.toks)
+        && let Err(e) = crate::syntax::parser::parse_with(
+            src,
+            &lexed.toks,
+            crate::syntax::parser::ParseOptions::for_path(path),
+        )
     {
         diags.push(Diag::error(path, format!("syntax error, {}", e.message)).at(src, e.offset));
     }

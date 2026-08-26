@@ -129,6 +129,11 @@ impl<'a> Parser<'a> {
             "@" => {
                 let attributes = self.attributes()?;
 
+                // A definitions file decorates declarations the same way.
+                if self.options.definitions && self.at("declare") {
+                    return self.declare_stmt(start);
+                }
+
                 // `@native` and then `export function f()`; the RFC composes them.
                 let exported = matches!(self.text(), "export")
                     && matches!(self.text_at(1), "local" | "const" | "function");
@@ -186,8 +191,192 @@ impl<'a> Parser<'a> {
 
             "type" if self.type_is_alias() => self.type_alias(start),
 
+            /*
+
+            `declare` is the statement of a definitions file, and it stays
+
+            contextual: `declare = 1` and `declare(x)` are a name in code, and
+
+            only the three declaration forms take the keyword reading.
+
+            */
+            "declare"
+                if self.options.definitions
+                    && (matches!(self.text_at(1), "function" | "class" | "extern")
+                        || self.text_at(2) == ":") =>
+            {
+                self.declare_stmt(start)
+            }
+
             _ => self.expr_stmt(start),
         }
+    }
+
+    /*
+    One `declare` statement, in its three forms:
+
+    `declare function name<T>(a: T, ...: any): R`
+    `declare name: T`
+    `declare class Name extends Base ... end`
+
+    A class body holds properties (`name: T`, `["a b"]: T`), methods
+    (`function name(self): R`), and indexers (`[T]: U`), each with an
+    optional `read` or `write` in front. The tree keeps only the span; a
+    declaration is meta code that larvae validates and never rewrites.
+    */
+    fn declare_stmt(&mut self, start: usize) -> Result<Stmt, ParseError> {
+        self.bump(); // declare
+
+        match self.text() {
+            "function" => {
+                self.bump();
+                self.expect_name()?;
+                self.declare_signature()?;
+            }
+
+            /*
+            The new solver's spelling: `declare extern type Name with ...
+            end`. The members are the members of a class declaration, so
+            both forms share the loop below.
+            */
+            "extern" => {
+                self.bump();
+                self.expect("type")?;
+                self.expect_name()?;
+
+                if self.at("extends") {
+                    self.bump();
+                    self.expect_name()?;
+                }
+
+                self.expect("with")?;
+                self.declare_members()?;
+                self.expect("end")?;
+
+                return Ok(Stmt::Declare(Declare {
+                    span: TokSpan::new(start, self.pos),
+                }));
+            }
+
+            "class" => {
+                self.bump();
+                self.expect_name()?;
+
+                if self.at("extends") {
+                    self.bump();
+                    self.expect_name()?;
+                }
+
+                self.declare_members()?;
+                self.expect("end")?;
+
+                return Ok(Stmt::Declare(Declare {
+                    span: TokSpan::new(start, self.pos),
+                }));
+            }
+
+            _ => {
+                self.expect_name()?;
+                self.expect(":")?;
+                self.type_()?;
+            }
+        }
+
+        Ok(Stmt::Declare(Declare {
+            span: TokSpan::new(start, self.pos),
+        }))
+    }
+
+    /// The members of a class or extern type declaration, up to its `end`
+    fn declare_members(&mut self) -> Result<(), ParseError> {
+        while !self.at("end") {
+            if self.at_end() {
+                return Err(self.err("this declaration never ends"));
+            }
+
+            // A member takes attributes, ex: `@deprecated` above a method.
+            if self.at("@") {
+                self.attributes()?;
+            }
+
+            // The modifier changes nothing about the shape that follows.
+            if self.at("read") || self.at("write") {
+                self.bump();
+            }
+
+            if self.at("function") {
+                self.bump();
+                self.expect_name()?;
+                self.declare_signature()?;
+            } else if self.at("[") {
+                self.bump();
+
+                // A quoted name is a property; a type is an indexer.
+                if matches!(self.kind_at(0), Some(TokKind::Str { .. })) {
+                    self.bump();
+                } else {
+                    self.type_()?;
+                }
+
+                self.expect("]")?;
+                self.expect(":")?;
+                self.type_()?;
+            } else {
+                self.expect_name()?;
+                self.expect(":")?;
+                self.type_()?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// The parameter list and return type of a declared function, no body
+    fn declare_signature(&mut self) -> Result<(), ParseError> {
+        if self.at("<") {
+            self.angle_span()?;
+        }
+
+        self.expect("(")?;
+
+        while !self.at(")") {
+            if self.at_end() {
+                return Err(self.err("this parameter list never closes"));
+            }
+
+            if self.at("...") {
+                self.bump();
+
+                if self.at(":") {
+                    self.bump();
+                    self.type_()?;
+                }
+
+                break;
+            }
+
+            self.expect_name()?;
+
+            if self.at(":") {
+                self.bump();
+                self.type_()?;
+            }
+
+            if self.at(",") {
+                self.bump();
+            } else {
+                break;
+            }
+        }
+
+        self.expect(")")?;
+
+        if self.at(":") {
+            self.bump();
+            self.type_ret()?;
+        }
+
+        Ok(())
     }
 
     /// `continue` is contextual. It is the keyword only when no token that
@@ -215,7 +404,38 @@ impl<'a> Parser<'a> {
 
         while self.at("@") {
             let start = self.bump();
-            self.expect_name()?;
+
+            /*
+            The bracket form of a definitions file, ex:
+            `@[deprecated { use = "task.spawn" }]`. The group skips whole
+            and balanced; its content is metadata larvae reads past.
+            */
+            if self.at("[") {
+                let mut depth = 0usize;
+
+                loop {
+                    if self.at_end() {
+                        return Err(self.err("this attribute never closes"));
+                    }
+
+                    if self.at("[") {
+                        depth += 1;
+                    } else if self.at("]") {
+                        depth -= 1;
+
+                        if depth == 0 {
+                            self.bump();
+
+                            break;
+                        }
+                    }
+
+                    self.bump();
+                }
+            } else {
+                self.expect_name()?;
+            }
+
             out.push(TokSpan::new(start, self.pos));
         }
 

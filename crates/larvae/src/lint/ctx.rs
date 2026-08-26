@@ -204,7 +204,11 @@ impl<'a> Collected<'a> {
         self.stmts.push(stmt);
 
         match stmt {
-            Stmt::Empty(_) | Stmt::Break(_) | Stmt::Continue(_) | Stmt::TypeAlias(_) => {}
+            Stmt::Empty(_)
+            | Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::TypeAlias(_)
+            | Stmt::Declare(_) => {}
 
             Stmt::Local(n) => self.exprs_of(&n.values),
 

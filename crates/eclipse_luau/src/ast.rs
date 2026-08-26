@@ -56,6 +56,8 @@ pub enum Stmt {
     Break(TokSpan),
     Continue(TokSpan),
     TypeAlias(TypeAlias),
+    /// A `declare` statement of a definitions file; the span is the whole statement
+    Declare(Declare),
     Class(Class),
 }
 
@@ -89,6 +91,8 @@ impl Stmt {
             Stmt::Return(n) => n.span,
 
             Stmt::TypeAlias(n) => n.span,
+
+            Stmt::Declare(n) => n.span,
         }
     }
 }
@@ -244,6 +248,19 @@ pub enum ClassMember {
         span: TokSpan,
     },
     Method(Function),
+}
+
+/*
+One declaration of a `.d.luau` definitions file.
+
+`declare function`, `declare name: T`, and `declare class ... end` all
+land here. The parser validates the inner structure; the tree keeps the
+span whole, because a declaration is meta code that larvae reads and
+never rewrites.
+*/
+#[derive(Debug)]
+pub struct Declare {
+    pub span: TokSpan,
 }
 
 /// `type X<T> = ...`, `export type ...`, `type function f() ... end`.

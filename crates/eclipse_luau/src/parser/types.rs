@@ -212,6 +212,18 @@ impl<'a> Parser<'a> {
                 return Err(self.err("unterminated table type"));
             }
 
+            /*
+            The `read` and `write` access modifiers come before a name or
+            an indexer: `{ read x: T }` and `{ read [string]: T }` alike.
+            A field NAMED read stays a field, because the modifier reading
+            needs something to modify after it.
+            */
+            if matches!(self.text(), "read" | "write")
+                && (matches!(self.kind_at(1), Some(TokKind::Ident)) || self.text_at(1) == "[")
+            {
+                self.bump();
+            }
+
             if self.at("[") {
                 self.bump();
                 self.type_body()?;
@@ -219,13 +231,6 @@ impl<'a> Parser<'a> {
                 self.expect(":")?;
                 self.type_body()?;
             } else {
-                // The `read` and `write` access modifiers come before the name.
-                if matches!(self.text(), "read" | "write")
-                    && matches!(self.kind_at(1), Some(TokKind::Ident))
-                {
-                    self.bump();
-                }
-
                 if self.at_name() && self.text_at(1) == ":" {
                     self.bump();
                     self.bump();

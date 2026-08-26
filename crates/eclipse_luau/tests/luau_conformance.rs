@@ -8,13 +8,13 @@ deliberately hostile string content included. A parser change that breaks
 any of them fails here first, with the file named.
 */
 
-use larvae::syntax::{lexer, parser, printer};
+use eclipse_luau::{lexer, parser, printer};
 
 #[test]
 fn every_conformance_file_round_trips() {
     let dir = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/parser/luau-conformance"
+        "/tests/fixtures/luau-conformance"
     );
 
     let mut checked = 0usize;
@@ -34,7 +34,7 @@ fn every_conformance_file_round_trips() {
             .to_string();
 
         let bytes = std::fs::read(&path).expect("reads");
-        let (src, _) = larvae::sys::utf8_stand_in(bytes);
+        let (src, _) = eclipse_luau::stand_in::utf8_stand_in(bytes);
 
         let lexed = match lexer::lex(&src) {
             Ok(l) => l,

@@ -67,13 +67,24 @@ span into either form is easy. To turn a line and a column back into a span
 is not easy.
 */
 pub fn analyze(src: &str, cfg: &LintConfig) -> Result<Vec<Finding>, ParseFailure> {
+    analyze_with(src, cfg, Default::default())
+}
+
+/// The same analysis, with the parse options the file's name asks for, so
+/// a `.d.luau` file reads its `declare` statements instead of refusing them
+pub fn analyze_with(
+    src: &str,
+    cfg: &LintConfig,
+    options: parser::ParseOptions,
+) -> Result<Vec<Finding>, ParseFailure> {
     let fail = |offset, message: String| ParseFailure {
         offset,
         message: format!("syntax error, {message}"),
     };
 
     let lexed = lexer::lex(src).map_err(|e| fail(e.offset, e.message))?;
-    let chunk = parser::parse(src, &lexed.toks).map_err(|e| fail(e.offset, e.message))?;
+    let chunk =
+        parser::parse_with(src, &lexed.toks, options).map_err(|e| fail(e.offset, e.message))?;
 
     let ctx = LintCtx::new(src, &lexed.toks, &lexed.comments, &chunk, cfg);
     let mut findings = Vec::new();
@@ -457,7 +468,8 @@ a tree must report on every file that the user gave it. One file that does
 not compile must not stop the run.
 */
 pub fn lint(path: &Path, src: &str, cfg: &LintConfig) -> Result<Vec<Diag>, Diag> {
-    let findings = analyze(src, cfg).map_err(|e| Diag::error(path, e.message).at(src, e.offset))?;
+    let findings = analyze_with(src, cfg, parser::ParseOptions::for_path(path))
+        .map_err(|e| Diag::error(path, e.message).at(src, e.offset))?;
 
     Ok(into_diags(path, src, findings))
 }

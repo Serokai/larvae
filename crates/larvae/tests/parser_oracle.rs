@@ -29,7 +29,7 @@ use larvae::syntax::{lexer, parser};
 
 fn dir(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/parser")
+        .join("../eclipse_luau/tests/fixtures")
         .join(name)
 }
 

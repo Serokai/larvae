@@ -969,6 +969,16 @@ impl<'a> Emitter<'a> {
             exactly as the author wrote it. That also keeps its comments. A
             token replay can never keep them.
             */
+            /*
+            A declaration is meta code larvae never rewrites; it prints as
+            the author wrote it, comments and layout included.
+            */
+            Stmt::Declare(n) => {
+                let (lo, hi) = self.byte_span(n.span);
+
+                Doc::text(&self.src[lo as usize..hi as usize])
+            }
+
             Stmt::TypeAlias(n) => {
                 let (lo, hi) = self.byte_span(n.span);
                 let raw = &self.src[lo as usize..hi as usize];
@@ -2304,7 +2314,12 @@ fn needs_space(prev: &str, next: &str) -> bool {
     }
 
     if matches!(next, "<" | "[") {
-        return prev == "{";
+        /*
+        `read [string]: T`: a word before `[` is an access modifier ahead
+        of an indexer, because a type indexes nothing else. Everything
+        other than a word attaches, ex: `Map<`.
+        */
+        return prev == "{" || matches!(prev, "read" | "write");
     }
 
     /*

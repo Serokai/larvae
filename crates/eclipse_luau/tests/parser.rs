@@ -4,7 +4,7 @@ token stream with no holes, and must print back byte for byte. That set of
 three checks is the M1a exit criterion.
 */
 
-use larvae::syntax::{lexer, parser, printer};
+use eclipse_luau::{lexer, parser, printer};
 
 /// This function parses, checks coverage, prints, and compares in one step.
 #[track_caller]
@@ -413,4 +413,93 @@ fn integer_literals_parse() {
     round_trip("local h = 0xABABi + 0xf_fi\n");
     round_trip("local b = 0b1000_1000i\n");
     round_trip("local big = 0xFFFF_FFFF_FFFF_FFFFi\n");
+}
+
+// --- definitions files ----------------------------------------------------
+
+/// The three declare forms parse in definitions mode.
+#[test]
+fn declarations_parse_in_definitions_mode() {
+    let src = "declare version: string\n\n\
+               declare function abs(n: number): number\n\n\
+               declare class Instance extends Object\n\
+               \tName: string\n\
+               \t[\"Special Prop\"]: boolean\n\
+               \tread ClassName: string\n\
+               \tfunction IsA(self, className: string): boolean\n\
+               \t[string]: any\n\
+               end\n";
+    let lexed = eclipse_luau::lexer::lex(src).unwrap();
+    let opts = eclipse_luau::parser::ParseOptions { definitions: true };
+
+    let chunk = eclipse_luau::parser::parse_with(src, &lexed.toks, opts).expect("parses");
+
+    assert_eq!(chunk.block.stmts.len(), 3);
+    assert_eq!(
+        eclipse_luau::printer::print_chunk(src, &lexed.toks, &chunk),
+        src
+    );
+}
+
+/// The same source is a syntax error in an ordinary file, like Luau itself.
+#[test]
+fn declarations_stay_an_error_in_ordinary_source() {
+    let src = "declare function abs(n: number): number\n";
+    let lexed = eclipse_luau::lexer::lex(src).unwrap();
+
+    assert!(eclipse_luau::parser::parse(src, &lexed.toks).is_err());
+
+    // The name stays a name: this is ordinary code.
+    let code = "local declare = 1\ndeclare = declare + 1\n";
+    let lexed = eclipse_luau::lexer::lex(code).unwrap();
+
+    assert!(eclipse_luau::parser::parse(code, &lexed.toks).is_ok());
+}
+
+/// The name decides the mode: .d.luau asks for definitions.
+#[test]
+fn the_file_name_selects_the_mode() {
+    use eclipse_luau::parser::ParseOptions;
+    use std::path::Path;
+
+    assert!(ParseOptions::for_path(Path::new("types/globalTypes.d.luau")).definitions);
+    assert!(ParseOptions::for_path(Path::new("x.d.lua")).definitions);
+    assert!(!ParseOptions::for_path(Path::new("src/main.luau")).definitions);
+    assert!(!ParseOptions::for_path(Path::new("android.luau")).definitions);
+}
+
+/*
+The real 837KB globalTypes.d.luau of luau-lsp must parse whole and print
+back byte for byte. The file lives in the larvae-lsp crate and the nightly
+refreshes it, so this test tracks real upstream output over time.
+*/
+#[test]
+fn the_vendored_global_types_parse_and_round_trip() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../larvae-lsp/types/globalTypes.d.luau"
+    );
+
+    let src = std::fs::read_to_string(path).expect("the vendored types exist");
+    let lexed = eclipse_luau::lexer::lex(&src).expect("lexes");
+    let opts = eclipse_luau::parser::ParseOptions { definitions: true };
+    let chunk = match eclipse_luau::parser::parse_with(&src, &lexed.toks, opts) {
+        Ok(chunk) => chunk,
+
+        Err(e) => {
+            let at = e.offset.min(src.len().saturating_sub(1));
+            let line = src[..at].matches('\n').count() + 1;
+
+            panic!(
+                "line {line}: {} near {:?}",
+                e.message,
+                &src[at..(at + 60).min(src.len())]
+            );
+        }
+    };
+
+    assert_eq!(
+        eclipse_luau::printer::print_chunk(&src, &lexed.toks, &chunk),
+        src
+    );
 }

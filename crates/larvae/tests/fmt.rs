@@ -2040,3 +2040,15 @@ fn export_by_value_prints_as_written() {
         assert_eq!(fmt(src), src);
     }
 }
+
+/// The access modifiers hold in every position, the indexer included.
+#[test]
+fn read_and_write_modifiers_survive_types() {
+    let src = "type Cell = { read value: number, write dirty: boolean }\n\
+               type Store = { read [string]: number }\n\
+               local box: { read data: { string } } = { data = {} }\n";
+    let out = fmt(src);
+
+    assert_eq!(out, src);
+    assert_eq!(fmt(&out), out, "fixed point");
+}

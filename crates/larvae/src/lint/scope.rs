@@ -259,7 +259,7 @@ impl<'a> Binder<'a> {
 
     fn stmt_inner(&mut self, stmt: &'a Stmt) {
         match stmt {
-            Stmt::Empty(_) | Stmt::Break(_) | Stmt::Continue(_) => {}
+            Stmt::Empty(_) | Stmt::Break(_) | Stmt::Continue(_) | Stmt::Declare(_) => {}
 
             // `type Foo = Types.Foo` is a use of the local `Types`.
             Stmt::TypeAlias(n) => self.type_reads(n.span),

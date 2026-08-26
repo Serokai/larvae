@@ -23,6 +23,7 @@ pub mod lexer;
 pub mod parser;
 pub mod printer;
 pub mod scan;
+pub mod stand_in;
 
 /// One parsed file: its tokens with the comment spans, and its tree
 pub struct Parsed {

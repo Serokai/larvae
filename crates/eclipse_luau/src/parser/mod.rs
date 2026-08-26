@@ -26,12 +26,44 @@ pub struct ParseError {
 const MAX_DEPTH: u32 = 180;
 const UNARY_PRIORITY: u8 = 12;
 
+/*
+How a parse reads the source.
+
+`definitions` allows the `declare` statements of a `.d.luau` file. It is
+off for ordinary source, because Luau itself accepts a declaration only
+in a definitions file, and a parser that quietly accepted one in a
+normal module would bless code the compiler refuses.
+*/
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ParseOptions {
+    pub definitions: bool,
+}
+
+impl ParseOptions {
+    /// The options a file's name asks for: `.d.luau` and `.d.lua` are definitions
+    pub fn for_path(path: &std::path::Path) -> Self {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+
+        Self {
+            definitions: name.ends_with(".d.luau") || name.ends_with(".d.lua"),
+        }
+    }
+}
+
 pub fn parse(src: &str, toks: &[Tok]) -> Result<Chunk, ParseError> {
+    parse_with(src, toks, ParseOptions::default())
+}
+
+pub fn parse_with(src: &str, toks: &[Tok], options: ParseOptions) -> Result<Chunk, ParseError> {
     let mut p = Parser {
         src,
         toks,
         pos: 0,
         depth: 0,
+        options,
     };
 
     let block = p.block()?;
@@ -52,6 +84,7 @@ pub fn parse_expr(src: &str, toks: &[Tok]) -> Result<Expr, ParseError> {
         toks,
         pos: 0,
         depth: 0,
+        options: ParseOptions::default(),
     };
 
     let expr = p.expr()?;
@@ -64,6 +97,7 @@ pub fn parse_expr(src: &str, toks: &[Tok]) -> Result<Expr, ParseError> {
 }
 
 struct Parser<'a> {
+    options: ParseOptions,
     src: &'a str,
     toks: &'a [Tok],
     pos: usize,

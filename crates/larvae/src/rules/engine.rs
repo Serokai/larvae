@@ -163,7 +163,11 @@ pub fn walk_stmt(s: &Stmt, v: &mut impl Visit) {
     }
 
     match s {
-        Stmt::Empty(_) | Stmt::Break(_) | Stmt::Continue(_) | Stmt::TypeAlias(_) => {}
+        Stmt::Empty(_)
+        | Stmt::Break(_)
+        | Stmt::Continue(_)
+        | Stmt::TypeAlias(_)
+        | Stmt::Declare(_) => {}
         Stmt::Local(n) => {
             for e in &n.values {
                 walk_expr(e, v);

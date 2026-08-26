@@ -234,6 +234,8 @@ impl NodeTable {
     fn push_stmt(&mut self, s: &Stmt, parent: u32, bytes: &impl Fn(TokSpan) -> (u32, u32)) {
         let (kind, span) = match s {
             Stmt::Empty(span) => (Kind::Empty, *span),
+            // A declaration walks as one leaf, like a type alias.
+            Stmt::Declare(n) => (Kind::TypeAlias, n.span),
             Stmt::Local(n) => (Kind::Local, n.span),
             Stmt::Assign(n) => (Kind::Assign, n.span),
             Stmt::Call(_, span) => (Kind::Call, *span),
@@ -256,6 +258,8 @@ impl NodeTable {
 
         // push the children, so a worm can walk into a statement and not only past it
         match s {
+            Stmt::Declare(_) => {}
+
             Stmt::Local(n) => {
                 for e in &n.values {
                     self.push_expr(e, id, bytes);

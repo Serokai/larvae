@@ -6,7 +6,7 @@
 # and prints `SyntaxError:` apart from `TypeError:`, which is the whole trick:
 # the type errors are not larvae's business and the syntax errors are.
 #
-# The verdicts in crates/larvae/tests/fixtures/parser are recorded, so CI runs
+# The verdicts in crates/eclipse_luau/tests/fixtures are recorded, so CI runs
 # the comparison without Luau. This script is how the recording gets made and
 # checked again later.
 #
@@ -25,7 +25,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LARVAE="${LARVAE:-$ROOT/target/release/larvae}"
 LUAU_LSP="${LUAU_LSP:-luau-lsp}"
-FIXTURES="$ROOT/crates/larvae/tests/fixtures/parser"
+FIXTURES="$ROOT/crates/eclipse_luau/tests/fixtures"
 
 if [ ! -x "$LARVAE" ]; then
     echo "building larvae (release)..." >&2
@@ -135,8 +135,8 @@ sweep() { # sweep <list of paths on stdin>
 
     echo
     echo "The first list is the one to act on. A file there is correct Luau that"
-    echo "no larvae command reads. Add it under fixtures/parser/accept with the"
-    echo "fix. The second list is softer; record a case under fixtures/parser/"
+    echo "no larvae command reads. Add it under fixtures/accept with the"
+    echo "fix. The second list is softer; record a case under fixtures/"
     echo "lenient when it is one larvae means to keep."
 
     [ "$strict" -eq 0 ]

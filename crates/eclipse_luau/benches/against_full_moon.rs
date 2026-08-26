@@ -12,7 +12,7 @@ mod bench {
         let dir = std::env::var("BENCH_CORPUS").unwrap_or_else(|_| {
             concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../larvae/tests/fixtures/parser/luau-conformance"
+                "/tests/fixtures/luau-conformance"
             )
             .to_string()
         });

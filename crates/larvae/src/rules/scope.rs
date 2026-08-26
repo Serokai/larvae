@@ -152,7 +152,11 @@ impl<'src> Binder<'_, 'src> {
 
     fn stmt(&mut self, s: &Stmt) {
         match s {
-            Stmt::Empty(_) | Stmt::Break(_) | Stmt::Continue(_) | Stmt::TypeAlias(_) => {}
+            Stmt::Empty(_)
+            | Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::TypeAlias(_)
+            | Stmt::Declare(_) => {}
 
             // The walk reads the values before the names exist. `local x = x` sees the outer x.
             Stmt::Local(n) => {
