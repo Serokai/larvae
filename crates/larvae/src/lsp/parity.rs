@@ -403,6 +403,22 @@ impl Server {
         json!(out)
     }
 
+    /*
+    The whole document, coloured.
+
+    The encoding is relative: each token carries its distance from the one
+    before it. That is the protocol's shape and the module builds it, so
+    nothing here does arithmetic on positions.
+    */
+    pub(super) fn semantic_tokens(&self, params: &Value) -> Value {
+        let Some((src, _)) = self.document(params) else {
+            return Value::Null;
+        };
+
+        // The colours read the globals the project has, not a fixed platform.
+        json!({ "data": super::tokens::semantic_tokens_for(src, self.lint.std) })
+    }
+
     /// The signature of the call the caret sits in; the analyzer alone knows it
     pub(super) fn signature_help(&self, params: &Value) -> Value {
         if !self.lsp.signature_help.enabled {

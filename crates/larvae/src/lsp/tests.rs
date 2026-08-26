@@ -341,10 +341,10 @@ fn closing_a_document_drops_it_and_clears_its_diagnostics() {
 /*
 A method larvae does not answer gets an error, not silence.
 
-`semanticTokens/full` is the example because larvae does not answer it yet.
-It was `rename`, then `signatureHelp`, and each moved as that feature
-shipped. That is the shape of this test working: the method named here has
-to be one the server truly lacks, so the case moves as the server grows.
+`moniker` is the example because larvae does not answer it and has no plan
+to. It was `rename`, then `signatureHelp`, then `semanticTokens`, and each
+moved as that feature shipped. That movement is the test working: the method
+it names has to be one the server truly lacks.
 */
 #[test]
 fn an_unsupported_request_is_answered_with_an_error() {
@@ -353,7 +353,7 @@ fn an_unsupported_request_is_answered_with_an_error() {
 
     server
         .handle(
-            &message("textDocument/semanticTokens/full", Some(9), json!({})),
+            &message("textDocument/moniker", Some(9), json!({})),
             &mut out,
         )
         .unwrap();
@@ -367,8 +367,8 @@ fn the_unsupported_example_is_really_unsupported() {
     let caps = capabilities(true);
 
     assert!(
-        caps["capabilities"]["semanticTokensProvider"].is_null(),
-        "semanticTokens is advertised now, so the test above needs a new example"
+        caps["capabilities"]["monikerProvider"].is_null(),
+        "moniker is advertised now, so the test above needs a new example"
     );
 }
 
@@ -1420,6 +1420,7 @@ fn every_advertised_provider_answers() {
         "codeActionProvider" => Some("textDocument/codeAction"),
         "definitionProvider" => Some("textDocument/definition"),
         "workspaceSymbolProvider" => Some("workspace/symbol"),
+        "semanticTokensProvider" => Some("textDocument/semanticTokens/full"),
         "referencesProvider" => Some("textDocument/references"),
         "documentHighlightProvider" => Some("textDocument/documentHighlight"),
         "renameProvider" => Some("textDocument/rename"),
