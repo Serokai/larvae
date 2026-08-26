@@ -81,6 +81,21 @@ Notable changes land here. Format follows
   keeps every comment around it: a formatter may rewrite code and may not
   delete prose
 
+### Fixed
+
+- A read from inside a type is a token index, as every other read is. It was
+  the byte offset of the token, so `Binding::reads` held two units at once the
+  moment a type named a binding. `shadowing` compares a read against the token
+  span of the declaration that hides it, and a byte offset that lands in that
+  range silences a real finding. Nine lines reproduce it
+- `@game` resolves in the editor from a file the DataModel map does not cover.
+  The spec is absolute and reads nothing from the file that writes it, but it
+  went through the `.luaurc` alias branch, where it resolved only if the
+  project defined a name called `game`. It answers before the alias lookup
+  now, through the mount table the pipeline already builds, so the editor and
+  `larvae process` read one require the same way. A `.luaurc` that defines
+  `game` still wins. This is the larvae half of luau-lsp#1598
+
 ## 0.6.0 - 2026-08-21
 
 ### Added
