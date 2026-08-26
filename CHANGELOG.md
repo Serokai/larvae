@@ -8,6 +8,41 @@ Notable changes land here. Format follows
 
 ### Added
 
+- larvae-lsp, the language server binary with Luau's analysis frontend
+  inside: real type diagnostics beside the lints, hover with inferred
+  types, and completions, for the same files the server always served.
+  The analyzer is the pinned Luau, vendored as a submodule and compiled
+  behind a small C shim into one shared library that exports nine
+  functions and hides both Luau copies from each other. Positions cross
+  the shim as byte offsets, and the Roblox global types load at session
+  start, vendored and refreshed nightly. `larvae lsp` stays the
+  analyzer-free server it was
+- The worm LSP hooks, three tiers in the manifest's `[lsp]` table.
+  Resolve: a worm answers the requires it claims, and the analyzer reads
+  the lowered Luau it returns, span-mapped back onto the original.
+  Declarations: `.d.luau` text a worm injects at load. Respond: a worm
+  transforms hover, completions, or diagnostics before the editor sees
+  them. Native worms only, refused at load elsewhere, because the hooks
+  sit on the analyzer's hot path
+- Definitions files parse: `declare function`, `declare name: T`,
+  `declare class`, the new solver's `declare extern type ... with ...
+  end`, and attributes in both spellings, `@name` and
+  `@[deprecated { ... }]`. The mode follows the file name, so `declare`
+  in an ordinary `.luau` stays the syntax error Luau gives it. The whole
+  837KB Roblox globalTypes.d.luau parses and prints back byte for byte
+- Service auto-imports in completions, with the ranking bug of upstream's
+  issue #1503 fixed structurally: position-valid keywords rank first, an
+  exactly typed keyword preselects, auto-imports rank last, so `end`
+  never loses to EncodingService. The inserted binding is
+  `const X = game:GetService("X")`, placed above the file's first real
+  statement, never inside the block the cursor sits in
+- The `read` and `write` access modifiers hold in every table type
+  position, the indexer included: `{ read [string]: number }` parses,
+  formats, and keeps its space
+- A nightly workflow that keeps the analyzer's inputs current: it moves
+  the Luau submodule pin when upstream releases and refreshes the
+  vendored Roblox global types, each as a pull request that CI validates
+
 - `[lsp]`, the table for the editor server. `enabled = false` answers every
   request with nothing, so another server owns the files. `claim_only =
   true` serves only the files that worms claim, empty diagnostics and
