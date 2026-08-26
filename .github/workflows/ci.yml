@@ -47,8 +47,9 @@ jobs:
       - name: Unit & integration tests
         run: cargo test --workspace
       - name: Parser conformance
-        # corpus round trip, coverage, mutation and truncation sweeps
-        run: cargo test -p larvae --test parser
+        # corpus round trip, coverage, mutation and truncation sweeps. The
+        # suite moved to eclipse_luau with the parser it exercises.
+        run: cargo test -p eclipse_luau --test parser
 
       - name: Parser agrees with Luau
         # Recorded verdicts of the real Luau parser, so this needs no Luau.
