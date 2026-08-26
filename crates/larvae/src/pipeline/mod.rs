@@ -207,6 +207,7 @@ fn run_inner(
         style: config.requires.indexing_style.unwrap_or_default(),
         quote: config.process.quotes.char(),
         strict: config.requires.strict,
+        claimed: claimed.clone(),
     };
 
     let opts = FileOpts::from_config(&root, config, write)?;

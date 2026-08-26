@@ -38,6 +38,15 @@ pub struct Resolver<'a> {
     /// The quote character for generated string literals
     pub quote: char,
     pub strict: bool,
+    /*
+    The file extensions that front-end worms claim, dots included.
+
+    A require may name a claimed file outright, `require("./config.json")`,
+    because a data file has no extensionless spelling. The worm lowers the
+    file to Luau in the output tree, so the emitted require drops the
+    extension and lands on the lowered module.
+    */
+    pub claimed: Vec<String>,
 }
 
 /// The context for one file, computed once

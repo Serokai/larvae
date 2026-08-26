@@ -795,3 +795,40 @@ return {
         "stale output after a settings change: {out}"
     );
 }
+
+/*
+A require may name a claimed file outright, `require("./data.mk")`. The
+worm lowers the file to Luau in the output tree, so the emitted require
+drops the extension and lands on the lowered module, and the graph gains
+the edge, so a bundle ships the data.
+*/
+#[test]
+fn a_require_of_a_claimed_file_resolves_and_drops_its_extension() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    markup_worm(root);
+    write(
+        root,
+        "larvae.toml",
+        "input = \"src\"\noutput = \"dist\"\ntarget = \"path\"\n\n[worms]\nmarkup = { path = \"worms/markup\" }\n",
+    );
+    write(root, "src/data.mk", "return <Tag/>\n");
+    write(
+        root,
+        "src/main.luau",
+        "local data = require(\"./data.mk\")\nreturn data\n",
+    );
+
+    let outcome = build(root);
+
+    assert!(!outcome.has_errors(), "{}", errors(&outcome));
+
+    let main = std::fs::read_to_string(root.join("dist/main.luau")).unwrap();
+
+    assert!(
+        main.contains("require(\"./data\")"),
+        "the extension drops: {main}"
+    );
+    assert!(root.join("dist/data.luau").exists(), "the lowering lands");
+}

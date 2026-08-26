@@ -32,36 +32,50 @@ impl<'a> Resolver<'a> {
             return Rewrite::Keep;
         }
 
-        let node = match resolve_module(target_base) {
-            Ok(Some(node)) => node,
+        /*
+        A require may name a claimed file outright. A data file has no
+        extensionless spelling, and the worm that claims it lowers it to a
+        Luau module in the output tree, so the file itself is the module
+        node and every emitted form drops the extension.
+        */
+        let claimed_file =
+            self.claimed.iter().any(|ext| spec.ends_with(ext.as_str())) && target_base.is_file();
 
-            Ok(None) => {
-                let d = Diag::warning(
-                    ctx.path,
-                    format!(
-                        "require(\"{spec}\"): no module found at {}",
-                        crate::ui::rel(target_base)
-                    ),
-                )
-                .at(src, offset);
-                diags.push(if self.strict {
-                    Diag {
-                        severity: crate::diag::Severity::Error,
-                        ..d
-                    }
-                } else {
-                    d
-                });
+        let node = if claimed_file {
+            super::ModuleNode::File(target_base.to_path_buf())
+        } else {
+            match resolve_module(target_base) {
+                Ok(Some(node)) => node,
 
-                return Rewrite::Keep;
-            }
+                Ok(None) => {
+                    let d = Diag::warning(
+                        ctx.path,
+                        format!(
+                            "require(\"{spec}\"): no module found at {}",
+                            crate::ui::rel(target_base)
+                        ),
+                    )
+                    .at(src, offset);
+                    diags.push(if self.strict {
+                        Diag {
+                            severity: crate::diag::Severity::Error,
+                            ..d
+                        }
+                    } else {
+                        d
+                    });
 
-            Err(msg) => {
-                diags.push(
-                    Diag::error(ctx.path, format!("require(\"{spec}\"): {msg}")).at(src, offset),
-                );
+                    return Rewrite::Keep;
+                }
 
-                return Rewrite::Keep;
+                Err(msg) => {
+                    diags.push(
+                        Diag::error(ctx.path, format!("require(\"{spec}\"): {msg}"))
+                            .at(src, offset),
+                    );
+
+                    return Rewrite::Keep;
+                }
             }
         };
 
