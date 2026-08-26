@@ -39,6 +39,26 @@ struct RawDiag {
 }
 
 #[repr(C)]
+struct RawParameter {
+    label: *const c_char,
+}
+
+#[repr(C)]
+struct RawSignature {
+    label: *const c_char,
+    active: u32,
+    count: usize,
+}
+
+#[repr(C)]
+struct RawHint {
+    line: u32,
+    character: u32,
+    label: *const c_char,
+    kind: u8,
+}
+
+#[repr(C)]
 struct RawLocation {
     path: *const c_char,
     start_line: u32,
@@ -59,6 +79,20 @@ type larvae_resolve_fn = extern "C" fn(*mut c_void, *const c_char, *const c_char
 type larvae_load_fn = extern "C" fn(*mut c_void, *const c_char) -> *const c_char;
 
 unsafe extern "C" {
+    fn larvae_signature_help(
+        s: *mut c_void,
+        path: *const c_char,
+        byte: u32,
+        sig: *mut RawSignature,
+        out: *mut RawParameter,
+        cap: usize,
+    ) -> i32;
+    fn larvae_inlay_hints(
+        s: *mut c_void,
+        path: *const c_char,
+        out: *mut RawHint,
+        cap: usize,
+    ) -> usize;
     fn larvae_definition(
         s: *mut c_void,
         path: *const c_char,
@@ -304,6 +338,92 @@ impl Analysis for LuauAnalysis {
         at: u32,
     ) -> Option<larvae::lsp::analysis::AnalysisLocation> {
         self.locate(larvae_type_definition, path, at)
+    }
+
+    fn signature(
+        &mut self,
+        path: &Path,
+        at: u32,
+    ) -> Option<larvae::lsp::analysis::AnalysisSignature> {
+        let key = self.key(path);
+
+        let mut sig = RawSignature {
+            label: std::ptr::null(),
+            active: 0,
+            count: 0,
+        };
+
+        // A signature with more parameters than this is not readable anyway.
+        const CAP: usize = 64;
+        let mut raw: [RawParameter; CAP] = [const {
+            RawParameter {
+                label: std::ptr::null(),
+            }
+        }; CAP];
+
+        let ok = unsafe {
+            larvae_signature_help(self.session, key, at, &mut sig, raw.as_mut_ptr(), CAP)
+        };
+
+        if ok == 0 || sig.label.is_null() {
+            return None;
+        }
+
+        let label = unsafe { CStr::from_ptr(sig.label) }
+            .to_string_lossy()
+            .into_owned();
+
+        let n = sig.count.min(CAP);
+
+        let parameters = raw[..n]
+            .iter()
+            .filter(|p| !p.label.is_null())
+            .map(|p| {
+                unsafe { CStr::from_ptr(p.label) }
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+
+        Some(larvae::lsp::analysis::AnalysisSignature {
+            label,
+            parameters,
+            active: sig.active,
+        })
+    }
+
+    fn hints(&mut self, path: &Path) -> Vec<larvae::lsp::analysis::AnalysisHint> {
+        let key = self.key(path);
+
+        /*
+        A module with more hints than this is one nobody reads with hints
+        on. The count comes back whole, so a truncation is visible here and
+        the editor still gets a useful screenful.
+        */
+        const CAP: usize = 2048;
+        let mut raw: [RawHint; CAP] = [const {
+            RawHint {
+                line: 0,
+                character: 0,
+                label: std::ptr::null(),
+                kind: 1,
+            }
+        }; CAP];
+
+        let n = unsafe { larvae_inlay_hints(self.session, key, raw.as_mut_ptr(), CAP) };
+
+        raw[..n.min(CAP)]
+            .iter()
+            .filter(|h| !h.label.is_null())
+            .map(|h| larvae::lsp::analysis::AnalysisHint {
+                line: h.line,
+                character: h.character,
+                label: unsafe { CStr::from_ptr(h.label) }
+                    .to_string_lossy()
+                    .into_owned(),
+                kind: h.kind,
+            })
+            .collect()
     }
 
     fn set_mounts(&mut self, mounts: larvae::requires::datamodel::MountTable) {

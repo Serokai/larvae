@@ -83,6 +83,38 @@ int larvae_definition(LarvaeSession* s, const char* path, uint32_t byte, LarvaeL
 /* The declaration of the TYPE of whatever sits at a byte offset. 1 on success. */
 int larvae_type_definition(LarvaeSession* s, const char* path, uint32_t byte, LarvaeLocation* out);
 
+/* One parameter of a signature, so the editor can bold the active one. */
+typedef struct {
+    const char* label;   /* "name: type", or just the type when unnamed */
+} LarvaeParameter;
+
+/* The signature of the call that encloses a byte offset.
+
+   `label` is the whole signature as one line. The parameters index into it
+   by name, and `active` says which one the caret sits on. Strings belong to
+   the session until the next call. */
+typedef struct {
+    const char* label;
+    uint32_t active;
+    size_t count;              /* how many parameters exist */
+} LarvaeSignature;
+
+/* Fills `sig` and writes at most `cap` parameters. 1 on success. */
+int larvae_signature_help(
+    LarvaeSession* s, const char* path, uint32_t byte,
+    LarvaeSignature* sig, LarvaeParameter* out, size_t cap);
+
+/* One inlay hint: a short label the editor draws inside the line. */
+typedef struct {
+    uint32_t line;
+    uint32_t character;
+    const char* label;
+    uint8_t kind;    /* 1 type, 2 parameter */
+} LarvaeHint;
+
+/* The hints for a whole module. Returns how many, writes at most cap. */
+size_t larvae_inlay_hints(LarvaeSession* s, const char* path, LarvaeHint* out, size_t cap);
+
 #ifdef __cplusplus
 }
 #endif

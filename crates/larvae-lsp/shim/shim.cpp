@@ -127,6 +127,9 @@ struct LarvaeSession
     std::vector<std::string> completionStorage;
     std::string hoverStorage;
     std::string locationStorage;
+    std::string signatureStorage;
+    std::vector<std::string> parameterStorage;
+    std::vector<std::string> hintStorage;
 
     LarvaeSession()
         : frontend(&files, &configs, options())
@@ -438,6 +441,276 @@ int larvae_type_definition(LarvaeSession* s, const char* path, uint32_t byte, La
     }
 
     return 0;
+}
+
+
+/*
+The signature of the call that encloses a position.
+
+The walk goes outward from the position to the nearest call, because a
+caret inside an argument is still inside the call that takes it. Luau gives
+the callee's type, and a function type carries its argument pack and the
+names the author wrote, so the label is built from the type and not from the
+source text. A callee with no function type has no signature to show.
+
+The active parameter counts the commas the caret has passed. That is what
+the editor bolds, and it is why an incomplete call still answers: the author
+is mid-typing, which is exactly when the help is wanted.
+*/
+int larvae_signature_help(
+    LarvaeSession* s, const char* path, uint32_t byte,
+    LarvaeSignature* sig, LarvaeParameter* out, size_t cap)
+{
+    auto it = s->open.find(path);
+    if (it == s->open.end())
+        return 0;
+
+    try
+    {
+        s->frontend.check(path);
+    }
+    catch (const std::exception&)
+    {
+        return 0;
+    }
+
+    Luau::ModulePtr module = s->frontend.moduleResolver.getModule(path);
+    const Luau::SourceModule* source = s->frontend.getSourceModule(path);
+    if (!module || !source)
+        return 0;
+
+    LineIndex lines(it->second);
+    Luau::Position position = lines.positionOf(byte);
+
+    std::vector<Luau::AstNode*> ancestry = Luau::findAstAncestryOfPosition(*source, position);
+
+    Luau::AstExprCall* call = nullptr;
+    for (auto node = ancestry.rbegin(); node != ancestry.rend(); ++node)
+    {
+        if (auto* found = (*node)->as<Luau::AstExprCall>())
+        {
+            call = found;
+            break;
+        }
+    }
+
+    if (!call)
+        return 0;
+
+    auto* callee = module->astTypes.find(call->func);
+    if (!callee)
+        return 0;
+
+    const Luau::FunctionType* fn = Luau::get<Luau::FunctionType>(Luau::follow(*callee));
+    if (!fn)
+        return 0;
+
+    Luau::ToStringOptions opts;
+    opts.exhaustive = false;
+    opts.maxTypeLength = 200;
+
+    auto [args, tail] = Luau::flatten(fn->argTypes);
+
+    s->parameterStorage.clear();
+
+    /*
+    A method call passes the receiver as the first argument, and the author
+    did not write it. To show it would put the caret on the wrong parameter
+    for every call.
+    */
+    size_t first = (call->self && !args.empty()) ? 1 : 0;
+
+    for (size_t i = first; i < args.size(); ++i)
+    {
+        std::string label;
+
+        if (i < fn->argNames.size() && fn->argNames[i])
+            label = fn->argNames[i]->name + ": ";
+
+        label += Luau::toString(args[i], opts);
+        s->parameterStorage.push_back(label);
+    }
+
+    if (tail)
+        s->parameterStorage.push_back("...");
+
+    std::string label = "(";
+    for (size_t i = 0; i < s->parameterStorage.size(); ++i)
+    {
+        if (i)
+            label += ", ";
+        label += s->parameterStorage[i];
+    }
+    label += "): " + Luau::toString(fn->retTypes, opts);
+
+    s->signatureStorage = label;
+
+    // The caret has passed one argument for each argument that ends before it.
+    uint32_t active = 0;
+    for (Luau::AstExpr* arg : call->args)
+    {
+        if (arg->location.end < position)
+            active++;
+    }
+
+    sig->label = s->signatureStorage.c_str();
+    sig->active = active;
+    sig->count = s->parameterStorage.size();
+
+    size_t n = s->parameterStorage.size() < cap ? s->parameterStorage.size() : cap;
+    for (size_t i = 0; i < n; ++i)
+        out[i].label = s->parameterStorage[i].c_str();
+
+    return 1;
+}
+
+/*
+Collect the inlay hints of one module.
+
+Two kinds, and both answer the same question: what is the type the author
+did not write. A local with no annotation gets its inferred type after the
+name. A function parameter and a return type get the same, which is what
+makes an unannotated codebase readable without changing it.
+
+The walk visits the AST rather than the type graph, because a hint belongs
+at a place in the text, and only the AST knows where the author wrote a
+name. A binding that carries an annotation is skipped: the type is on the
+screen already, and to repeat it is noise.
+*/
+struct HintCollector : Luau::AstVisitor
+{
+    LarvaeSession* session;
+    Luau::ModulePtr module;
+    std::vector<std::pair<Luau::Position, std::pair<std::string, uint8_t>>> found;
+
+    Luau::ToStringOptions opts;
+
+    HintCollector(LarvaeSession* s, Luau::ModulePtr m)
+        : session(s)
+        , module(std::move(m))
+    {
+        opts.exhaustive = false;
+        opts.maxTypeLength = 60;
+    }
+
+    /*
+    The rendered type, or nothing when the hint would not help.
+
+    Luau keys its type map by expression, and a local is not an expression,
+    so the type comes from what the local was given: the value in a `local`
+    statement, and the argument pack of the enclosing function for a
+    parameter. That is the same answer by a different road.
+    */
+    std::optional<std::string> render(Luau::TypeId type)
+    {
+        std::string text = Luau::toString(Luau::follow(type), opts);
+
+        // A type nobody can act on is not worth the space it takes.
+        if (text.empty() || text == "any" || text == "*error-type*")
+            return std::nullopt;
+
+        return text;
+    }
+
+    bool visit(Luau::AstStatLocal* node) override
+    {
+        for (size_t i = 0; i < node->vars.size; ++i)
+        {
+            Luau::AstLocal* local = node->vars.data[i];
+
+            // An annotation puts the type on screen already.
+            if (!local || local->annotation)
+                continue;
+
+            if (i >= node->values.size)
+                break;
+
+            auto* type = module->astTypes.find(node->values.data[i]);
+            if (!type)
+                continue;
+
+            if (auto text = render(*type))
+                found.push_back({local->location.end, {": " + *text, 1}});
+        }
+
+        return true;
+    }
+
+    bool visit(Luau::AstExprFunction* node) override
+    {
+        auto* self = module->astTypes.find(node);
+        if (!self)
+            return true;
+
+        const Luau::FunctionType* fn = Luau::get<Luau::FunctionType>(Luau::follow(*self));
+        if (!fn)
+            return true;
+
+        auto [args, tail] = Luau::flatten(fn->argTypes);
+        (void)tail;
+
+        // A method takes the receiver first, and the author did not write it.
+        size_t offset = node->self ? 1 : 0;
+
+        for (size_t i = 0; i < node->args.size; ++i)
+        {
+            Luau::AstLocal* arg = node->args.data[i];
+
+            if (!arg || arg->annotation)
+                continue;
+
+            size_t index = i + offset;
+            if (index >= args.size())
+                break;
+
+            if (auto text = render(args[index]))
+                found.push_back({arg->location.end, {": " + *text, 1}});
+        }
+
+        return true;
+    }
+};
+
+size_t larvae_inlay_hints(LarvaeSession* s, const char* path, LarvaeHint* out, size_t cap)
+{
+    auto it = s->open.find(path);
+    if (it == s->open.end())
+        return 0;
+
+    try
+    {
+        s->frontend.check(path);
+    }
+    catch (const std::exception&)
+    {
+        return 0;
+    }
+
+    Luau::ModulePtr module = s->frontend.moduleResolver.getModule(path);
+    const Luau::SourceModule* source = s->frontend.getSourceModule(path);
+    if (!module || !source || !source->root)
+        return 0;
+
+    HintCollector collector(s, module);
+    source->root->visit(&collector);
+
+    s->hintStorage.clear();
+    s->hintStorage.reserve(collector.found.size());
+
+    for (auto& entry : collector.found)
+        s->hintStorage.push_back(entry.second.first);
+
+    size_t n = collector.found.size() < cap ? collector.found.size() : cap;
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        out[i].line = collector.found[i].first.line;
+        out[i].character = collector.found[i].first.column;
+        out[i].label = s->hintStorage[i].c_str();
+        out[i].kind = collector.found[i].second.second;
+    }
+
+    return collector.found.size();
 }
 
 size_t larvae_completions(LarvaeSession* s, const char* path, uint32_t byte, LarvaeCompletion* out, size_t cap)

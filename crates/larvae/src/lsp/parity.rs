@@ -341,6 +341,83 @@ impl Server {
     }
 }
 
+impl Server {
+    /// The signature of the call the caret sits in; the analyzer alone knows it
+    pub(super) fn signature_help(&self, params: &Value) -> Value {
+        let Some((_, _, byte)) = self.at(params) else {
+            return Value::Null;
+        };
+
+        let Some(path) = params["textDocument"]["uri"].as_str().and_then(path_of_uri) else {
+            return Value::Null;
+        };
+
+        let found = self
+            .analysis
+            .borrow_mut()
+            .as_mut()
+            .and_then(|a| a.signature(&path, byte));
+
+        let Some(sig) = found else {
+            return Value::Null;
+        };
+
+        let parameters: Vec<Value> = sig
+            .parameters
+            .iter()
+            .map(|p| json!({ "label": p }))
+            .collect();
+
+        json!({
+            "signatures": [{
+                "label": sig.label,
+                "parameters": parameters,
+                "activeParameter": sig.active,
+            }],
+            "activeSignature": 0,
+            "activeParameter": sig.active,
+        })
+    }
+
+    /*
+    The types the author left out, for the range the editor asked about.
+
+    The analyzer answers for the whole module, because a type check is per
+    module and a range would not make it cheaper. The filter happens here,
+    so the editor receives only what it drew.
+    */
+    pub(super) fn inlay_hints(&self, params: &Value) -> Value {
+        let Some(path) = params["textDocument"]["uri"].as_str().and_then(path_of_uri) else {
+            return json!([]);
+        };
+
+        let hints = self
+            .analysis
+            .borrow_mut()
+            .as_mut()
+            .map(|a| a.hints(&path))
+            .unwrap_or_default();
+
+        let from = params["range"]["start"]["line"].as_u64().map(|l| l as u32);
+        let to = params["range"]["end"]["line"].as_u64().map(|l| l as u32);
+
+        let out: Vec<Value> = hints
+            .into_iter()
+            .filter(|h| from.is_none_or(|f| h.line >= f) && to.is_none_or(|t| h.line <= t))
+            .map(|h| {
+                json!({
+                    "position": { "line": h.line, "character": h.character },
+                    "label": h.label,
+                    "kind": h.kind,
+                    "paddingLeft": false,
+                })
+            })
+            .collect();
+
+        json!(out)
+    }
+}
+
 /*
 An analyzer location in protocol shape.
 

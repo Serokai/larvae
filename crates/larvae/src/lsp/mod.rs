@@ -283,6 +283,18 @@ impl Server {
                 self.reply(message, out, result)?;
             }
 
+            "textDocument/signatureHelp" => {
+                let result = self.signature_help(&message.params);
+
+                self.reply(message, out, result)?;
+            }
+
+            "textDocument/inlayHint" => {
+                let result = self.inlay_hints(&message.params);
+
+                self.reply(message, out, result)?;
+            }
+
             "textDocument/typeDefinition" => {
                 let result = self.type_definition(&message.params);
 
@@ -450,6 +462,9 @@ fn capabilities(analysis: bool) -> Value {
         caps["hoverProvider"] = json!(true);
         // Only the frontend knows where a type was declared.
         caps["typeDefinitionProvider"] = json!(true);
+        // Both read the type graph, so neither means anything without it.
+        caps["signatureHelpProvider"] = json!({ "triggerCharacters": ["(", ","] });
+        caps["inlayHintProvider"] = json!(true);
         caps["completionProvider"] = json!({ "triggerCharacters": [".", ":", "\""] });
     }
 

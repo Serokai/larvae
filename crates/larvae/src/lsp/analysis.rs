@@ -132,6 +132,25 @@ pub struct AnalysisLocation {
     pub end: (u32, u32),
 }
 
+/// One call signature, for `textDocument/signatureHelp`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnalysisSignature {
+    pub label: String,
+    pub parameters: Vec<String>,
+    /// Which parameter the caret sits on, so the editor bolds the right one
+    pub active: u32,
+}
+
+/// One inlay hint, at the place in the text where the author left a type out
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnalysisHint {
+    pub line: u32,
+    pub character: u32,
+    pub label: String,
+    /// 1 is a type, 2 is a parameter name, as the protocol numbers them
+    pub kind: u8,
+}
+
 pub trait Analysis: Send {
     /// Install the module hooks; the server calls this once per worm load
     fn set_module_hooks(&mut self, hooks: ModuleHooks) {
@@ -201,6 +220,20 @@ pub trait Analysis: Send {
         let _ = (path, at);
 
         None
+    }
+
+    /// The signature of the call that encloses a byte offset
+    fn signature(&mut self, path: &Path, at: u32) -> Option<AnalysisSignature> {
+        let _ = (path, at);
+
+        None
+    }
+
+    /// The types the author left out, for the whole module
+    fn hints(&mut self, path: &Path) -> Vec<AnalysisHint> {
+        let _ = path;
+
+        Vec::new()
     }
 
     /// Drop the cached state of one document and its dependents
