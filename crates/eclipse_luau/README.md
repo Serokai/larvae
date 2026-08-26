@@ -33,5 +33,16 @@ cargo bench -p eclipse_luau --features full-moon-bench  # against full_moon
 BENCH_CORPUS=/path/to/big/codebase cargo bench ...      # a real corpus
 ```
 
-No performance claims stand in this README until the corpus numbers are
-recorded from a fixed machine and published here.
+Measured 2026-08-26 on an Intel i5-3427U (1.8 GHz, Linux). The corpus is
+the vendored Luau conformance suite, filtered to the files both parsers
+accept, parsed whole per iteration. Criterion medians over 100 samples:
+
+| parser       | time per pass | relative |
+| ------------ | ------------- | -------- |
+| eclipse_luau | 13.55 ms      | 1.0×     |
+| full_moon    | 89.24 ms      | 6.6×     |
+
+The numbers come from `cargo bench -p eclipse_luau --features
+full-moon-bench` with no other load pinned. A different machine moves
+both numbers; the ratio is the durable claim. Record new numbers here
+when the parser or the corpus changes.
