@@ -449,6 +449,9 @@ pub struct TableTypes {
     #[serde(default = "default_true")]
     pub enabled: bool,
 
+    #[serde(default)]
+    pub expand: TypeExpansion,
+
     /*
     The width at which a table type opens.
 
@@ -470,10 +473,20 @@ impl Default for TableTypes {
     fn default() -> Self {
         Self {
             enabled: default_true(),
+            expand: TypeExpansion::default(),
             width: default_table_type_width(),
             separator: TypeSeparator::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TypeExpansion {
+    #[default]
+    WhenNeeded,
+    Always,
+    Preserve,
 }
 
 fn default_table_type_width() -> usize {

@@ -1,3 +1,4 @@
+use larvae::fmt::config::{TableTypes, TypeExpansion};
 use larvae::fmt::{FmtConfig, format};
 
 fn fmt(src: &str) -> String {
@@ -68,4 +69,62 @@ fn a_long_union_stays_on_one_line_for_now() {
     let src = "export type U = \"alphaalpha\" | \"betabeta\" | \"gammagamma\" | \"deltadelta\"\n";
 
     assert_eq!(fmt_with(src, narrow(40)), src);
+}
+
+fn expand(expand: TypeExpansion) -> FmtConfig {
+    FmtConfig {
+        table_types: TableTypes {
+            expand,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+#[test]
+fn when_needed_collapses_an_author_wrapped_table() {
+    assert_eq!(
+        fmt_with(
+            "type T = {\n\tx: number,\n}\n",
+            expand(TypeExpansion::WhenNeeded)
+        ),
+        "type T = { x: number }\n"
+    );
+}
+
+#[test]
+fn always_opens_a_table_that_fits() {
+    assert_eq!(
+        fmt_with("type T = { x: number }\n", expand(TypeExpansion::Always)),
+        "type T = {\n\tx: number,\n}\n"
+    );
+}
+
+#[test]
+fn always_leaves_an_empty_table_flat() {
+    assert_eq!(
+        fmt_with("type T = {}\n", expand(TypeExpansion::Always)),
+        "type T = {}\n"
+    );
+}
+
+#[test]
+fn preserve_keeps_an_author_wrapped_table_open() {
+    let src = "type T = {\n\tx: number,\n}\n";
+
+    assert_eq!(fmt_with(src, expand(TypeExpansion::Preserve)), src);
+}
+
+#[test]
+fn preserve_keeps_an_author_flat_table_flat() {
+    let src = "type T = { x: number }\n";
+
+    assert_eq!(fmt_with(src, expand(TypeExpansion::Preserve)), src);
+}
+
+#[test]
+fn preserve_holds_the_nevermore_shape() {
+    let src = "export type S = typeof(setmetatable(\n\t{} :: {\n\t\t_serviceBag: ServiceBag.ServiceBag,\n\t},\n\t{} :: typeof({ __index = S })\n))\n";
+
+    assert_eq!(fmt_with(src, expand(TypeExpansion::Preserve)), src);
 }

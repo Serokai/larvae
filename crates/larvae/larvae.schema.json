@@ -1087,6 +1087,15 @@
                 false
               ]
             },
+            "expand": {
+              "default": "when-needed",
+              "description": "When a table type opens over several lines. \"when-needed\" opens it only past \"width\", which is what larvae has always done, and an author's own wrap collapses back. \"always\" opens every table that holds a field. \"preserve\" reads the author's layout instead of the width: a newline after the brace, or a trailing separator when \"magic_trailing_comma\" is on, keeps that table open, and a table the author wrote flat stays flat.\n\n[table_types.expand →](https://larvae-luau.github.io/docs/reference/formatting#table-types-expand)",
+              "enum": [
+                "when-needed",
+                "always",
+                "preserve"
+              ]
+            },
             "width": {
               "type": "integer",
               "minimum": 0,

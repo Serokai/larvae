@@ -1824,6 +1824,7 @@ fn table_types(enabled: bool, width: usize, separator: TypeSeparator) -> FmtConf
             enabled,
             width,
             separator,
+            ..Default::default()
         },
         ..Default::default()
     }

@@ -21,7 +21,7 @@ use crate::syntax::lexer::{Tok, TokKind};
 
 use super::config::{
     BlockNewlineGaps, CallParens, CallStyle, CollapseSimpleStatement, FmtConfig, IfExpansion,
-    IfPlacement, IfStyle, ListExpansion, QuoteStyle, RequireGrouping, Semicolons,
+    IfPlacement, IfStyle, ListExpansion, QuoteStyle, RequireGrouping, Semicolons, TypeExpansion,
 };
 use super::doc::Doc;
 use super::trivia::{Attached, Comment, Trivia};
@@ -350,7 +350,18 @@ impl<'a> Emitter<'a> {
             };
         }
 
-        if width.is_some_and(|w| w <= cfg.width) {
+        let expanded = match cfg.expand {
+            TypeExpansion::Always => true,
+
+            TypeExpansion::Preserve => {
+                self.newline_between(open, open + 1)
+                    || (self.cfg.magic_trailing_comma && self.has_trailing_comma(close))
+            }
+
+            TypeExpansion::WhenNeeded => false,
+        };
+
+        if !expanded && width.is_some_and(|w| w <= cfg.width) {
             return Doc::concat([
                 Doc::text("{ "),
                 Doc::join(Doc::text(format!("{sep} ")), fields),
