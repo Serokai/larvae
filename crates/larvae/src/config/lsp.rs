@@ -36,6 +36,31 @@ pub struct LspConfig {
     /// What a hover card carries
     #[serde(default)]
     pub hover: HoverConfig,
+
+    /// The project wide symbol index that `workspace/symbol` searches
+    #[serde(default)]
+    pub index: IndexConfig,
+}
+
+/*
+`[lsp.index]`, mirroring luau-lsp's `index.*`.
+
+The index reads and parses every Luau file the project holds. That measured
+25ms over 300 files, which is nothing on a save and something on a very
+large tree, so a project that feels it turns the index off and keeps
+`documentSymbol` for the file in front of it.
+*/
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct IndexConfig {
+    #[serde(default = "on")]
+    pub enabled: bool,
+}
+
+impl Default for IndexConfig {
+    fn default() -> Self {
+        toml::from_str("").expect("every field has a default")
+    }
 }
 
 /*
@@ -108,17 +133,35 @@ moves between the two servers keeps the setting they already know. The editor
 extension exposes the same ids under `larvae-lsp.`, and this table is the
 project side of them. Where both speak, the project wins.
 */
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct CompletionConfig {
+    /// Off answers every completion request with an empty list
+    #[serde(default = "on")]
+    pub enabled: bool,
+
+    /// Offer the keywords that fit the position, beside the names
+    #[serde(default = "on")]
+    pub show_keywords: bool,
+
     #[serde(default)]
     pub imports: ImportsConfig,
+}
+
+impl Default for CompletionConfig {
+    fn default() -> Self {
+        toml::from_str("").expect("every field has a default")
+    }
 }
 
 /// `[lsp.completion.imports]`, the auto-import settings
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct ImportsConfig {
+    /// Offer a service or module the file has not imported yet
+    #[serde(default = "on")]
+    pub enabled: bool,
+
     /*
     Whether an auto-import writes `const` or `local`.
 

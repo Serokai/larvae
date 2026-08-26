@@ -183,7 +183,7 @@ impl Server {
     pub(super) fn completions(&self, params: &Value) -> Value {
         let uri = super::uri::uri_of(params);
 
-        if self.declines(&uri) {
+        if !self.lsp.completion.enabled || self.declines(&uri) {
             return json!([]);
         }
 
@@ -259,6 +259,8 @@ impl Server {
         let mut items: Vec<Value> = analysis
             .completions(&path, at)
             .into_iter()
+            // 14 is Keyword. A project that finds them noisy turns them off.
+            .filter(|c| self.lsp.completion.show_keywords || c.kind != 14)
             .map(|c| {
                 let tier = match c.kind {
                     14 => '0',
@@ -295,7 +297,7 @@ impl Server {
         detail line shows the same text the edit inserts. A user reads that
         line before accepting, so the two cannot differ.
         */
-        if !prefix.is_empty() {
+        if !prefix.is_empty() && self.lsp.completion.imports.enabled {
             let keyword = self.lsp.completion.imports.keyword();
             let lines = rpc::Lines::new(src);
 

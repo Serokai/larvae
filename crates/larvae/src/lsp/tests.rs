@@ -750,10 +750,7 @@ fn claim_only_publishes_empty_for_a_plain_luau_file() {
     server.lsp = crate::config::lsp::LspConfig {
         enabled: true,
         claim_only: true,
-        completion: Default::default(),
-        inlay_hints: Default::default(),
-        signature_help: Default::default(),
-        hover: Default::default(),
+        ..Default::default()
     };
 
     let diags = published(&server, "file:///t.luau");
@@ -767,10 +764,7 @@ fn claim_only_declines_formatting_and_symbols_for_a_plain_luau_file() {
     server.lsp = crate::config::lsp::LspConfig {
         enabled: true,
         claim_only: true,
-        completion: Default::default(),
-        inlay_hints: Default::default(),
-        signature_help: Default::default(),
-        hover: Default::default(),
+        ..Default::default()
     };
 
     assert_eq!(server.format("file:///t.luau").unwrap(), Value::Null);
@@ -783,10 +777,7 @@ fn a_disabled_server_advertises_no_capabilities() {
     server.lsp = crate::config::lsp::LspConfig {
         enabled: false,
         claim_only: false,
-        completion: Default::default(),
-        inlay_hints: Default::default(),
-        signature_help: Default::default(),
-        hover: Default::default(),
+        ..Default::default()
     };
 
     let mut out = Vec::new();
@@ -1177,10 +1168,7 @@ serves_luau = true
     server.lsp = crate::config::lsp::LspConfig {
         enabled: true,
         claim_only: true,
-        completion: Default::default(),
-        inlay_hints: Default::default(),
-        signature_help: Default::default(),
-        hover: Default::default(),
+        ..Default::default()
     };
     server.worms = Pool::new(vec![spec(SERVING, dir.path())], 1);
 
@@ -1894,4 +1882,72 @@ fn no_root_indexes_nothing() {
         server.workspace_symbols(&json!({ "query": "anything" })),
         json!([])
     );
+}
+
+/// The completion and index knobs reach the server too.
+#[test]
+fn the_completion_and_index_knobs_reach_the_server() {
+    let mut server = Server {
+        editor: json!({
+            "larvae-lsp": {
+                "completion": {
+                    "enabled": false,
+                    "showKeywords": false,
+                    "imports": { "enabled": false },
+                },
+                "index": { "enabled": false },
+            }
+        }),
+        ..Default::default()
+    };
+
+    server.apply_editor_settings();
+
+    assert!(!server.lsp.completion.enabled);
+    assert!(!server.lsp.completion.show_keywords);
+    assert!(!server.lsp.completion.imports.enabled);
+    assert!(!server.lsp.index.enabled);
+}
+
+/// An index that is off holds no symbols, so the search answers with nothing.
+#[test]
+fn an_index_that_is_off_finds_nothing() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+
+    std::fs::write(
+        dir.path().join("a.luau"),
+        "local function findMe()\nend\n\nreturn findMe\n",
+    )
+    .expect("writes");
+
+    let mut server = Server {
+        root: Some(dir.path().to_path_buf()),
+        ..Default::default()
+    };
+
+    server.reindex();
+    assert_ne!(
+        server.workspace_symbols(&json!({ "query": "findMe" })),
+        json!([]),
+        "the index should hold it while it is on"
+    );
+
+    server.lsp.index.enabled = false;
+    server.reindex();
+
+    assert_eq!(
+        server.workspace_symbols(&json!({ "query": "findMe" })),
+        json!([])
+    );
+}
+
+/// Every completion knob defaults on, because none of them hides anything.
+#[test]
+fn the_completion_knobs_default_on() {
+    let server = Server::default();
+
+    assert!(server.lsp.completion.enabled);
+    assert!(server.lsp.completion.show_keywords);
+    assert!(server.lsp.completion.imports.enabled);
+    assert!(server.lsp.index.enabled);
 }

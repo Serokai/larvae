@@ -65,6 +65,24 @@ impl Server {
             self.lsp.completion.imports.use_const = on;
         }
 
+        let completion = &settings["completion"];
+
+        if let Some(on) = completion["enabled"].as_bool() {
+            self.lsp.completion.enabled = on;
+        }
+
+        if let Some(on) = completion["showKeywords"].as_bool() {
+            self.lsp.completion.show_keywords = on;
+        }
+
+        if let Some(on) = completion["imports"]["enabled"].as_bool() {
+            self.lsp.completion.imports.enabled = on;
+        }
+
+        if let Some(on) = settings["index"]["enabled"].as_bool() {
+            self.lsp.index.enabled = on;
+        }
+
         if let Some(on) = settings["signatureHelp"]["enabled"].as_bool() {
             self.lsp.signature_help.enabled = on;
         }

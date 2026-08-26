@@ -349,6 +349,12 @@ impl Server {
     directory the server happens to sit in.
     */
     pub(super) fn reindex(&mut self) {
+        if !self.lsp.index.enabled {
+            self.symbols = super::workspace::Index::default();
+
+            return;
+        }
+
         self.symbols = match self.root.as_deref() {
             Some(root) => super::workspace::Index::build(root, &self.excluded),
 

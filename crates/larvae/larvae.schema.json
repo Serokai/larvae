@@ -2191,6 +2191,9 @@
         },
         "hover": {
           "$ref": "#/$defs/lsp_hover"
+        },
+        "index": {
+          "$ref": "#/$defs/lsp_index"
         }
       }
     },
@@ -2230,6 +2233,15 @@
       "additionalProperties": false,
       "description": "`[lsp.completion.imports]`, the auto-import settings. The names mirror luau-lsp's `completion.imports.*`, so a user moving between the two servers keeps the setting they know. The editor extension exposes the same ids under `larvae-lsp.`; where both speak, this file wins.",
       "properties": {
+        "enabled": {
+          "type": "boolean",
+          "enum": [
+            true,
+            false
+          ],
+          "default": true,
+          "description": "Offer a service or module the file has not imported yet, with the binding inserted above the first statement."
+        },
         "use_const": {
           "type": "boolean",
           "enum": [
@@ -2246,6 +2258,24 @@
       "additionalProperties": false,
       "description": "`[lsp.completion]`, which mirrors luau-lsp's `completion.*` settings.",
       "properties": {
+        "enabled": {
+          "type": "boolean",
+          "enum": [
+            true,
+            false
+          ],
+          "default": true,
+          "description": "Off answers every completion request with an empty list, so another server owns the list."
+        },
+        "show_keywords": {
+          "type": "boolean",
+          "enum": [
+            true,
+            false
+          ],
+          "default": true,
+          "description": "Offer the keywords that fit the position, beside the names."
+        },
         "imports": {
           "$ref": "#/$defs/lsp_imports"
         }
@@ -2311,6 +2341,22 @@
           ],
           "default": true,
           "description": "Answer a hover with the type under the cursor."
+        }
+      }
+    },
+    "lsp_index": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "`[lsp.index]`, mirroring luau-lsp's `index.*`. The index reads and parses every Luau file the project holds, which measured 25ms over 300 files. A project that feels it turns the index off and keeps `documentSymbol` for the file in front of it.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "enum": [
+            true,
+            false
+          ],
+          "default": true,
+          "description": "Build the project wide symbol index that `workspace/symbol` searches."
         }
       }
     }
