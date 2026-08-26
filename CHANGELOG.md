@@ -39,6 +39,13 @@ Notable changes land here. Format follows
 - The `read` and `write` access modifiers hold in every table type
   position, the indexer included: `{ read [string]: number }` parses,
   formats, and keeps its space
+- A require may name a claimed file outright: `require("./config.json")`
+  resolves when a worm claims `.json`, the emitted require drops the
+  extension onto the lowered module, and a bundle ships the data. The
+  json-toml proof worm exercises both sides
+- `serves_luau` in a worm's `[lsp]` table: the worm's hooks answer inside
+  plain Luau files, so claim-only serving widens when it loads, with one
+  editor notice naming the worm
 - A nightly workflow that keeps the analyzer's inputs current: it moves
   the Luau submodule pin when upstream releases and refreshes the
   vendored Roblox global types, each as a pull request that CI validates
