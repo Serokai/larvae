@@ -751,6 +751,9 @@ fn claim_only_publishes_empty_for_a_plain_luau_file() {
         enabled: true,
         claim_only: true,
         completion: Default::default(),
+        inlay_hints: Default::default(),
+        signature_help: Default::default(),
+        hover: Default::default(),
     };
 
     let diags = published(&server, "file:///t.luau");
@@ -765,6 +768,9 @@ fn claim_only_declines_formatting_and_symbols_for_a_plain_luau_file() {
         enabled: true,
         claim_only: true,
         completion: Default::default(),
+        inlay_hints: Default::default(),
+        signature_help: Default::default(),
+        hover: Default::default(),
     };
 
     assert_eq!(server.format("file:///t.luau").unwrap(), Value::Null);
@@ -778,6 +784,9 @@ fn a_disabled_server_advertises_no_capabilities() {
         enabled: false,
         claim_only: false,
         completion: Default::default(),
+        inlay_hints: Default::default(),
+        signature_help: Default::default(),
+        hover: Default::default(),
     };
 
     let mut out = Vec::new();
@@ -1169,6 +1178,9 @@ serves_luau = true
         enabled: true,
         claim_only: true,
         completion: Default::default(),
+        inlay_hints: Default::default(),
+        signature_help: Default::default(),
+        hover: Default::default(),
     };
     server.worms = Pool::new(vec![spec(SERVING, dir.path())], 1);
 
@@ -1769,4 +1781,60 @@ fn no_editor_settings_changes_nothing() {
     server.apply_editor_settings();
 
     assert_eq!((server.lsp.enabled, server.lsp.claim_only), before);
+}
+
+/// Every knob the extension mirrors reaches the server.
+#[test]
+fn the_feature_knobs_reach_the_server() {
+    let mut server = Server {
+        editor: json!({
+            "larvae-lsp": {
+                "signatureHelp": { "enabled": false },
+                "hover": { "enabled": false },
+                "inlayHints": {
+                    "variableTypes": true,
+                    "parameterTypes": true,
+                    "typeHintMaxLength": 12,
+                },
+            }
+        }),
+        ..Default::default()
+    };
+
+    server.apply_editor_settings();
+
+    assert!(!server.lsp.signature_help.enabled);
+    assert!(!server.lsp.hover.enabled);
+    assert!(server.lsp.inlay_hints.variable_types);
+    assert!(server.lsp.inlay_hints.parameter_types);
+    assert_eq!(server.lsp.inlay_hints.type_hint_max_length, 12);
+}
+
+/*
+A hint is off until the project asks for it.
+
+The editor draws it into a line the author did not write, and a reader who
+did not ask reads that as the file changing under them.
+*/
+#[test]
+fn inlay_hints_are_off_by_default() {
+    let server = Server::default();
+
+    assert!(!server.lsp.inlay_hints.variable_types);
+    assert!(!server.lsp.inlay_hints.parameter_types);
+
+    let result = server.inlay_hints(&json!({
+        "textDocument": { "uri": "file:///t.luau" }
+    }));
+
+    assert_eq!(result, json!([]), "a hint appeared without being asked for");
+}
+
+/// Signature help and hover are on, because neither draws anything unasked.
+#[test]
+fn signature_help_and_hover_are_on_by_default() {
+    let server = Server::default();
+
+    assert!(server.lsp.signature_help.enabled);
+    assert!(server.lsp.hover.enabled);
 }

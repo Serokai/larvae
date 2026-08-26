@@ -2182,6 +2182,15 @@
         },
         "completion": {
           "$ref": "#/$defs/lsp_completion"
+        },
+        "inlay_hints": {
+          "$ref": "#/$defs/lsp_inlay_hints"
+        },
+        "signature_help": {
+          "$ref": "#/$defs/lsp_signature_help"
+        },
+        "hover": {
+          "$ref": "#/$defs/lsp_hover"
         }
       }
     },
@@ -2239,6 +2248,69 @@
       "properties": {
         "imports": {
           "$ref": "#/$defs/lsp_imports"
+        }
+      }
+    },
+    "lsp_inlay_hints": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "`[lsp.inlay_hints]`, mirroring luau-lsp's `inlayHints.*`. Every one is off by default: a hint is text the editor draws into a line the author did not write, and a reader who did not ask for it reads that as the file changing under them.",
+      "properties": {
+        "variable_types": {
+          "type": "boolean",
+          "enum": [
+            true,
+            false
+          ],
+          "default": false,
+          "description": "Draw the inferred type of a local the author left unannotated."
+        },
+        "parameter_types": {
+          "type": "boolean",
+          "enum": [
+            true,
+            false
+          ],
+          "default": false,
+          "description": "Draw the inferred type of a parameter the author left unannotated."
+        },
+        "type_hint_max_length": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 50,
+          "description": "How long a hint can be before it is cut. A hint longer than the code it annotates hides the code. luau-lsp uses 50."
+        }
+      }
+    },
+    "lsp_signature_help": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "`[lsp.signature_help]`, mirroring luau-lsp's `signatureHelp.*`. Needs a binary built with the analyzer, because the signature comes from the type of the callee.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "enum": [
+            true,
+            false
+          ],
+          "default": true,
+          "description": "Show the signature of the call the caret sits in, with the active parameter marked."
+        }
+      }
+    },
+    "lsp_hover": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "`[lsp.hover]`, mirroring luau-lsp's `hover.*`.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "enum": [
+            true,
+            false
+          ],
+          "default": true,
+          "description": "Answer a hover with the type under the cursor."
         }
       }
     }

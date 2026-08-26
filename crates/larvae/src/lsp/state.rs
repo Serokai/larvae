@@ -64,6 +64,28 @@ impl Server {
         if let Some(on) = settings["completion"]["imports"]["useConst"].as_bool() {
             self.lsp.completion.imports.use_const = on;
         }
+
+        if let Some(on) = settings["signatureHelp"]["enabled"].as_bool() {
+            self.lsp.signature_help.enabled = on;
+        }
+
+        if let Some(on) = settings["hover"]["enabled"].as_bool() {
+            self.lsp.hover.enabled = on;
+        }
+
+        let hints = &settings["inlayHints"];
+
+        if let Some(on) = hints["variableTypes"].as_bool() {
+            self.lsp.inlay_hints.variable_types = on;
+        }
+
+        if let Some(on) = hints["parameterTypes"].as_bool() {
+            self.lsp.inlay_hints.parameter_types = on;
+        }
+
+        if let Some(n) = hints["typeHintMaxLength"].as_u64() {
+            self.lsp.inlay_hints.type_hint_max_length = n as usize;
+        }
     }
 
     /*

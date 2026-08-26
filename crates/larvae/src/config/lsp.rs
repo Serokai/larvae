@@ -24,6 +24,80 @@ pub struct LspConfig {
     /// What the completion list offers, and how it writes what it inserts
     #[serde(default)]
     pub completion: CompletionConfig,
+
+    /// The types the editor draws in a line the author left unannotated
+    #[serde(default)]
+    pub inlay_hints: InlayHintsConfig,
+
+    /// The call signature the editor shows while the author types arguments
+    #[serde(default)]
+    pub signature_help: SignatureHelpConfig,
+
+    /// What a hover card carries
+    #[serde(default)]
+    pub hover: HoverConfig,
+}
+
+/*
+`[lsp.inlay_hints]`, mirroring luau-lsp's `inlayHints.*`.
+
+Off by default, every one of them. A hint is text the editor draws into a
+line the author did not write, and a reader who did not ask for that reads
+it as the file changing under them. luau-lsp defaults them off for the same
+reason.
+*/
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct InlayHintsConfig {
+    /// The inferred type of a local the author left unannotated
+    #[serde(default)]
+    pub variable_types: bool,
+
+    /// The inferred type of a parameter the author left unannotated
+    #[serde(default)]
+    pub parameter_types: bool,
+
+    /*
+    How long a hint can be before it is cut.
+
+    A hint longer than the code it annotates hides the code. luau-lsp uses
+    50 and that number reads well, so larvae takes it rather than invent a
+    different one.
+    */
+    #[serde(default = "fifty")]
+    pub type_hint_max_length: usize,
+}
+
+fn fifty() -> usize {
+    50
+}
+
+/// `[lsp.signature_help]`, mirroring luau-lsp's `signatureHelp.*`
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct SignatureHelpConfig {
+    #[serde(default = "on")]
+    pub enabled: bool,
+}
+
+impl Default for SignatureHelpConfig {
+    fn default() -> Self {
+        toml::from_str("").expect("every field has a default")
+    }
+}
+
+/// `[lsp.hover]`, mirroring luau-lsp's `hover.*`
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct HoverConfig {
+    #[serde(default = "on")]
+    pub enabled: bool,
+}
+
+impl Default for HoverConfig {
+    fn default() -> Self {
+        toml::from_str("").expect("every field has a default")
+    }
 }
 
 /*

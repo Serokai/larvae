@@ -104,7 +104,8 @@ impl Server {
     pub(super) fn hover(&self, params: &Value) -> Value {
         let uri = super::uri::uri_of(params);
 
-        if self.declines(&uri) {
+        // `[lsp.hover] enabled = false` answers with nothing, as luau-lsp does.
+        if !self.lsp.hover.enabled || self.declines(&uri) {
             return Value::Null;
         }
 

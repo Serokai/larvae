@@ -344,6 +344,10 @@ impl Server {
 impl Server {
     /// The signature of the call the caret sits in; the analyzer alone knows it
     pub(super) fn signature_help(&self, params: &Value) -> Value {
+        if !self.lsp.signature_help.enabled {
+            return Value::Null;
+        }
+
         let Some((_, _, byte)) = self.at(params) else {
             return Value::Null;
         };
@@ -391,6 +395,17 @@ impl Server {
             return json!([]);
         };
 
+        /*
+        A hint is text the editor draws into a line the author did not
+        write, so nothing is drawn until the project asks. The two kinds
+        are separate because a reader often wants one and not the other.
+        */
+        let cfg = &self.lsp.inlay_hints;
+
+        if !cfg.variable_types && !cfg.parameter_types {
+            return json!([]);
+        }
+
         let hints = self
             .analysis
             .borrow_mut()
@@ -405,9 +420,20 @@ impl Server {
             .into_iter()
             .filter(|h| from.is_none_or(|f| h.line >= f) && to.is_none_or(|t| h.line <= t))
             .map(|h| {
+                // A hint longer than the code it annotates hides the code.
+                let label = match h.label.chars().count() > cfg.type_hint_max_length {
+                    true => {
+                        let kept: String = h.label.chars().take(cfg.type_hint_max_length).collect();
+
+                        format!("{kept}...")
+                    }
+
+                    false => h.label.clone(),
+                };
+
                 json!({
                     "position": { "line": h.line, "character": h.character },
-                    "label": h.label,
+                    "label": label,
                     "kind": h.kind,
                     "paddingLeft": false,
                 })
