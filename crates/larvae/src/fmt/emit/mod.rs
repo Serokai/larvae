@@ -216,9 +216,20 @@ impl<'a> Emitter<'a> {
         while i < to {
             let spaced = prev.is_some_and(|p| needs_space(self.tok(p), self.tok(i)));
 
-            if self.tok(i) == "{"
-                && let Some(close) = self.matching_brace(i, to)
-            {
+            let group = match self.tok(i) {
+                "{" => self
+                    .matching_brace(i, to)
+                    .map(|c| (c, self.table_type(i, c))),
+
+                "(" => self
+                    .matching_paren(i)
+                    .filter(|&c| c < to)
+                    .map(|c| (c, self.paren_type(i, c))),
+
+                _ => None,
+            };
+
+            if let Some((close, doc)) = group {
                 if spaced {
                     flat.push(' ');
                 }
@@ -227,7 +238,7 @@ impl<'a> Emitter<'a> {
                     parts.push(Doc::text(std::mem::take(&mut flat)));
                 }
 
-                parts.push(self.table_type(i, close));
+                parts.push(doc);
                 prev = Some(close);
                 i = close + 1;
 
@@ -357,6 +368,64 @@ impl<'a> Emitter<'a> {
             Doc::Hard,
             Doc::text("}"),
         ])
+    }
+
+    /*
+    One parenthesised type, `(` parts `)`.
+
+    The parts split at the commas of the top level, the same way `table_type`
+    splits its fields, and depth counts the same pairs.
+
+    The layout is one group, so the renderer decides. A group carries what
+    stands before it on the line, which a width measured over this region
+    alone cannot see: `export type T = typeof(` is thirty characters that
+    every part after it must fit beside.
+    */
+    fn paren_type(&self, open: u32, close: u32) -> Doc<'a> {
+        let mut parts: Vec<Doc<'a>> = Vec::new();
+        let mut depth = 0i32;
+        let mut start = open + 1;
+
+        for i in open + 1..close {
+            let t = self.tok(i);
+
+            match t {
+                "{" | "(" | "[" => depth += 1,
+
+                "}" | ")" | "]" => depth -= 1,
+
+                "," if depth == 0 => {
+                    if start < i {
+                        parts.push(self.type_region(start, i));
+                    }
+
+                    start = i + 1;
+                }
+
+                _ if t.bytes().all(|b| b == b'<') => depth += t.len() as i32,
+
+                _ if t.bytes().all(|b| b == b'>') => depth -= t.len() as i32,
+
+                _ => {}
+            }
+        }
+
+        if start < close {
+            parts.push(self.type_region(start, close));
+        }
+
+        if parts.is_empty() {
+            return Doc::text("()");
+        }
+
+        let body = Doc::join(Doc::concat([Doc::text(","), Doc::Line]), parts);
+
+        Doc::group(Doc::concat([
+            Doc::text("("),
+            Doc::indent(Doc::concat([Doc::Soft, body])),
+            Doc::Soft,
+            Doc::text(")"),
+        ]))
     }
 
     /// Reports if the author left a newline between two adjacent tokens.
@@ -545,14 +614,14 @@ pub(super) fn needs_space(prev: &str, next: &str) -> bool {
 
     // An opening parenthesis attaches to the token before it, unless that token is an operator.
     if next == "(" {
-        return matches!(prev, "," | ":" | "->" | "|" | "&" | "{" | "=");
+        return matches!(prev, "," | ":" | "->" | "|" | "&" | "{" | "=" | "::");
     }
 
-    if matches!(prev, "," | ":" | "->" | "|" | "&" | "{" | "=" | "..") {
+    if matches!(prev, "," | ":" | "->" | "|" | "&" | "{" | "=" | ".." | "::") {
         return true;
     }
 
-    if matches!(next, "->" | "|" | "&" | "}" | "=" | "..") {
+    if matches!(next, "->" | "|" | "&" | "}" | "=" | ".." | "::") {
         return true;
     }
 
