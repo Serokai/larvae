@@ -57,10 +57,16 @@ impl Server {
             );
         }
 
-        let diagnostics = match claimed {
+        let mut diagnostics = match claimed {
             Some((path, index)) => self.claimed_diagnostics(path, index, src, &lines),
 
-            None => match lint::analyze(src, &self.lint) {
+            None => match lint::analyze_with(
+                src,
+                &self.lint,
+                path.as_deref()
+                    .map(crate::syntax::parser::ParseOptions::for_path)
+                    .unwrap_or_default(),
+            ) {
                 Ok(findings) => findings
                     .into_iter()
                     .map(|f| diagnostic(src, &lines, f))
@@ -79,6 +85,32 @@ impl Server {
                 }
             },
         };
+
+        /*
+        The analyzer's findings join the lint findings in one publish. The
+        analyzer reads plain Luau, so a claimed file stays out until the
+        tier-1 hooks lower it; the lints of the worm already cover it.
+        */
+        if claimed.is_none()
+            && let Some(analysis) = self.analysis.borrow_mut().as_mut()
+            && let Some(path) = path.as_deref()
+        {
+            analysis.invalidate(path);
+            analysis.open(path, src);
+
+            for diag in analysis.check(path) {
+                diagnostics.push(json!({
+                    "range": lines.range(src, (diag.span.0, diag.span.1)),
+                    "severity": diag.severity,
+                    "source": "larvae-types",
+                    "code": diag.code,
+                    "message": diag.message,
+                }));
+            }
+        }
+
+        // Tier 3: the worms that transform diagnostics see the list first.
+        let diagnostics = self.worms.lsp_respond("diagnostics", json!(diagnostics));
 
         rpc::notify(
             out,

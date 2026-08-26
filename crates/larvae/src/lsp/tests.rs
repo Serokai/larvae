@@ -11,7 +11,7 @@ fn server_with(src: &str) -> Server {
 /// The dispatch must handle every advertised capability.
 #[test]
 fn the_advertised_capabilities_are_all_implemented() {
-    let caps = capabilities();
+    let caps = capabilities(false);
     let caps = &caps["capabilities"];
 
     assert_eq!(caps["documentFormattingProvider"], true);
@@ -291,7 +291,10 @@ fn an_unsupported_request_is_answered_with_an_error() {
     let mut out = Vec::new();
 
     server
-        .handle(&message("textDocument/hover", Some(9), json!({})), &mut out)
+        .handle(
+            &message("textDocument/rename", Some(9), json!({})),
+            &mut out,
+        )
         .unwrap();
 
     assert!(String::from_utf8(out).unwrap().contains("is not supported"));
@@ -717,4 +720,344 @@ fn a_disabled_server_advertises_no_capabilities() {
         "empty capabilities: {text}"
     );
     assert!(!text.contains("documentFormattingProvider"), "{text}");
+}
+
+// --- the worm lsp hooks ---------------------------------------------------
+
+/// A worm that answers every lsp hook, over the real transport
+const LSP_WORM: &str = r#"
+name = "mockdata"
+api = 1
+form = "native"
+entry = "worm.py"
+
+[lsp]
+resolve = true
+declarations = true
+respond = ["hover"]
+"#;
+
+#[cfg(unix)]
+fn lsp_worm_that(dir: &std::path::Path) {
+    let script = dir.join("worm.py");
+
+    std::fs::write(
+        &script,
+        r#"#!/usr/bin/env python3
+import sys, json, struct
+
+def read():
+    n = sys.stdin.buffer.read(4)
+    if len(n) < 4: sys.exit(0)
+    return json.loads(sys.stdin.buffer.read(struct.unpack("<I", n)[0]))
+
+def send(obj):
+    b = json.dumps(obj).encode()
+    sys.stdout.buffer.write(struct.pack("<I", len(b)) + b)
+    sys.stdout.buffer.flush()
+
+while True:
+    req = read()
+    op = req["op"]
+    if op == "init":
+        send({"ok": True})
+    elif op == "lsp_resolve":
+        if req["spec"].endswith(".data"):
+            send({"ok": True, "path": "/virtual/" + req["spec"]})
+        else:
+            send({"ok": True})
+    elif op == "lsp_load":
+        send({"ok": True, "source": "return 7", "span_map": [[0, 8, 0, 4]], "claims": [[0, 4]]})
+    elif op == "lsp_declarations":
+        send({"ok": True, "declarations": [{"name": "mock", "source": "declare mockGlobal: number"}]})
+    elif op == "lsp_respond":
+        body = json.loads(req["response"])
+        body["contents"]["value"] = body["contents"]["value"] + " (via worm)"
+        send({"ok": True, "response": body})
+    else:
+        send({"ok": False, "error": "unexpected op " + op})
+"#,
+    )
+    .unwrap();
+
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// Captures what the server installs through the seam
+struct MockAnalysis {
+    hooks: std::sync::Arc<std::sync::Mutex<Option<crate::lsp::analysis::ModuleHooks>>>,
+    defs: std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>,
+}
+
+impl crate::lsp::analysis::Analysis for MockAnalysis {
+    fn set_module_hooks(&mut self, hooks: crate::lsp::analysis::ModuleHooks) {
+        *self.hooks.lock().unwrap() = Some(hooks);
+    }
+
+    fn definitions(&mut self, name: &str, source: &str) -> bool {
+        self.defs
+            .lock()
+            .unwrap()
+            .push((name.to_string(), source.to_string()));
+
+        true
+    }
+
+    fn open(&mut self, _: &std::path::Path, _: &str) {}
+
+    fn check(&mut self, _: &std::path::Path) -> Vec<crate::lsp::analysis::AnalysisDiag> {
+        Vec::new()
+    }
+
+    fn hover(&mut self, _: &std::path::Path, _: u32) -> Option<String> {
+        None
+    }
+
+    fn completions(
+        &mut self,
+        _: &std::path::Path,
+        _: u32,
+    ) -> Vec<crate::lsp::analysis::AnalysisCompletion> {
+        Vec::new()
+    }
+
+    fn invalidate(&mut self, _: &std::path::Path) {}
+}
+
+#[cfg(unix)]
+type SharedHooks = std::sync::Arc<std::sync::Mutex<Option<crate::lsp::analysis::ModuleHooks>>>;
+#[cfg(unix)]
+type SharedDefs = std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>;
+
+#[cfg(unix)]
+fn server_with_lsp_worm(dir: &std::path::Path) -> (Server, SharedHooks, SharedDefs) {
+    lsp_worm_that(dir);
+
+    let hooks: SharedHooks = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let defs: SharedDefs = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+
+    let mut server = Server {
+        analysis: std::cell::RefCell::new(Some(Box::new(MockAnalysis {
+            hooks: hooks.clone(),
+            defs: defs.clone(),
+        }))),
+        ..Default::default()
+    };
+    server.worms = Pool::new(vec![spec(LSP_WORM, dir)], 1);
+    server.install_lsp_hooks();
+
+    (server, hooks, defs)
+}
+
+/// Tier 1: the analyzer's resolution asks the worm first, over the pipe.
+#[cfg(unix)]
+#[test]
+fn a_worm_resolves_and_loads_a_module_for_the_analyzer() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_server, hooks, _) = server_with_lsp_worm(dir.path());
+
+    let hooks = hooks.lock().unwrap();
+    let hooks = hooks.as_ref().expect("the server installed the hooks");
+
+    let resolved = (hooks.resolve)(std::path::Path::new("/p/a.luau"), "./thing.data");
+
+    assert_eq!(resolved.as_deref(), Some("/virtual/./thing.data"));
+    assert_eq!(
+        (hooks.resolve)(std::path::Path::new("/p/a.luau"), "./plain.luau"),
+        None,
+        "an unclaimed spec passes through"
+    );
+
+    let loaded = (hooks.load)("/virtual/thing.data");
+
+    assert_eq!(loaded.as_deref(), Some("return 7"));
+}
+
+/// Tier 2: the worm's declarations reach the analyzer at load.
+#[cfg(unix)]
+#[test]
+fn a_worms_declarations_reach_the_analyzer() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_server, _, defs) = server_with_lsp_worm(dir.path());
+
+    let defs = defs.lock().unwrap();
+
+    assert_eq!(defs.len(), 1);
+    assert_eq!(defs[0].0, "mock");
+    assert!(defs[0].1.contains("mockGlobal"), "{}", defs[0].1);
+}
+
+/// Tier 3: a hover passes through the worm before the editor sees it.
+#[cfg(unix)]
+#[test]
+fn a_worm_transforms_a_hover_response() {
+    let dir = tempfile::tempdir().unwrap();
+    let (server, _, _) = server_with_lsp_worm(dir.path());
+
+    let hover = serde_json::json!({
+        "contents": { "kind": "markdown", "value": "number" }
+    });
+
+    let out = server.worms.lsp_respond("hover", hover);
+
+    assert_eq!(out["contents"]["value"], "number (via worm)", "{out}");
+}
+
+/// The span map answers with the narrowest original range, for tier 1 output.
+#[test]
+fn the_span_map_of_a_load_reply_maps_generated_spans_back() {
+    let map = crate::worm::proto::SpanMap(vec![(0, 8, 0, 4)]);
+
+    assert_eq!(map.to_original((0, 8)), Some((0, 4)));
+    assert_eq!(map.to_original((2, 6)), Some((0, 4)));
+    assert_eq!(map.to_original((9, 12)), None);
+}
+
+// --- issue 1503: keywords beat auto-imports -------------------------------
+
+/// An analyzer that answers what luau-lsp answered in the report
+struct Issue1503Analysis;
+
+impl crate::lsp::analysis::Analysis for Issue1503Analysis {
+    fn open(&mut self, _: &std::path::Path, _: &str) {}
+
+    fn check(&mut self, _: &std::path::Path) -> Vec<crate::lsp::analysis::AnalysisDiag> {
+        Vec::new()
+    }
+
+    fn hover(&mut self, _: &std::path::Path, _: u32) -> Option<String> {
+        None
+    }
+
+    fn completions(
+        &mut self,
+        _: &std::path::Path,
+        _: u32,
+    ) -> Vec<crate::lsp::analysis::AnalysisCompletion> {
+        vec![
+            crate::lsp::analysis::AnalysisCompletion {
+                label: "end".into(),
+                kind: 14,
+                detail: None,
+            },
+            crate::lsp::analysis::AnalysisCompletion {
+                label: "elapsedTime".into(),
+                kind: 3,
+                detail: None,
+            },
+        ]
+    }
+
+    fn services(&mut self) -> Vec<String> {
+        vec!["EncodingService".into(), "EditorSourceService".into()]
+    }
+
+    fn invalidate(&mut self, _: &std::path::Path) {}
+}
+
+fn issue_server(src: &str) -> Server {
+    let mut server = server_with(src);
+    server.analysis = std::cell::RefCell::new(Some(Box::new(Issue1503Analysis)));
+
+    server
+}
+
+fn completion_items(server: &Server, line: u32, character: u32) -> Vec<Value> {
+    let result = server.completions(&serde_json::json!({
+        "textDocument": { "uri": "file:///t.luau" },
+        "position": { "line": line, "character": character },
+    }));
+
+    result.as_array().cloned().unwrap_or_default()
+}
+
+/*
+The report: typing `end` to close a guard clause, and the list hands the
+author EncodingService. Here the typed keyword must sort first among every
+item that matches the prefix, and preselect, so enter confirms `end`.
+*/
+#[test]
+fn a_typed_end_beats_the_encoding_service_import() {
+    let server = issue_server("if x then return end");
+    let items = completion_items(&server, 0, 20);
+
+    // The service does not even offer against `end`: nothing to rank.
+    assert!(
+        !items.iter().any(|i| i["label"] == "EncodingService"),
+        "a service must not offer against the prefix `end`"
+    );
+
+    let end = items.iter().find(|i| i["label"] == "end").expect("end");
+
+    assert_eq!(
+        end["preselect"], true,
+        "the exactly typed keyword preselects"
+    );
+    assert!(
+        end["sortText"].as_str().unwrap().starts_with('0'),
+        "keywords take the first tier"
+    );
+
+    // When the prefix does fit a service, the import offers, ranked last.
+    let items = completion_items(&issue_server("Enc"), 0, 3);
+    let import = items
+        .iter()
+        .find(|i| i["label"] == "EncodingService")
+        .expect("the service offers for its own prefix");
+
+    assert!(import["sortText"].as_str().unwrap().starts_with('9'));
+}
+
+/// The comment on the report: `else` losing to the `elapsedTime` global.
+#[test]
+fn a_typed_else_beats_the_elapsed_time_global() {
+    let server = issue_server("if x then\nels");
+    let items = completion_items(&server, 1, 3);
+
+    let sort_of = |label: &str| {
+        items
+            .iter()
+            .find(|i| i["label"] == label)
+            .map(|i| i["sortText"].as_str().unwrap_or_default().to_string())
+            .expect(label)
+    };
+
+    // "end" stands in for the keyword tier here; the analyzer of the mock
+    // reports the same two kinds the comment names.
+    assert!(
+        sort_of("end") < sort_of("elapsedTime"),
+        "keywords outrank globals"
+    );
+}
+
+/// The auto-import lands above the guard clause, never inside it.
+#[test]
+fn a_service_import_inserts_above_the_first_statement() {
+    let src = "-- header comment\nconst Players = game:GetService(\"Players\")\n\nif x then return end\nEnc";
+    let server = issue_server(src);
+    let items = completion_items(&server, 4, 3);
+
+    let import = items
+        .iter()
+        .find(|i| i["label"] == "EncodingService")
+        .expect("the service offers");
+
+    let edit = &import["additionalTextEdits"][0];
+
+    assert_eq!(
+        edit["range"]["start"]["line"], 2,
+        "after the existing import block"
+    );
+    assert!(
+        edit["newText"]
+            .as_str()
+            .unwrap()
+            .contains("const EncodingService = game:GetService(\"EncodingService\")"),
+        "{import}"
+    );
+
+    // A service the file already binds does not offer again.
+    assert!(!items.iter().any(|i| i["label"] == "Players"));
 }

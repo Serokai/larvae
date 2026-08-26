@@ -864,6 +864,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "larvae-lsp"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "cc",
+ "json5",
+ "larvae",
+ "serde_json",
+]
+
+[[package]]
 name = "larvae-worm"
 version = "0.4.0"
 dependencies = [

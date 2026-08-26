@@ -11,7 +11,217 @@ use crate::worm::proto;
 use super::uri::path_of_uri;
 use super::{Server, rpc};
 
+/// The identifier the author is in the middle of typing, before the cursor
+fn word_before(src: &str, at: u32) -> String {
+    let head = &src[..at.min(src.len() as u32) as usize];
+
+    head.chars()
+        .rev()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
+}
+
+/*
+The line where an auto-import lands: after the imports the file already
+has, before its first real statement.
+
+The scan walks whole lines from the top. A comment, a blank line, or an
+existing import (`local`/`const` bound to a `require` or a `GetService`)
+extends the preamble; the first line that is none of those ends it. So a
+file that opens with a guard clause gets its import above the guard, and
+a file with an import block gets the new line at the block's end.
+*/
+fn import_insertion_line(src: &str) -> u32 {
+    let mut last_import_end = 0u32;
+
+    for (line, text) in (0u32..).zip(src.lines()) {
+        let trimmed = text.trim_start();
+
+        let is_preamble = trimmed.is_empty()
+            || trimmed.starts_with("--")
+            || ((trimmed.starts_with("local ") || trimmed.starts_with("const "))
+                && (trimmed.contains("require(") || trimmed.contains("GetService(")));
+
+        if !is_preamble {
+            break;
+        }
+
+        if !trimmed.is_empty() && !trimmed.starts_with("--") {
+            last_import_end = line + 1;
+        }
+    }
+
+    last_import_end
+}
+
+/// The byte offset of the position in a request's params
+fn position_byte(src: &str, params: &Value) -> u32 {
+    let line = params["position"]["line"].as_u64().unwrap_or(0) as u32;
+    let character = params["position"]["character"].as_u64().unwrap_or(0) as u32;
+
+    rpc::Lines::new(src).byte_of(src, line, character)
+}
+
 impl Server {
+    /*
+    The type at the cursor, from the analyzer behind the seam.
+
+    The position arrives as a line and a UTF-16 character, converts to a
+    byte offset once here, and crosses the seam as bytes. No analyzer, or
+    a claimed file, answers null, and the editor shows nothing.
+    */
+    pub(super) fn hover(&self, params: &Value) -> Value {
+        let uri = super::uri::uri_of(params);
+
+        if self.declines(&uri) {
+            return Value::Null;
+        }
+
+        let Some(src) = self.documents.get(&uri) else {
+            return Value::Null;
+        };
+
+        let Some(path) = path_of_uri(&uri) else {
+            return Value::Null;
+        };
+
+        if self.worms.frontend_for(&path).is_some() {
+            return Value::Null;
+        }
+
+        let at = position_byte(src, params);
+
+        let mut analysis = self.analysis.borrow_mut();
+
+        let Some(text) = analysis.as_mut().and_then(|a| {
+            a.open(&path, src);
+
+            a.hover(&path, at)
+        }) else {
+            return Value::Null;
+        };
+
+        let hover = json!({
+            "contents": { "kind": "markdown", "value": format!("```luau\n{text}\n```") }
+        });
+
+        // Tier 3: the worms that transform hovers see it before the editor.
+        self.worms.lsp_respond("hover", hover)
+    }
+
+    /// Completions at the cursor, from the analyzer behind the seam
+    pub(super) fn completions(&self, params: &Value) -> Value {
+        let uri = super::uri::uri_of(params);
+
+        if self.declines(&uri) {
+            return json!([]);
+        }
+
+        let Some(src) = self.documents.get(&uri) else {
+            return json!([]);
+        };
+
+        let Some(path) = path_of_uri(&uri) else {
+            return json!([]);
+        };
+
+        if self.worms.frontend_for(&path).is_some() {
+            return json!([]);
+        }
+
+        let at = position_byte(src, params);
+
+        let mut analysis = self.analysis.borrow_mut();
+
+        let Some(analysis) = analysis.as_mut() else {
+            return json!([]);
+        };
+
+        analysis.open(&path, src);
+
+        /*
+        The order the editor shows is the order these tiers spell. A
+        keyword that fits the position outranks everything, because the
+        bug this design answers is real: an author types `end` to close a
+        guard clause and the list hands them EncodingService. An exactly
+        typed keyword also preselects, so enter confirms what the author
+        wrote. Auto-imports rank last: they are the most speculative
+        offer in the list, and they must never win a race against syntax.
+        */
+        let prefix = word_before(src, at);
+
+        let mut items: Vec<Value> = analysis
+            .completions(&path, at)
+            .into_iter()
+            .map(|c| {
+                let tier = match c.kind {
+                    14 => '0',
+
+                    5 | 10 => '1',
+
+                    3 | 12 => '2',
+
+                    _ => '5',
+                };
+
+                let mut item = json!({
+                    "label": c.label,
+                    "kind": c.kind,
+                    "detail": c.detail,
+                    "sortText": format!("{tier}{}", c.label),
+                });
+
+                if c.kind == 14 && !prefix.is_empty() && c.label == prefix {
+                    item["preselect"] = json!(true);
+                }
+
+                item
+            })
+            .collect();
+
+        /*
+        Service auto-imports, the parity feature with the fix built in.
+        Each one carries its own insertion: a `const` binding above the
+        first real statement of the file, never inside the block the
+        cursor sits in. A service the file already binds does not offer.
+        */
+        if !prefix.is_empty() {
+            let lines = rpc::Lines::new(src);
+
+            for service in analysis.services() {
+                if !service.starts_with(prefix.as_str())
+                    || src.contains(&format!("GetService(\"{service}\")"))
+                {
+                    continue;
+                }
+
+                let insert_at = import_insertion_line(src);
+
+                items.push(json!({
+                    "label": service,
+                    "kind": 9,
+                    "detail": format!("auto-import: const {service} = game:GetService(\"{service}\")"),
+                    "sortText": format!("9{service}"),
+                    "additionalTextEdits": [{
+                        "range": {
+                            "start": { "line": insert_at, "character": 0 },
+                            "end": { "line": insert_at, "character": 0 },
+                        },
+                        "newText": format!("const {service} = game:GetService(\"{service}\")\n"),
+                    }],
+                }));
+            }
+
+            let _ = lines;
+        }
+
+        // Tier 3: the worms that transform completions see the list first.
+        self.worms.lsp_respond("completions", json!(items))
+    }
+
     /// Reports if the `[lsp]` mode leaves this file to another server
     fn declines(&self, uri: &str) -> bool {
         if !self.lsp.enabled {
@@ -100,7 +310,11 @@ impl Server {
             return json!([]);
         };
 
-        let Ok(chunk) = crate::syntax::parser::parse(src, &lexed.toks) else {
+        let options = path_of_uri(uri)
+            .map(|p| crate::syntax::parser::ParseOptions::for_path(&p))
+            .unwrap_or_default();
+
+        let Ok(chunk) = crate::syntax::parser::parse_with(src, &lexed.toks, options) else {
             return json!([]);
         };
 

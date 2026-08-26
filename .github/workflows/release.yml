@@ -26,6 +26,8 @@ jobs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - id: tag
         run: |
           set -euo pipefail
@@ -69,6 +71,8 @@ jobs:
     runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
         with:
           ref: ${{ needs.verify.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
@@ -146,6 +150,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
         with:
           ref: ${{ needs.verify.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable

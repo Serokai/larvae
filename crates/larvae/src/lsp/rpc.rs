@@ -208,6 +208,34 @@ impl Lines {
     pub fn whole(&self, src: &str) -> Value {
         self.range(src, (0, src.len() as u32))
     }
+
+    /*
+    The byte offset for a protocol position, the inverse of `position`.
+
+    The character counts UTF-16 code units, like everything the protocol
+    sends. A character past the end of the line clamps to the end, because
+    an editor sends one for a cursor at the end of a line.
+    */
+    pub fn byte_of(&self, src: &str, line: u32, character: u32) -> u32 {
+        let start = self
+            .starts
+            .get(line as usize)
+            .copied()
+            .unwrap_or(src.len() as u32);
+
+        let rest = &src[start as usize..];
+        let mut units = 0u32;
+
+        for (at, c) in rest.char_indices() {
+            if c == '\n' || units >= character {
+                return start + at as u32;
+            }
+
+            units += c.len_utf16() as u32;
+        }
+
+        src.len() as u32
+    }
 }
 
 #[cfg(test)]

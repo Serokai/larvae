@@ -21,6 +21,7 @@ the editor shows the findings and the layout of the worm. Without this route,
 the Luau parser reads the first markup character and reports a syntax error.
 */
 
+pub mod analysis;
 pub mod rpc;
 
 mod diagnostics;
@@ -46,12 +47,24 @@ use state::no_worms;
 use uri::uri_of;
 
 pub fn run() -> Result<()> {
+    run_with(None)
+}
+
+/*
+The entry the larvae-lsp binary uses: the same server, with an analyzer
+plugged into the seam. `larvae lsp` passes None and serves lint and
+format, as it always did.
+*/
+pub fn run_with(analysis: Option<Box<dyn analysis::Analysis>>) -> Result<()> {
     let stdin = std::io::stdin();
     let mut input = BufReader::new(stdin.lock());
     let stdout = std::io::stdout();
     let mut output = stdout.lock();
 
-    let mut server = Server::default();
+    let mut server = Server {
+        analysis: std::cell::RefCell::new(analysis),
+        ..Default::default()
+    };
 
     while let Some(message) = rpc::read(&mut input)? {
         if server.handle(&message, &mut output)? {
@@ -78,6 +91,9 @@ struct Server {
     shutting_down: bool,
     /// The `[lsp]` table of the project; the default serves every Luau file
     lsp: crate::config::lsp::LspConfig,
+    /// The analyzer behind the seam, when the binary provides one.
+    /// A cell, because a publish borrows the server shared.
+    analysis: std::cell::RefCell<Option<Box<dyn analysis::Analysis>>>,
 }
 
 impl Default for Server {
@@ -92,6 +108,7 @@ impl Default for Server {
             worm_stamp: Vec::new(),
             shutting_down: false,
             lsp: Default::default(),
+            analysis: std::cell::RefCell::new(None),
         }
     }
 }
@@ -110,7 +127,7 @@ impl Server {
                 crashed and the editor restarts it.
                 */
                 let caps = match self.lsp.enabled {
-                    true => capabilities(),
+                    true => capabilities(self.analysis.borrow().is_some()),
 
                     false => serde_json::json!({ "capabilities": {} }),
                 };
@@ -212,6 +229,18 @@ impl Server {
                 }
             }
 
+            "textDocument/hover" => {
+                let result = self.hover(&message.params);
+
+                self.reply(message, out, result)?;
+            }
+
+            "textDocument/completion" => {
+                let result = self.completions(&message.params);
+
+                self.reply(message, out, result)?;
+            }
+
             "textDocument/documentSymbol" => {
                 let symbols = self.symbols(&uri_of(&message.params));
 
@@ -240,14 +269,26 @@ impl Server {
 }
 
 /// The abilities of this server; the editor then asks only for these
-fn capabilities() -> Value {
+fn capabilities(analysis: bool) -> Value {
+    let mut caps = json!({
+        // 1 is full sync, see the note on didChange
+        "textDocumentSync": { "openClose": true, "change": 1, "save": true },
+        "documentFormattingProvider": true,
+        "documentSymbolProvider": true,
+    });
+
+    /*
+    Hover and completion exist only through the analyzer, so a server
+    without one does not advertise them. The editor then never asks, and
+    stock luau-lsp answers instead when both servers run.
+    */
+    if analysis {
+        caps["hoverProvider"] = json!(true);
+        caps["completionProvider"] = json!({ "triggerCharacters": [".", ":", "\""] });
+    }
+
     json!({
-        "capabilities": {
-            // 1 is full sync, see the note on didChange
-            "textDocumentSync": { "openClose": true, "change": 1, "save": true },
-            "documentFormattingProvider": true,
-            "documentSymbolProvider": true,
-        },
+        "capabilities": caps,
         "serverInfo": { "name": "larvae", "version": env!("CARGO_PKG_VERSION") },
     })
 }

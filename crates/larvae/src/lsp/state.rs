@@ -123,6 +123,46 @@ impl Server {
 
             Err(_) => self.worms = no_worms(),
         }
+
+        self.install_lsp_hooks();
+    }
+
+    /*
+    The worm hooks, installed into the analyzer behind the seam.
+
+    Tier 1 goes in as module hooks: the analyzer asks the pool before its
+    default resolution, so a worm's lowered module is what the type system
+    reads. Tier 2 goes in as declaration text. The install runs after every
+    worm load, so a rebuilt worm re-declares, which is the invalidation the
+    plan demands: a worm change behaves like a file change.
+
+    Without an analyzer this is a no-op, and the pool's own lint and format
+    hooks serve as before.
+    */
+    pub(super) fn install_lsp_hooks(&mut self) {
+        let mut analysis = self.analysis.borrow_mut();
+
+        let Some(analysis) = analysis.as_mut() else {
+            return;
+        };
+
+        if !self.worms.has_lsp_hooks() {
+            return;
+        }
+
+        let resolve_pool = self.worms.clone();
+        let load_pool = self.worms.clone();
+
+        analysis.set_module_hooks(crate::lsp::analysis::ModuleHooks {
+            resolve: Box::new(move |from, spec| {
+                resolve_pool.lsp_resolve(&from.to_string_lossy(), spec)
+            }),
+            load: Box::new(move |path| load_pool.lsp_load_any(path).map(|r| r.source)),
+        });
+
+        for decl in self.worms.lsp_declarations() {
+            analysis.definitions(&decl.name, &decl.source);
+        }
     }
 
     /*

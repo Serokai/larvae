@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/eclipse_luau", "crates/larvae", "crates/larvae-worm"]
+members = ["crates/eclipse_luau", "crates/larvae", "crates/larvae-lsp", "crates/larvae-worm"]
 # fuzz needs nightly, the fixture worm only builds for wasm32
 exclude = ["crates/larvae/fuzz", "crates/larvae/tests/fixtures/echo-worm"]
 
