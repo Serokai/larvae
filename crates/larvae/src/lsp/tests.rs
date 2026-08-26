@@ -731,6 +731,7 @@ fn claim_only_publishes_empty_for_a_plain_luau_file() {
     server.lsp = crate::config::lsp::LspConfig {
         enabled: true,
         claim_only: true,
+        completion: Default::default(),
     };
 
     let diags = published(&server, "file:///t.luau");
@@ -744,6 +745,7 @@ fn claim_only_declines_formatting_and_symbols_for_a_plain_luau_file() {
     server.lsp = crate::config::lsp::LspConfig {
         enabled: true,
         claim_only: true,
+        completion: Default::default(),
     };
 
     assert_eq!(server.format("file:///t.luau").unwrap(), Value::Null);
@@ -756,6 +758,7 @@ fn a_disabled_server_advertises_no_capabilities() {
     server.lsp = crate::config::lsp::LspConfig {
         enabled: false,
         claim_only: false,
+        completion: Default::default(),
     };
 
     let mut out = Vec::new();
@@ -1146,6 +1149,7 @@ serves_luau = true
     server.lsp = crate::config::lsp::LspConfig {
         enabled: true,
         claim_only: true,
+        completion: Default::default(),
     };
     server.worms = Pool::new(vec![spec(SERVING, dir.path())], 1);
 
@@ -1265,4 +1269,81 @@ fn a_worm_with_nothing_to_offer_is_quiet() {
         extend::code_actions(&server.worms, "file:///p/t.luaux", "x\n", &json!(null)).is_empty()
     );
     assert!(extend::definitions(&server.worms).is_empty());
+}
+
+// --- [lsp.completion.imports] use_const ------------------------------------
+
+/// The service an auto-import offers, with the keyword the setting decided.
+fn import_edit(server: &Server, src_prefix_line: u32, character: u32) -> (String, String) {
+    let items = completion_items(server, src_prefix_line, character);
+
+    let import = items
+        .iter()
+        .find(|i| i["label"] == "EncodingService")
+        .expect("the service offers");
+
+    (
+        import["detail"].as_str().expect("a detail").to_string(),
+        import["additionalTextEdits"][0]["newText"]
+            .as_str()
+            .expect("a text edit")
+            .to_string(),
+    )
+}
+
+/*
+The auto-import writes `const` unless the project says otherwise.
+
+This is a deliberate departure from luau-lsp, which defaults the setting off
+because Luau had no `const` when it was written. An auto-import binds a
+service and nothing reassigns it, which is the clearest case for the keyword.
+*/
+#[test]
+fn an_auto_import_writes_const_by_default() {
+    let server = issue_server("Enc");
+    let (detail, text) = import_edit(&server, 0, 3);
+
+    assert!(text.starts_with("const EncodingService ="), "{text}");
+    assert!(detail.contains("const EncodingService"), "{detail}");
+}
+
+/// A project that has not adopted `const` turns the setting off and gets `local`.
+#[test]
+fn use_const_off_writes_local() {
+    let mut server = issue_server("Enc");
+    server.lsp.completion.imports.use_const = false;
+
+    let (detail, text) = import_edit(&server, 0, 3);
+
+    assert!(text.starts_with("local EncodingService ="), "{text}");
+    assert!(!text.contains("const"), "{text}");
+
+    // A user reads the detail before accepting, so it cannot say the other word.
+    assert!(detail.contains("local EncodingService"), "{detail}");
+    assert!(!detail.contains("const"), "{detail}");
+}
+
+/*
+The insertion point reads a `local` import as an import.
+
+With the setting off a file's preamble is bound with `local`, and a new
+import still has to land at the end of that preamble rather than above it.
+*/
+#[test]
+fn a_local_preamble_still_ends_where_the_import_goes() {
+    let src =
+        "-- header\nlocal Players = game:GetService(\"Players\")\n\nif x then return end\nEnc";
+    let mut server = issue_server(src);
+    server.lsp.completion.imports.use_const = false;
+
+    let items = completion_items(&server, 4, 3);
+    let import = items
+        .iter()
+        .find(|i| i["label"] == "EncodingService")
+        .expect("the service offers");
+
+    assert_eq!(
+        import["additionalTextEdits"][0]["range"]["start"]["line"], 2,
+        "the import must land after the preamble, not inside the guard"
+    );
 }

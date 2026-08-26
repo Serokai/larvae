@@ -286,11 +286,16 @@ impl Server {
 
         /*
         Service auto-imports, the parity feature with the fix built in.
-        Each one carries its own insertion: a `const` binding above the
-        first real statement of the file, never inside the block the
-        cursor sits in. A service the file already binds does not offer.
+        Each one carries its own insertion: a binding above the first real
+        statement of the file, never inside the block the cursor sits in. A
+        service the file already binds does not offer.
+
+        `[lsp.completion.imports] use_const` decides the keyword, and the
+        detail line shows the same text the edit inserts. A user reads that
+        line before accepting, so the two cannot differ.
         */
         if !prefix.is_empty() {
+            let keyword = self.lsp.completion.imports.keyword();
             let lines = rpc::Lines::new(src);
 
             for service in analysis.services() {
@@ -305,14 +310,18 @@ impl Server {
                 items.push(json!({
                     "label": service,
                     "kind": 9,
-                    "detail": format!("auto-import: const {service} = game:GetService(\"{service}\")"),
+                    "detail": format!(
+                        "auto-import: {keyword} {service} = game:GetService(\"{service}\")"
+                    ),
                     "sortText": format!("9{service}"),
                     "additionalTextEdits": [{
                         "range": {
                             "start": { "line": insert_at, "character": 0 },
                             "end": { "line": insert_at, "character": 0 },
                         },
-                        "newText": format!("const {service} = game:GetService(\"{service}\")\n"),
+                        "newText": format!(
+                            "{keyword} {service} = game:GetService(\"{service}\")\n"
+                        ),
                     }],
                 }));
             }

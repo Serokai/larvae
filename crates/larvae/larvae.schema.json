@@ -2179,6 +2179,9 @@
           ],
           "default": false,
           "description": "On serves only the files that a worm claims, so stock luau-lsp can own the plain Luau. Off serves every Luau file, which is what larvae always did."
+        },
+        "completion": {
+          "$ref": "#/$defs/lsp_completion"
         }
       }
     },
@@ -2210,6 +2213,32 @@
         "roblox": {
           "$ref": "#/$defs/lint_level",
           "description": "A Roblox data type used in a way that does not hold. Every lint of this kind that [lint.rules] does not name takes this level."
+        }
+      }
+    },
+    "lsp_imports": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "`[lsp.completion.imports]`, the auto-import settings. The names mirror luau-lsp's `completion.imports.*`, so a user moving between the two servers keeps the setting they know. The editor extension exposes the same ids under `larvae-lsp.`; where both speak, this file wins.",
+      "properties": {
+        "use_const": {
+          "type": "boolean",
+          "enum": [
+            true,
+            false
+          ],
+          "default": true,
+          "description": "Whether an auto-import writes `const` or `local`. On by default, which departs from luau-lsp on purpose: that server defaults it off because Luau had no `const` when the setting was written, and larvae's platform has the keyword. An auto-import binds a service and nothing reassigns it, which is the clearest case for it. Off writes `local` instead.\n\nThis setting is its own thing and does not read `[fmt] require_binding`, because that option governs a `require` binding and a `game:GetService` line is not one."
+        }
+      }
+    },
+    "lsp_completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "`[lsp.completion]`, which mirrors luau-lsp's `completion.*` settings.",
+      "properties": {
+        "imports": {
+          "$ref": "#/$defs/lsp_imports"
         }
       }
     }
