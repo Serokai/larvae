@@ -47,6 +47,60 @@ pub struct ModuleHooks {
     pub load: LoadHook,
 }
 
+/*
+The plain-Luau view of larvae source, with every byte offset kept.
+
+The analyzer is stock Luau and stops at larvae's own syntax. `const` is
+the common case, and `local` has the same five bytes, so the swap keeps
+the offsets identical and no position maps. The rule mirrors the parser:
+`const` before a name or `function` is the keyword. Source that does not
+lex returns unchanged, and the analyzer recovers as it does today.
+*/
+pub fn plain_view(src: &str) -> std::borrow::Cow<'_, str> {
+    use crate::syntax::lexer::TokKind;
+
+    let Ok(lexed) = crate::syntax::lexer::lex(src) else {
+        return std::borrow::Cow::Borrowed(src);
+    };
+
+    /*
+    A reserved word never names a binding, so `const` before one is the
+    identifier in an expression, ex: `local x = const` before `return`.
+    */
+    let reserved = |text: &str| {
+        matches!(
+            text,
+            "and" | "break" | "do" | "else" | "elseif" | "end" | "false" | "for" | "if" | "in"
+                | "local" | "nil" | "not" | "or" | "repeat" | "return" | "then" | "true"
+                | "until" | "while"
+        )
+    };
+
+    let starts: Vec<usize> = lexed
+        .toks
+        .windows(2)
+        .filter(|pair| {
+            matches!(pair[0].kind, TokKind::Ident)
+                && matches!(pair[1].kind, TokKind::Ident)
+                && pair[0].text(src) == "const"
+                && !reserved(pair[1].text(src))
+        })
+        .map(|pair| pair[0].start as usize)
+        .collect();
+
+    if starts.is_empty() {
+        return std::borrow::Cow::Borrowed(src);
+    }
+
+    let mut out = src.to_string();
+
+    for start in starts {
+        out.replace_range(start..start + 5, "local");
+    }
+
+    std::borrow::Cow::Owned(out)
+}
+
 pub trait Analysis: Send {
     /// Install the module hooks; the server calls this once per worm load
     fn set_module_hooks(&mut self, hooks: ModuleHooks) {
@@ -85,4 +139,35 @@ pub trait Analysis: Send {
 
     /// Drop the cached state of one document and its dependents
     fn invalidate(&mut self, path: &Path);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::plain_view;
+
+    #[test]
+    fn const_becomes_local_at_the_same_offset() {
+        let src = "const card = require(\"./card\")\nconst function f() end\n";
+        let out = plain_view(src);
+
+        assert_eq!(
+            out.as_ref(),
+            "local card = require(\"./card\")\nlocal function f() end\n"
+        );
+        assert_eq!(out.len(), src.len());
+    }
+
+    #[test]
+    fn const_as_a_value_stays() {
+        let src = "local x = const\nreturn { const = 1 }\n";
+
+        assert_eq!(plain_view(src).as_ref(), src);
+    }
+
+    #[test]
+    fn plain_source_borrows() {
+        let src = "local x = 1\n";
+
+        assert!(matches!(plain_view(src), std::borrow::Cow::Borrowed(_)));
+    }
 }

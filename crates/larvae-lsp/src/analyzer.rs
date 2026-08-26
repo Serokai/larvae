@@ -134,6 +134,9 @@ extern "C" fn load_cb(userdata: *mut c_void, path: *const c_char) -> *const c_ch
 
     match std::fs::read_to_string(path.as_ref()) {
         Ok(text) => {
+            // A required file can hold larvae syntax; the analyzer reads stock Luau.
+            let text = larvae::lsp::analysis::plain_view(&text).into_owned();
+
             state.load_buffer = CString::new(text).ok();
 
             state
