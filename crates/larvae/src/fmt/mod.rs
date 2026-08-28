@@ -25,6 +25,10 @@ use crate::syntax::{lexer, parser};
 
 /// Formats the source of one file.
 pub fn format(src: &str, cfg: &FmtConfig) -> Result<String> {
+    if src.trim_matches([' ', '\t', '\r', '\n']).is_empty() {
+        return Ok(String::new());
+    }
+
     let lexed = lexer::lex(src)
         .map_err(|e| anyhow::anyhow!("syntax error at byte {}, {}", e.offset, e.message))?;
 

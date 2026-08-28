@@ -124,8 +124,10 @@ fn formatted_input_is_left_alone() {
 
 #[test]
 fn an_empty_file_stays_empty() {
-    assert_eq!(fmt(""), "\n");
-    assert_eq!(fmt("\n\n\n"), "\n");
+    assert_eq!(fmt(""), "");
+    assert_eq!(fmt("\n\n\n"), "");
+    assert_eq!(fmt(" \t\r\n \n"), "");
+    assert!(format("\u{a0}", &FmtConfig::default()).is_err());
 }
 
 #[test]
